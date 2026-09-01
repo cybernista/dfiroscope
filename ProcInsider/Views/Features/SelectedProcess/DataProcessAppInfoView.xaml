@@ -1,0 +1,840 @@
+<UserControl x:Class="ProcInsider.Views.Features.SelectedProcess.DataProcessAppInfoView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:selectedProcess="clr-namespace:ProcInsider.Views.Features.SelectedProcess">
+    <Grid AutomationProperties.Name="App Info content">
+        <TabControl x:Name="AppInfoTabControl" Margin="5,0,5,5">
+            <TabItem Header="Properties">
+                <selectedProcess:DataProcessPropertiesView DataContext="{Binding ProcessPropertiesViewModel}"/>
+            </TabItem>
+
+            <TabItem Header="Performance"
+                     AutomationProperties.Name="Performance">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Auto">
+                    <selectedProcess:DataProcessStatisticsView MinWidth="620"
+                                                               MinHeight="500"
+                                                               DataContext="{Binding ProcessStatisticsViewModel}"/>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Overview" DataContext="{Binding ProcessDescriptionViewModel}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="6" IsEnabled="{Binding IsApplicationProfileEditable}">
+                        <TextBlock Text="Role summary" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap" MinHeight="80"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Expected responsibilities" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding ExpectedResponsibilities, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Normal observable behavior" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding NormalBehavior, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Typical launch triggers" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding LaunchTriggers, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="55"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Expected parent/account/session/privilege/lifetime context" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding ExpectedContext, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="55"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Command-line expectations" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding CommandLineExpectations, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="55"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Filesystem and registry expectations" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding FilesystemRegistryExpectations, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="55"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Child-process expectations" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding ChildProcessExpectations, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="55"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Network expectations" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding NetworkExpectations, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="55"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Normal Windows/configuration variants" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding NormalVariants, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="55"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Common abuse and masquerading notes" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding CybersecurityNotes, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Known benign context (not a verdict)" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding KnownBenignNotes, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="55"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Analyst validation checks" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding AnalystValidationChecks, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70"
+                                 IsEnabled="{Binding HasProcessSelected}" Margin="0,2,0,8"/>
+                        <TextBlock Text="Catalog sources" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding CatalogSourcesDisplay}"
+                                 IsReadOnly="True" TextWrapping="Wrap" MinHeight="55"
+                                 VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12"
+                                 Margin="0,2,0,8"/>
+                        <TextBlock Text="Catalog provenance" FontWeight="SemiBold"/>
+                        <TextBox Text="{Binding CatalogProvenanceDisplay}"
+                                 IsReadOnly="True" TextWrapping="Wrap" MinHeight="55"
+                                 VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12"
+                                 Margin="0,2,0,8"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Review" FontWeight="SemiBold" Margin="0,0,6,0"/>
+                            <TextBlock Grid.Column="1" Text="{Binding ReviewStateDisplay}" TextWrapping="Wrap"/>
+                            <TextBlock Grid.Column="2" Text="Profile last reviewed" FontWeight="SemiBold" Margin="14,0,6,0"/>
+                            <TextBlock Grid.Column="3" Text="{Binding ProfileLastReviewedDisplay}" TextWrapping="Wrap"/>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="AI Draft Review"
+                     DataContext="{Binding ProcessDescriptionViewModel}"
+                     Visibility="{Binding IsAiAssistancePublished, Converter={StaticResource BoolToVisibilityConverter}}">
+                <Grid Margin="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" Padding="8" Background="#FFFFF8E1" BorderBrush="#FFE5C15B" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="AI output is an unsaved, unreviewed proposal. It never updates the shipped catalog or session override until Save/Replace is clicked explicitly."
+                                       FontWeight="SemiBold" TextWrapping="Wrap"/>
+                            <TextBlock Text="Claimed sources are unverified unless a future retrieval workflow supplies citations; model memory is low-confidence reference material."
+                                       Margin="0,3,0,0" Foreground="#FF7A4E00" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding AiUncertaintyDisplay, StringFormat=Uncertainty: {0}}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding AiDraftValidationDisplay}" Margin="0,4,0,0" Foreground="#FF7A4E00" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding AiSourceClaimsDisplay}" Margin="0,4,0,0" FontFamily="Consolas" FontSize="11" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Grid.Row="1" Text="Field-level diff against the profile resolved before generation" FontWeight="SemiBold" Margin="0,8,0,4"/>
+                    <DataGrid Grid.Row="2" ItemsSource="{Binding DraftDifferences}"
+                              AutoGenerateColumns="False" IsReadOnly="True"
+                              CanUserAddRows="False" CanUserDeleteRows="False"
+                              CanUserSortColumns="True" CanUserResizeColumns="True"
+                              EnableRowVirtualization="True" EnableColumnVirtualization="True"
+                              HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Field" Binding="{Binding FieldName}" Width="180" SortMemberPath="FieldName"/>
+                            <DataGridTextColumn Header="Diff" Binding="{Binding DifferenceDisplay}" Width="90" SortMemberPath="DifferenceDisplay"/>
+                            <DataGridTemplateColumn Header="Resolved before AI" Width="320" SortMemberPath="ResolvedValue">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate><TextBlock Text="{Binding ResolvedValue}" TextWrapping="Wrap" Margin="3"/></DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="AI Draft" Width="320" SortMemberPath="DraftValue">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate><TextBlock Text="{Binding DraftValue}" TextWrapping="Wrap" Margin="3"/></DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <Expander Grid.Row="3" Header="App Info generation history (distinct from Security Assessment)" Margin="0,8,0,0">
+                        <DataGrid ItemsSource="{Binding AppInfoGenerationHistory}" AutoGenerateColumns="False" IsReadOnly="True"
+                                  CanUserAddRows="False" CanUserDeleteRows="False"
+                                  CanUserSortColumns="True" CanUserResizeColumns="True" MaxHeight="150">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Requested" Binding="{Binding RequestedDisplay}" Width="145" SortMemberPath="RequestedDisplay"/>
+                                <DataGridTextColumn Header="Provider" Binding="{Binding ProviderDisplay}" Width="180" SortMemberPath="ProviderDisplay"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100" SortMemberPath="Status"/>
+                                <DataGridTextColumn Header="Template" Binding="{Binding PromptTemplateId}" Width="190" SortMemberPath="PromptTemplateId"/>
+                                <DataGridTextColumn Header="Preview / error" Binding="{Binding ResponsePreview}" Width="*" SortMemberPath="ResponsePreview"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Expander>
+                </Grid>
+            </TabItem>
+            <TabItem Header="NSRL"
+                     DataContext="{Binding ProcessDescriptionViewModel}"
+                     Visibility="{Binding IsKnownFileReferenceDataPublished, Converter={StaticResource BoolToVisibilityConverter}}"
+                     IsSelected="{Binding Nsrl.IsTabSelected, Mode=TwoWay}">
+                <Grid DataContext="{Binding Nsrl}" Margin="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Expander Grid.Row="0"
+                              Header="Managed local NSRL reference data (explicit actions)"
+                              IsExpanded="False"
+                              Margin="0,0,0,8">
+                        <ContentControl Content="{Binding ReferenceData}">
+                            <ContentControl.ContentTemplate>
+                                <DataTemplate>
+                                    <Border Padding="8" Background="#FFF4F8F4" BorderBrush="#FFBED8BE" BorderThickness="1">
+                                        <StackPanel>
+                                            <TextBlock Text="The managed server is a separate current-user loopback process. Opening this panel does not start it, contact NIST, or create reference-data folders."
+                                                       TextWrapping="Wrap"/>
+                                            <Grid Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="Reusable catalog root" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <TextBox Grid.Column="1" Text="{Binding CatalogRoot, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0"
+                                                         AutomationProperties.Name="Managed NSRL reusable catalog root"/>
+                                                <Button Grid.Column="2" Content="Connect / Refresh status" Command="{Binding RefreshStatusCommand}" Padding="9,4" Margin="0,0,5,0"
+                                                        AutomationProperties.Name="Connect to or refresh managed NSRL server status"/>
+                                                <Button Grid.Column="3" Content="Start" Command="{Binding StartCommand}" Padding="9,4" Margin="0,0,5,0"
+                                                        AutomationProperties.Name="Start managed NSRL server"/>
+                                                <Button Grid.Column="4" Content="Stop" Command="{Binding StopCommand}" Padding="9,4" Margin="0,0,5,0"
+                                                        AutomationProperties.Name="Stop exact managed NSRL server"/>
+                                                <Button Grid.Column="5" Content="Use managed server" Command="{Binding UseManagedProviderCommand}" Padding="9,4"
+                                                        AutomationProperties.Name="Use authenticated managed server for App Info lookups"/>
+                                            </Grid>
+                                            <Grid Margin="0,6,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="Accepted startup receipt" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                <TextBox Grid.Column="1" Text="{Binding ValidationReceiptPath, UpdateSourceTrigger=PropertyChanged}"
+                                                         AutomationProperties.Name="Managed NSRL accepted-generation startup receipt"/>
+                                            </Grid>
+                                            <TextBlock Text="{Binding CorpusBoundary}" Margin="0,7,0,0" Foreground="#FF7A4E00" TextWrapping="Wrap"/>
+                                            <Grid Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Button Grid.Column="0" Content="Check for NIST release" Command="{Binding CheckReleaseCommand}" Padding="9,4" Margin="0,0,5,0"/>
+                                                <Button Grid.Column="1" Content="{Binding DownloadActionLabel}" Command="{Binding DownloadOrUpdateCommand}" Padding="9,4" Margin="0,0,5,0"/>
+                                                <Button Grid.Column="2" Content="Cancel" Command="{Binding CancelCommand}" Padding="9,4" Margin="0,0,5,0"/>
+                                                <Button Grid.Column="3" Content="Roll back" Command="{Binding RollbackCommand}" Padding="9,4" Margin="0,0,10,0"/>
+                                                <ProgressBar Grid.Column="4" Width="150" Height="16" Minimum="0" Maximum="100" Value="{Binding ProgressPercent}" VerticalAlignment="Center"/>
+                                                <TextBlock Grid.Column="5" Text="{Binding ProgressDisplay}" Margin="8,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                            </Grid>
+                                            <Grid Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                                    <TextBlock Text="Server / protocol" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding ServerState}" TextWrapping="Wrap"/>
+                                                    <TextBlock Text="{Binding ProtocolDisplay}" Foreground="#555555" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                                                    <TextBlock Text="Active official / derived generations" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding CatalogIdentity}" TextWrapping="Wrap"/>
+                                                    <TextBlock Text="{Binding DerivedIdentity}" Foreground="#555555" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2">
+                                                    <TextBlock Text="Storage / validation" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding StorageDisplay}" TextWrapping="Wrap"/>
+                                                    <TextBlock Text="{Binding ValidationDisplay}" Foreground="#555555" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </Grid>
+                                            <TextBlock Text="{Binding ReleaseDisplay}" Margin="0,7,0,0" TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding PreflightDisplay}" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding StatusMessage}" Margin="0,5,0,0" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ContentControl.ContentTemplate>
+                        </ContentControl>
+                    </Expander>
+
+                    <Border Grid.Row="1"
+                            Padding="8"
+                            Background="#FFF7FBFF"
+                            BorderBrush="#FFD7E7F5"
+                            BorderThickness="1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Provider mode" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding ProviderModes}" SelectedItem="{Binding SelectedProviderMode, Mode=TwoWay}"
+                                      Margin="0,0,10,5" AutomationProperties.Name="NSRL lookup provider mode"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0"
+                                       Text="Compatible lookup endpoint"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,6,0"/>
+                            <TextBox Grid.Row="1" Grid.Column="1"
+                                     Text="{Binding Endpoint, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,0,10,0"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2"
+                                       Text="Timeout (s)"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,6,0"/>
+                            <TextBox Grid.Row="1" Grid.Column="3"
+                                     Text="{Binding TimeoutSeconds, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,0,10,0"/>
+                            <CheckBox Grid.Row="1" Grid.Column="4"
+                                      Content="Allow explicit non-loopback disclosure"
+                                      IsChecked="{Binding AllowNonLoopback, Mode=TwoWay}"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,10,0"/>
+                            <Button Grid.Row="1" Grid.Column="5"
+                                    Content="Save settings"
+                                    Command="{Binding SaveSettingsCommand}"
+                                    Padding="10,4"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="6"
+                                       Text="{Binding PrivacyWarning}"
+                                       Margin="0,6,0,0"
+                                       Foreground="#FF8A4B00"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="6"
+                                       Text="{Binding SettingsStatus}"
+                                       Margin="0,4,0,0"
+                                       Foreground="#666666"
+                                       TextWrapping="Wrap"/>
+                        </Grid>
+                    </Border>
+
+                    <Grid Grid.Row="2" Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*"/>
+                            <ColumnDefinition Width="3*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                            <TextBlock Text="Selected filename" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding SelectedFileName}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                            <TextBlock Text="Selected SHA-256" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding SelectedSha256}" FontFamily="Consolas" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Margin="0,0,12,0">
+                            <TextBlock Text="Selected size" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding SelectedFileSize}"/>
+                        </StackPanel>
+                        <Button Grid.Column="3"
+                                Content="Refresh lookup"
+                                Command="{Binding RefreshLookupCommand}"
+                                Padding="12,5"
+                                VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <Border Grid.Row="3"
+                            Margin="0,8,0,0"
+                            Padding="8"
+                            Background="#FFFFF8E1"
+                            BorderBrush="#FFE5C15B"
+                            BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="{Binding OutcomeDisplay, StringFormat=Exact-hash state: {0}}"
+                                       FontWeight="Bold"/>
+                            <TextBlock Text="{Binding VerdictGuidance}"
+                                       Margin="0,3,0,0"
+                                       Foreground="#FF7A4E00"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding StatusMessage}"
+                                       Margin="0,3,0,0"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid Grid.Row="4" Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Provider / server" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Provider / RDS versions" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="Lookup time" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding ProviderStatus}" TextWrapping="Wrap" Margin="0,2,12,0"/>
+                        <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,2,12,0">
+                            <TextBlock Text="{Binding ProviderVersionDisplay, StringFormat=Server: {0}}" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding CatalogVersionDisplay, StringFormat=Catalog/RDS: {0}}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding LookupTimeDisplay}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                    </Grid>
+
+                    <StackPanel Grid.Row="5" Margin="0,8,0,6">
+                        <TextBlock Text="{Binding RecordSummary}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding ProviderProvenance}" Margin="0,3,0,0" Foreground="#555555" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding FilenameSearchStatus}" Margin="0,3,0,0" Foreground="#666666" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Expander Grid.Row="6"
+                              Header="Bounded package records"
+                              IsExpanded="True">
+                    <DataGrid ItemsSource="{Binding Records}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              CanUserDeleteRows="False"
+                              CanUserSortColumns="True"
+                              CanUserResizeColumns="True"
+                              EnableRowVirtualization="True"
+                              EnableColumnVirtualization="True"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto">
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="Returned filename(s)" Width="220" SortMemberPath="FileNamesDisplay">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding FileNamesDisplay}" TextWrapping="Wrap" Margin="3"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Size" Binding="{Binding FileSizeDisplay}" Width="90" SortMemberPath="FileSizeDisplay"/>
+                            <DataGridTemplateColumn Header="Product / package" Width="260" SortMemberPath="ProductDisplay">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding ProductDisplay}" TextWrapping="Wrap" Margin="3"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Manufacturer" Width="150" SortMemberPath="ManufacturerDisplay">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding ManufacturerDisplay}" TextWrapping="Wrap" Margin="3"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="OS / version" Width="180" SortMemberPath="OperatingSystemDisplay">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding OperatingSystemDisplay}" TextWrapping="Wrap" Margin="3"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Language" Binding="{Binding LanguageDisplay}" Width="115" SortMemberPath="LanguageDisplay"/>
+                            <DataGridTextColumn Header="Application type" Binding="{Binding ApplicationTypeDisplay}" Width="135" SortMemberPath="ApplicationTypeDisplay"/>
+                            <DataGridTemplateColumn Header="Provider source" Width="160" SortMemberPath="ProviderSourceDisplay">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding ProviderSourceDisplay}" TextWrapping="Wrap" Margin="3"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    </Expander>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Security Assessment"
+                     DataContext="{Binding ProcessDescriptionViewModel}"
+                     Visibility="{Binding IsAiAssistancePublished, Converter={StaticResource BoolToVisibilityConverter}}"
+                     IsSelected="{Binding SecurityAssessment.IsTabSelected, Mode=TwoWay}">
+                <Grid DataContext="{Binding SecurityAssessment}" Margin="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" Padding="8" Background="#FFFFF8E1" BorderBrush="#FFE5C15B" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="Evidence-bounded Security Assessment" FontWeight="SemiBold"/>
+                            <TextBlock Text="The resolved profile and deterministic Expected vs Actual rows are always included as labeled reference/derived context. Select additional evidence explicitly below."
+                                       Margin="0,3,0,0" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding PrivacyWarning}" Margin="0,4,0,0" Foreground="#FF8A4B00" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                    <ItemsControl Grid.Row="1" ItemsSource="{Binding EvidenceSourceOptions}" Margin="0,8,0,0">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox Content="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                          ToolTip="{Binding Description}" Margin="0,0,14,5"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Grid Grid.Row="2" Margin="0,4,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <CheckBox Grid.Column="0" Content="Include current bounded NSRL result"
+                                  IsChecked="{Binding IncludeNsrlContext, Mode=TwoWay}" Margin="0,0,14,0"
+                                  Visibility="{Binding IsKnownFileReferenceDataPublished, Converter={StaticResource BoolToVisibilityConverter}}"
+                                  ToolTip="Included only when explicitly selected and a current Match/No match result with provider/RDS provenance exists."/>
+                        <TextBox Grid.Column="1" Text="{Binding AnalystPromptSuffix, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Optional analyst focus; it cannot expand the provided-evidence boundary." Margin="0,0,8,0"/>
+                        <Button Grid.Column="2" Content="Refresh preview" Command="{Binding RefreshEvidencePreviewCommand}" Padding="10,4" Margin="0,0,6,0"/>
+                        <Button Grid.Column="3" Content="Run Security Assessment" Command="{Binding RunAssessmentCommand}" Padding="10,4" Margin="0,0,6,0"/>
+                        <Button Grid.Column="4" Content="Cancel" Command="{Binding CancelAssessmentCommand}" Padding="10,4"/>
+                    </Grid>
+                    <Grid Grid.Row="3">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <GroupBox Grid.Column="0" Header="Bounded evidence preview">
+                            <TextBox Text="{Binding EvidencePreview}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
+                                     FontFamily="Consolas" FontSize="11" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/>
+                        </GroupBox>
+                        <GroupBox Grid.Column="2" Header="Assessment output">
+                            <TextBox Text="{Binding ResponseText}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"/>
+                        </GroupBox>
+                    </Grid>
+                    <StackPanel Grid.Row="4" Margin="0,6,0,0">
+                        <TextBlock Text="{Binding EvidenceSummary}" Foreground="#555555" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding StatusMessage}" Margin="0,3,0,0" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                        <Expander Header="Security Assessment history" Margin="0,5,0,0">
+                            <DataGrid ItemsSource="{Binding AssessmentHistory}" SelectedItem="{Binding SelectedAssessment}"
+                                      AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False"
+                                      CanUserSortColumns="True" CanUserResizeColumns="True" MaxHeight="140">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Requested" Binding="{Binding RequestedDisplay}" Width="145" SortMemberPath="RequestedDisplay"/>
+                                    <DataGridTextColumn Header="Provider" Binding="{Binding ProviderDisplay}" Width="180" SortMemberPath="ProviderDisplay"/>
+                                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100" SortMemberPath="Status"/>
+                                    <DataGridTextColumn Header="Evidence summary" Binding="{Binding SourceScopeSummary}" Width="*" SortMemberPath="SourceScopeSummary"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Expander>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Process Risk"
+                     AutomationProperties.Name="Process Risk"
+                     Visibility="{Binding FeaturePublication.ProcessRiskScore, Converter={StaticResource BoolToVisibilityConverter}}">
+                <selectedProcess:ProcessRiskDetailsView DataContext="{Binding ProcessRiskDetailsViewModel}"/>
+            </TabItem>
+            <TabItem Header="Expected vs Actual"
+                     DataContext="{Binding ProcessDescriptionViewModel}"
+                     Visibility="{Binding DataContext.FeaturePublication.ApplicationComparison, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVisibilityConverter}}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <Grid Margin="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Expander Grid.Row="0"
+                              Header="Expected / reference values"
+                              IsExpanded="True"
+                              Margin="0,0,0,6">
+                    <StackPanel>
+                        <Border Margin="5,5,5,0"
+                                Padding="8"
+                                Background="#FFFFF8E1"
+                                BorderBrush="#FFE5C15B"
+                                BorderThickness="1">
+                            <TextBlock Text="These are expected/reference values, not known-good facts. A new unsaved draft may be initialized from the selected process, and these values do not contribute to Process Risk."
+                                       Foreground="#FF7A4E00"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap"/>
+                        </Border>
+        <Border
+                Margin="5,5,5,0"
+                Padding="8"
+                Background="#FFF7FBFF"
+                BorderBrush="#FFD7E7F5"
+                BorderThickness="1">
+            <StackPanel>
+                <TextBlock Text="{Binding CurrentTargetDisplay}"
+                           FontWeight="SemiBold"
+                           FontSize="14"/>
+                <TextBlock Text="{Binding MatchStatus}"
+                           Margin="0,4,0,0"
+                           Foreground="#555555"
+                           TextWrapping="Wrap"/>
+                <StackPanel Visibility="{Binding IsAiAssistancePublished, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <TextBlock Text="{Binding EvaluationStatusDisplay}"
+                               Margin="0,4,0,0"
+                               Foreground="#FF8A4B00"
+                               TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Content="Evaluate bundled AI draft"
+                                Command="{Binding EvaluateBundledAiDraftCommand}"
+                                Visibility="{Binding ShowEvaluateBundledAiDraftAction, Converter={StaticResource BoolToVisibilityConverter}}"
+                                Padding="10,4"
+                                Margin="0,0,6,0"/>
+                        <Button Content="Return to normal App Info"
+                                Command="{Binding ReturnToNormalProfileCommand}"
+                                Visibility="{Binding IsEvaluatingBundledAiDraft, Converter={StaticResource BoolToVisibilityConverter}}"
+                                Padding="10,4"/>
+                    </StackPanel>
+                    <Border Visibility="{Binding IsEvaluatingBundledAiDraft, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Margin="0,6,0,0"
+                            Padding="8"
+                            Background="#FFFFE8E8"
+                            BorderBrush="#FFD13438"
+                            BorderThickness="1">
+                        <TextBlock Text="{Binding EvaluationCandidateWarning}"
+                                   FontWeight="Bold"
+                                   Foreground="#FF9B1C1C"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                    <TextBlock Text="{Binding PrivacyWarning}"
+                               Margin="0,4,0,0"
+                               Foreground="#666666"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <Grid Margin="5" IsEnabled="{Binding IsApplicationProfileEditable}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Display name" FontWeight="SemiBold"/>
+            <TextBox Grid.Row="1" Grid.Column="0"
+                     Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}"
+                     IsEnabled="{Binding HasProcessSelected}"
+                     Margin="0,2,6,6"/>
+
+            <TextBlock Grid.Row="0" Grid.Column="1" Text="Executable pattern" FontWeight="SemiBold"/>
+            <TextBox Grid.Row="1" Grid.Column="1"
+                     Text="{Binding ExecutableNamePattern, UpdateSourceTrigger=PropertyChanged}"
+                     IsEnabled="{Binding HasProcessSelected}"
+                     Margin="0,2,6,6"/>
+
+            <CheckBox Grid.Row="1" Grid.Column="2"
+                      Content="Regex"
+                      IsChecked="{Binding IsRegexPattern, Mode=TwoWay}"
+                      IsEnabled="{Binding HasProcessSelected}"
+                      VerticalAlignment="Center"
+                      Margin="0,2,0,6"/>
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Company/vendor" FontWeight="SemiBold"/>
+            <TextBox Grid.Row="3" Grid.Column="0"
+                     Text="{Binding CompanyVendor, UpdateSourceTrigger=PropertyChanged}"
+                     IsEnabled="{Binding HasProcessSelected}"
+                     Margin="0,2,6,0"/>
+
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="Product/package" FontWeight="SemiBold"/>
+            <TextBox Grid.Row="3" Grid.Column="1"
+                     Text="{Binding ProductName, UpdateSourceTrigger=PropertyChanged}"
+                     IsEnabled="{Binding HasProcessSelected}"
+                     Margin="0,2,6,0"/>
+
+            <StackPanel Grid.Row="3" Grid.Column="2" Orientation="Horizontal">
+                <TextBlock Text="Confidence"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           Margin="0,0,6,0"/>
+                <Slider Width="110"
+                        Minimum="0"
+                        Maximum="1"
+                        TickFrequency="0.1"
+                        IsSnapToTickEnabled="True"
+                        Value="{Binding Confidence, Mode=TwoWay}"
+                        IsEnabled="{Binding HasProcessSelected}"/>
+                <TextBlock Text="{Binding Confidence, StringFormat={}{0:P0}}"
+                           VerticalAlignment="Center"
+                           Margin="6,0,0,0"/>
+            </StackPanel>
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="Expected path" FontWeight="SemiBold" Margin="0,6,0,0"/>
+            <TextBox Grid.Row="5" Grid.Column="0"
+                     Text="{Binding PathPattern, UpdateSourceTrigger=PropertyChanged}"
+                     IsEnabled="{Binding HasProcessSelected}"
+                     Margin="0,2,6,0"/>
+
+            <TextBlock Grid.Row="4" Grid.Column="1" Text="Expected package family" FontWeight="SemiBold" Margin="0,6,0,0"/>
+            <TextBox Grid.Row="5" Grid.Column="1"
+                     Text="{Binding PackageFamilyName, UpdateSourceTrigger=PropertyChanged}"
+                     IsEnabled="{Binding HasProcessSelected}"
+                     Margin="0,2,6,0"/>
+
+            <StackPanel Grid.Row="5" Grid.Column="2" Orientation="Horizontal">
+                <TextBlock Text="Category"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           Margin="0,0,6,0"/>
+                <TextBox Width="130"
+                         Text="{Binding ApplicationCategory, UpdateSourceTrigger=PropertyChanged}"
+                         IsEnabled="{Binding HasProcessSelected}"/>
+            </StackPanel>
+        </Grid>
+                        <WrapPanel Margin="5">
+                        <Button Content="Save new override"
+                                Command="{Binding SaveMetadataCommand}"
+                                Padding="12,5"
+                                Margin="0,0,5,0"/>
+                        <Button Content="Replace saved override"
+                                Command="{Binding ReplaceSavedOverrideCommand}"
+                                Padding="12,5"
+                                Margin="0,0,5,0"/>
+                        <Button Content="Discard AI Draft"
+                                Command="{Binding DiscardAiDraftCommand}"
+                                Visibility="{Binding IsAiAssistancePublished, Converter={StaticResource BoolToVisibilityConverter}}"
+                                Padding="12,5"
+                                Margin="0,0,5,0"/>
+                        <Button Content="AI Generate App Info"
+                                Command="{Binding GenerateAppInfoCommand}"
+                                Visibility="{Binding DataContext.FeaturePublication.AiAssistance, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}"
+                                Padding="12,5"
+                                Margin="0,0,10,0"/>
+                        <TextBlock Text="{Binding ProvenanceDisplay}"
+                                   VerticalAlignment="Center"
+                                   Foreground="#555555"
+                                   Margin="0,0,10,0"/>
+                        <TextBlock Text="{Binding ReviewStateDisplay}"
+                                   VerticalAlignment="Center"
+                                   Foreground="#555555"
+                                   Margin="0,0,10,0"/>
+                        <TextBlock Text="{Binding StatusMessage}"
+                                   VerticalAlignment="Center"
+                                   Foreground="Gray"
+                                   TextWrapping="Wrap"/>
+                     </WrapPanel>
+                     </StackPanel>
+                    </Expander>
+                    <Border Grid.Row="1" Padding="8" Background="#FFFFF8E1" BorderBrush="#FFE5C15B" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="{Binding SelectedProfileDisplay}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding ProfileSelectionReason}" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                            <TextBlock Text="Match means consistency with one expected property, not benignness. A mismatch is an analyst pivot, not a malware verdict."
+                                       Margin="0,3,0,0" Foreground="#7A4E00" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                    <Expander Grid.Row="2" Header="Deterministic catalog candidates" Margin="0,6,0,0">
+                        <TextBox Text="{Binding AmbiguousCandidatesDisplay}"
+                                 IsReadOnly="True" TextWrapping="Wrap" MaxHeight="110"
+                                 VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="11"/>
+                    </Expander>
+                    <TextBlock Grid.Row="3" Text="{Binding PeAvailability}" Margin="0,6,0,0"
+                               Foreground="#555555" TextWrapping="Wrap"/>
+                    <TextBlock Grid.Row="4" Text="{Binding ComparisonStatus}" Margin="0,4,0,6"
+                               FontWeight="SemiBold" TextWrapping="Wrap"/>
+                    <DataGrid Grid.Row="5"
+                              MinHeight="220"
+                              ItemsSource="{Binding ComparisonRows}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              CanUserDeleteRows="False"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal"
+                              EnableRowVirtualization="True"
+                              EnableColumnVirtualization="True"
+                              CanUserSortColumns="True"
+                              CanUserResizeColumns="True"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Property" Binding="{Binding PropertyDisplay}" Width="145" SortMemberPath="PropertyDisplay"/>
+                            <DataGridTemplateColumn Header="Result" Width="95" SortMemberPath="ResultDisplay">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding ResultDisplay}" FontWeight="SemiBold">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="#555555"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding ResultDisplay}" Value="Match">
+                                                            <Setter Property="Foreground" Value="#FF1B6E1B"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding ResultDisplay}" Value="Mismatch">
+                                                            <Setter Property="Foreground" Value="#FFB42318"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding ResultDisplay}" Value="Unknown">
+                                                            <Setter Property="Foreground" Value="#FF8A5A00"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Importance" Binding="{Binding ImportanceDisplay}" Width="85" SortMemberPath="ImportanceDisplay"/>
+                            <DataGridTemplateColumn Header="Expected" Width="230" SortMemberPath="ExpectedValue">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding ExpectedValue}" TextWrapping="Wrap" Margin="3"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Actual" Width="230" SortMemberPath="ActualValue">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding ActualValue}" TextWrapping="Wrap" Margin="3"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Rationale" Width="310" SortMemberPath="Rationale">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Rationale}" TextWrapping="Wrap" Margin="3"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Evidence / availability" Width="270" SortMemberPath="EvidenceSource">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="3">
+                                            <TextBlock Text="{Binding EvidenceSource}" TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding SourceAvailability}" TextWrapping="Wrap" Foreground="#666666"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+    </Grid>
+</UserControl>

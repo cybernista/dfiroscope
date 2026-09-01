@@ -1,0 +1,145 @@
+<UserControl x:Class="ProcInsider.Views.Features.Ai.ExplorerAiInvestigationView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <WrapPanel Grid.Row="0" Margin="0,0,0,4">
+            <ComboBox ItemsSource="{Binding ProviderOptions}"
+                      SelectedItem="{Binding SelectedProviderOption, Mode=TwoWay}"
+                      DisplayMemberPath="DisplayName"
+                      Width="150"
+                      Margin="0,0,4,4"
+                      ToolTip="{Binding SelectedProviderOption.Description}"/>
+            <TextBox Text="{Binding BaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     Width="190"
+                     Margin="0,0,4,4"
+                     ToolTip="OpenAI-compatible endpoint base URL"/>
+            <TextBox Text="{Binding ModelName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     Width="120"
+                     Margin="0,0,4,4"
+                     ToolTip="Model"/>
+            <TextBlock Text="Timeout" VerticalAlignment="Center" Margin="0,0,3,4"/>
+            <TextBox Text="{Binding TimeoutSeconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     Width="52"
+                     Margin="0,0,4,4"
+                     ToolTip="Provider timeout in seconds"/>
+            <Button Content="Test" Command="{Binding TestConnectionCommand}" Padding="8,2" Margin="0,0,4,4"/>
+            <Button Content="Save" Command="{Binding SaveSettingsCommand}" Padding="8,2" Margin="0,0,4,4"/>
+            <Button Content="Investigate" Command="{Binding RunInvestigationCommand}" Padding="8,2" Margin="0,0,4,4"/>
+            <Button Content="Cancel" Command="{Binding CancelInvestigationCommand}" Padding="8,2" Margin="0,0,4,4"/>
+            <Button Content="Preview" Command="{Binding RefreshEvidencePreviewCommand}" Padding="8,2" Margin="0,0,4,4"/>
+        </WrapPanel>
+
+        <Border Grid.Row="1"
+                Background="#FFFFF6DF"
+                BorderBrush="#FFE0B95C"
+                BorderThickness="1"
+                Padding="6"
+                Margin="0,0,0,4"
+                Visibility="{Binding IsCloudProvider, Converter={StaticResource BoolToVisibilityConverter}}">
+            <TextBlock Text="{Binding PrivacyWarning}" TextWrapping="Wrap" Foreground="#664400"/>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <DockPanel Grid.Row="0" Margin="0,0,0,4">
+                <ComboBox DockPanel.Dock="Right"
+                          ItemsSource="{Binding PromptTemplates}"
+                          SelectedItem="{Binding SelectedPromptTemplate, Mode=TwoWay}"
+                          DisplayMemberPath="Title"
+                          Width="180"
+                          Margin="6,0,0,0"/>
+                <TextBlock Text="{Binding CurrentTargetDisplay}"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"/>
+            </DockPanel>
+            <Grid Grid.Row="1" Margin="0,0,0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="6"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBox Grid.Column="0"
+                         Text="{Binding AnalystPromptSuffix, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         FontFamily="Consolas"
+                         FontSize="11"/>
+                <GridSplitter Grid.Column="1"
+                              Width="6"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Stretch"
+                              Background="#CCCCCC"
+                              Cursor="SizeWE"
+                              ShowsPreview="True"/>
+                <TextBox Grid.Column="2"
+                         Text="{Binding EvidencePreview, Mode=OneWay}"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         AcceptsReturn="True"
+                         VerticalScrollBarVisibility="Auto"
+                         FontFamily="Consolas"
+                         FontSize="11"/>
+            </Grid>
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="6"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBox Grid.Column="0"
+                         Text="{Binding ResponseText, Mode=OneWay}"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         AcceptsReturn="True"
+                         VerticalScrollBarVisibility="Auto"
+                         FontFamily="Consolas"
+                         FontSize="11"/>
+                <GridSplitter Grid.Column="1"
+                              Width="6"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Stretch"
+                              Background="#CCCCCC"
+                              Cursor="SizeWE"
+                              ShowsPreview="True"/>
+                <DataGrid Grid.Column="2"
+                          ItemsSource="{Binding InvestigationHistory}"
+                          SelectedItem="{Binding SelectedInvestigation, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Requested" Binding="{Binding RequestedDisplay}" Width="120"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="80"/>
+                        <DataGridTextColumn Header="Preview" Binding="{Binding ResponsePreview}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </Grid>
+
+        <DockPanel Grid.Row="3" Margin="0,4,0,0">
+            <ProgressBar DockPanel.Dock="Left"
+                         Width="70"
+                         Height="14"
+                         IsIndeterminate="{Binding IsBusy}"
+                         Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"
+                         Margin="0,2,6,0"/>
+            <TextBlock Text="{Binding StatusMessage}" Foreground="#555555" TextWrapping="Wrap"/>
+        </DockPanel>
+    </Grid>
+</UserControl>

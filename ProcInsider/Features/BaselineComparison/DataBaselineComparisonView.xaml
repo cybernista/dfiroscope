@@ -1,0 +1,365 @@
+<UserControl x:Class="ProcInsider.Features.BaselineComparison.DataBaselineComparisonView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Baseline snapshot" FontWeight="SemiBold"/>
+            <DockPanel Grid.Row="1" Grid.Column="0" LastChildFill="True" Margin="0,2,0,8">
+                <Button DockPanel.Dock="Right"
+                        Content="Browse"
+                        Command="{Binding BrowseBaselineSnapshotCommand}"
+                        Padding="10,3"
+                        Margin="6,0,0,0"/>
+                <Button DockPanel.Dock="Right"
+                        Content="Active"
+                        Command="{Binding UseActiveSnapshotAsBaselineCommand}"
+                        Padding="10,3"
+                        Margin="6,0,0,0"/>
+                <TextBox Text="{Binding BaselineSnapshotPath, UpdateSourceTrigger=PropertyChanged}"
+                         FontFamily="Consolas"
+                         FontSize="11"/>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" Grid.RowSpan="4" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                          Background="#CCCCCC" Cursor="SizeWE" ShowsPreview="True"/>
+
+            <TextBlock Grid.Row="0" Grid.Column="2" Text="Current snapshot" FontWeight="SemiBold"/>
+            <DockPanel Grid.Row="1" Grid.Column="2" LastChildFill="True" Margin="0,2,0,8">
+                <Button DockPanel.Dock="Right"
+                        Content="Browse"
+                        Command="{Binding BrowseCurrentSnapshotCommand}"
+                        Padding="10,3"
+                        Margin="6,0,0,0"/>
+                <Button DockPanel.Dock="Right"
+                        Content="Active"
+                        Command="{Binding UseActiveSnapshotAsCurrentCommand}"
+                        Padding="10,3"
+                        Margin="6,0,0,0"/>
+                <TextBox Text="{Binding CurrentSnapshotPath, UpdateSourceTrigger=PropertyChanged}"
+                         FontFamily="Consolas"
+                         FontSize="11"/>
+            </DockPanel>
+
+            <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,2,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.4*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="2*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Baseline name" FontWeight="SemiBold"/>
+                <TextBox Grid.Row="1" Grid.Column="0"
+                         Text="{Binding BaselineName, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,2,8,0"/>
+
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="Host id" FontWeight="SemiBold"/>
+                <TextBox Grid.Row="1" Grid.Column="1"
+                         Text="{Binding BaselineHostId, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,2,8,0"/>
+
+                <TextBlock Grid.Row="0" Grid.Column="2" Text="Trust note" FontWeight="SemiBold"/>
+                <TextBox Grid.Row="1" Grid.Column="2"
+                         Text="{Binding BaselineTrustNote, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,2,0,0"/>
+            </Grid>
+
+            <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,8,0,0">
+                <Button Content="Save Metadata"
+                        Command="{Binding SaveBaselineMetadataCommand}"
+                        Padding="12,4"
+                        Margin="0,0,8,0"/>
+                <Button Content="Compare"
+                        Command="{Binding CompareSnapshotsCommand}"
+                        Padding="12,4"
+                        Margin="0,0,8,0"/>
+                <Button Content="Accept Finding"
+                        Command="{Binding AcceptSelectedFindingCommand}"
+                        Padding="12,4"
+                        Margin="0,0,8,0"/>
+                <Button Content="Clear"
+                        Command="{Binding ClearComparisonCommand}"
+                        Padding="12,4"
+                        Margin="0,0,12,0"/>
+                <ProgressBar Width="100"
+                             Height="16"
+                             IsIndeterminate="{Binding IsBusy}"
+                             Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"
+                             VerticalAlignment="Center"
+                             Margin="0,0,8,0"/>
+                <TextBlock Text="{Binding SummaryText}"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap"/>
+            </StackPanel>
+        </Grid>
+
+        <TextBlock Grid.Row="1"
+                   Text="{Binding StatusMessage}"
+                   Margin="0,8,0,4"
+                   Foreground="#555555"
+                   TextWrapping="Wrap"/>
+
+        <TabControl Grid.Row="2" Margin="0,4,0,0">
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding NewFindings.Count, StringFormat='New ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding NewFindings}"
+                          SelectedItem="{Binding SelectedFinding, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          Margin="0,5,0,0"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Kind" Binding="{Binding ArtifactKind}" Width="115" SortMemberPath="ArtifactKind"/>
+                        <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="220" SortMemberPath="Title"/>
+                        <DataGridTextColumn Header="Current" Binding="{Binding CurrentSummary}" Width="280" SortMemberPath="CurrentSummary">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding CurrentSummary}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Reason" Binding="{Binding Explanation}" Width="220" SortMemberPath="Explanation"/>
+                        <DataGridTextColumn Header="Stable Key" Binding="{Binding StableKey}" Width="*" SortMemberPath="StableKey">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding StableKey}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                    <Setter Property="FontFamily" Value="Consolas"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding ChangedFindings.Count, StringFormat='Changed ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding ChangedFindings}"
+                          SelectedItem="{Binding SelectedFinding, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          Margin="0,5,0,0"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Kind" Binding="{Binding ArtifactKind}" Width="115" SortMemberPath="ArtifactKind"/>
+                        <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="220" SortMemberPath="Title"/>
+                        <DataGridTextColumn Header="Baseline" Binding="{Binding BaselineSummary}" Width="230" SortMemberPath="BaselineSummary"/>
+                        <DataGridTextColumn Header="Current" Binding="{Binding CurrentSummary}" Width="230" SortMemberPath="CurrentSummary"/>
+                        <DataGridTextColumn Header="Changed Fields" Binding="{Binding ChangedFields}" Width="*" SortMemberPath="ChangedFields">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding ChangedFields}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding MissingFindings.Count, StringFormat='Missing ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding MissingFindings}"
+                          SelectedItem="{Binding SelectedFinding, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          Margin="0,5,0,0"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Kind" Binding="{Binding ArtifactKind}" Width="115" SortMemberPath="ArtifactKind"/>
+                        <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="220" SortMemberPath="Title"/>
+                        <DataGridTextColumn Header="Baseline" Binding="{Binding BaselineSummary}" Width="320" SortMemberPath="BaselineSummary"/>
+                        <DataGridTextColumn Header="Reason" Binding="{Binding Explanation}" Width="220" SortMemberPath="Explanation"/>
+                        <DataGridTextColumn Header="Stable Key" Binding="{Binding StableKey}" Width="*" SortMemberPath="StableKey">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding StableKey}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                    <Setter Property="FontFamily" Value="Consolas"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding NoisyFindings.Count, StringFormat='Noisy ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding NoisyFindings}"
+                          SelectedItem="{Binding SelectedFinding, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          Margin="0,5,0,0"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Kind" Binding="{Binding ArtifactKind}" Width="115" SortMemberPath="ArtifactKind"/>
+                        <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="220" SortMemberPath="Title"/>
+                        <DataGridTextColumn Header="Baseline" Binding="{Binding BaselineSummary}" Width="260" SortMemberPath="BaselineSummary"/>
+                        <DataGridTextColumn Header="Current" Binding="{Binding CurrentSummary}" Width="260" SortMemberPath="CurrentSummary"/>
+                        <DataGridTextColumn Header="Reason" Binding="{Binding Explanation}" Width="*" SortMemberPath="Explanation"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding KnownFindings.Count, StringFormat='Known ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding KnownFindings}"
+                          SelectedItem="{Binding SelectedFinding, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          Margin="0,5,0,0"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Kind" Binding="{Binding ArtifactKind}" Width="115" SortMemberPath="ArtifactKind"/>
+                        <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="220" SortMemberPath="Title"/>
+                        <DataGridTextColumn Header="Current" Binding="{Binding CurrentSummary}" Width="360" SortMemberPath="CurrentSummary"/>
+                        <DataGridTextColumn Header="Stable Key" Binding="{Binding StableKey}" Width="*" SortMemberPath="StableKey">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding StableKey}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                    <Setter Property="FontFamily" Value="Consolas"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding AcceptedFindings.Count, StringFormat='Accepted ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding AcceptedFindings}"
+                          SelectedItem="{Binding SelectedFinding, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          Margin="0,5,0,0"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Kind" Binding="{Binding ArtifactKind}" Width="115" SortMemberPath="ArtifactKind"/>
+                        <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="220" SortMemberPath="Title"/>
+                        <DataGridTextColumn Header="Policy Rule" Binding="{Binding PolicyRuleId}" Width="220" SortMemberPath="PolicyRuleId">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding PolicyRuleId}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                    <Setter Property="FontFamily" Value="Consolas"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Reason" Binding="{Binding Explanation}" Width="260" SortMemberPath="Explanation"/>
+                        <DataGridTextColumn Header="Stable Key" Binding="{Binding StableKey}" Width="*" SortMemberPath="StableKey">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding StableKey}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                    <Setter Property="FontFamily" Value="Consolas"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+        </TabControl>
+
+        <TextBlock Grid.Row="3" Margin="0,4,0,0">
+            <Run Text="Policy: "/>
+            <Run Text="baseline-policy.json" FontWeight="Bold"/>
+        </TextBlock>
+    </Grid>
+</UserControl>

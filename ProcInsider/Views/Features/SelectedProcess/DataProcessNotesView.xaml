@@ -1,0 +1,54 @@
+<UserControl x:Class="ProcInsider.Views.Features.SelectedProcess.DataProcessNotesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Notes annotation target -->
+        <StackPanel Grid.Row="0" Margin="5">
+            <TextBlock Text="Annotation Target:" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding CurrentFilePath}"
+                       TextWrapping="Wrap"
+                       Foreground="Gray"
+                       FontFamily="Consolas"
+                       FontSize="11"/>
+        </StackPanel>
+
+        <!-- Notes editor -->
+        <TextBox Grid.Row="1"
+                 Text="{Binding NotesContent, UpdateSourceTrigger=PropertyChanged}"
+                 AcceptsReturn="True"
+                 AcceptsTab="True"
+                 TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto"
+                 HorizontalScrollBarVisibility="Auto"
+                 FontFamily="Consolas"
+                 FontSize="12"
+                 Margin="5"
+                 IsEnabled="{Binding HasProcessSelected}"/>
+
+        <!-- Notes controls -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="5">
+            <Button Content="💾 Save"
+                    Command="{Binding SaveNotesCommand}"
+                    Padding="15,5" Margin="0,0,5,0"
+                    IsEnabled="{Binding HasProcessSelected}"/>
+            <Button Content="🔄 Reload"
+                    Command="{Binding ReloadNotesCommand}"
+                    Padding="15,5" Margin="0,0,10,0"
+                    IsEnabled="{Binding HasProcessSelected}"/>
+            <TextBlock Text="{Binding StatusMessage}"
+                       VerticalAlignment="Center"
+                       Foreground="Gray"/>
+            <TextBlock Text=" *"
+                       Foreground="Red"
+                       FontWeight="Bold"
+                       Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVisibilityConverter}}"
+                       VerticalAlignment="Center"/>
+        </StackPanel>
+    </Grid>
+</UserControl>

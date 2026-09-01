@@ -1,0 +1,19 @@
+<UserControl x:Class="ProcInsider.Views.Features.Ai.ExplorerAiView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:aiViews="clr-namespace:ProcInsider.Views.Features.Ai"
+             xmlns:vm="clr-namespace:ProcInsider.ViewModels">
+    <TabControl SelectedValue="{Binding SelectedExplorerAiSection, Mode=TwoWay}"
+                SelectedValuePath="Tag">
+        <TabItem Header="Chat"
+                 Tag="{x:Static vm:ExplorerAiSection.Chat}"
+                 DataContext="{Binding AiChatViewModel}">
+            <aiViews:AiChatView />
+        </TabItem>
+        <TabItem Header="Investigation"
+                 Tag="{x:Static vm:ExplorerAiSection.Investigation}"
+                 DataContext="{Binding AiInvestigationViewModel}">
+            <aiViews:ExplorerAiInvestigationView />
+        </TabItem>
+    </TabControl>
+</UserControl>

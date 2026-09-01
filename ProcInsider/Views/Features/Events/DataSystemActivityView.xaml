@@ -1,0 +1,89 @@
+<UserControl x:Class="ProcInsider.Views.Features.Events.DataSystemActivityView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="5">
+            <Button Content="Refresh Activity"
+                    Command="{Binding RefreshActivitiesCommand}"
+                    Padding="10,3" Margin="0,0,10,0"/>
+            <TextBlock Text="{Binding StatusMessage}"
+                       VerticalAlignment="Center"
+                       TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <DataGrid Grid.Row="1"
+                  ItemsSource="{Binding ActivitiesView}"
+                  SelectedItem="{Binding SelectedActivity, Mode=TwoWay}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  SelectionMode="Single"
+                  EnableRowVirtualization="True"
+                  EnableColumnVirtualization="True"
+                  VirtualizingPanel.IsVirtualizing="True"
+                  VirtualizingPanel.VirtualizationMode="Recycling"
+                  GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column"
+                  CanUserReorderColumns="True"
+                  CanUserResizeColumns="True"
+                  CanUserSortColumns="True"
+                  Margin="5"
+                  FontSize="11">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Time" Binding="{Binding TimestampDisplay}" Width="135"
+                                    SortMemberPath="TimestampDisplay">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="FontFamily" Value="Consolas"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Activity" Binding="{Binding Activity}" Width="165"
+                                    SortMemberPath="Activity"/>
+                <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="75"
+                                    SortMemberPath="Result"/>
+                <DataGridTextColumn Header="Subject" Binding="{Binding SubjectAccount}" Width="145"
+                                    SortMemberPath="SubjectAccount"/>
+                <DataGridTextColumn Header="Target" Binding="{Binding TargetAccount}" Width="145"
+                                    SortMemberPath="TargetAccount"/>
+                <DataGridTextColumn Header="Member" Binding="{Binding MemberAccount}" Width="155"
+                                    SortMemberPath="MemberAccount"/>
+                <DataGridTextColumn Header="Group" Binding="{Binding TargetGroup}" Width="150"
+                                    SortMemberPath="TargetGroup"/>
+                <DataGridTextColumn Header="Logon Type" Binding="{Binding LogonType}" Width="135"
+                                    SortMemberPath="LogonType"/>
+                <DataGridTextColumn Header="Source Host" Binding="{Binding SourceHost}" Width="130"
+                                    SortMemberPath="SourceHost"/>
+                <DataGridTextColumn Header="Source Address" Binding="{Binding SourceAddress}" Width="120"
+                                    SortMemberPath="SourceAddress"/>
+                <DataGridTextColumn Header="Process" Binding="{Binding ProcessDisplay}" Width="155"
+                                    SortMemberPath="ProcessDisplay"/>
+                <DataGridTextColumn Header="Summary" Binding="{Binding Summary}" Width="300"
+                                    SortMemberPath="Summary">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="ToolTip" Value="{Binding Summary}"/>
+                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Event ID" Binding="{Binding EventIdDisplay}" Width="75"
+                                    SortMemberPath="EventIdDisplay"/>
+                <DataGridTextColumn Header="Evidence" Binding="{Binding SourceDisplay}" Width="180"
+                                    SortMemberPath="SourceDisplay"/>
+                <DataGridTextColumn Header="Record" Binding="{Binding RecordId}" Width="95"
+                                    SortMemberPath="RecordId"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <TextBlock Grid.Row="2" Margin="5,0,5,5">
+            <Run Text="Visible system activity rows: "/>
+            <Run Text="{Binding VisibleActivityCount, Mode=OneWay}" FontWeight="Bold"/>
+        </TextBlock>
+    </Grid>
+</UserControl>

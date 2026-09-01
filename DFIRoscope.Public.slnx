@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="ProcInsider.Core/ProcInsider.Core.csproj" />
+  <Project Path="ProcInsider.Infrastructure.Windows/ProcInsider.Infrastructure.Windows.csproj" />
+  <Project Path="ProcInsider/ProcInsider.csproj" />
+  <Project Path="ProcInsider.Agent/ProcInsider.Agent.csproj" />
+</Solution>

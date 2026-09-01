@@ -1,0 +1,248 @@
+{
+  "Profile": {
+    "Id": "procinsider-etw-high-volume-diagnostic",
+    "DisplayName": "High-Volume Diagnostic",
+    "Description": "Verbose diagnostic ETW profile for broad process, image, file, registry, network, DNS, WMI, and threat-intelligence telemetry.",
+    "ExpectedVolume": "High",
+    "RiskNote": "Use this profile for short captures only; provider volume and kernel buffering pressure can increase quickly.",
+    "CorrelationHints": [
+      "Use process lifecycle events as the timeline anchor for PID plus start-time identity.",
+      "Use file, registry, DNS, and network target fields as behavior pivots for search and Sigma.",
+      "Treat threat-intelligence provider availability as best-effort; missing or denied providers should not stop other ETW sources."
+    ]
+  },
+  "Session": {
+    "Name": "DFIRoscope-ETW",
+    "BufferSizeKb": 4096,
+    "MinimumBuffers": 32,
+    "MaximumBuffers": 256,
+    "FlushTimerSeconds": 1
+  },
+  "Providers": [
+    {
+      "Name": "Microsoft-Windows-Kernel-Process",
+      "Guid": "22fb2cd6-0e7b-422b-a0c7-2fad1fd0e716",
+      "Enabled": true,
+      "Level": "Verbose",
+      "KeywordsHex": "0xFFFFFFFFFFFFFFFF",
+      "Events": [
+        {
+          "Id": 1,
+          "Name": "ProcessStart",
+          "Category": "Process",
+          "Action": "ProcessStart",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "ProcessNameFields": [ "ImageName", "ProcessName" ],
+          "ImagePathFields": [ "ImageName", "ImagePath" ],
+          "TargetFields": [ "ImageName", "ProcessName", "CommandLine" ]
+        },
+        {
+          "Id": 2,
+          "Name": "ProcessStop",
+          "Category": "Process",
+          "Action": "ProcessExit",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "ProcessNameFields": [ "ImageName", "ProcessName" ],
+          "ImagePathFields": [ "ImageName", "ImagePath" ],
+          "TargetFields": [ "ImageName", "ProcessName" ]
+        }
+      ]
+    },
+    {
+      "Name": "Microsoft-Windows-Kernel-Image",
+      "Enabled": true,
+      "Level": "Verbose",
+      "KeywordsHex": "0xFFFFFFFFFFFFFFFF",
+      "Events": [
+        {
+          "Id": 5,
+          "Name": "ImageLoad",
+          "Category": "Process",
+          "Action": "ImageLoad",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "ProcessNameFields": [ "ProcessName", "ImageName" ],
+          "ImagePathFields": [ "ProcessName", "ImageName" ],
+          "TargetFields": [ "ImageName", "FileName", "ImageLoaded", "Path" ]
+        }
+      ]
+    },
+    {
+      "Name": "Microsoft-Windows-Kernel-File",
+      "Guid": "edd08927-9cc4-4e65-b970-c2560fb5c289",
+      "Enabled": true,
+      "Level": "Verbose",
+      "KeywordsHex": "0xFFFFFFFFFFFFFFFF",
+      "Events": [
+        {
+          "Id": 12,
+          "Name": "FileCreate",
+          "Category": "File",
+          "Action": "FileCreate",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "FileName", "FilePath", "Path", "FileObject" ]
+        },
+        {
+          "Id": 14,
+          "Name": "FileDelete",
+          "Category": "File",
+          "Action": "FileDelete",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "FileName", "FilePath", "Path", "FileObject" ]
+        },
+        {
+          "Id": 15,
+          "Name": "FileRename",
+          "Category": "File",
+          "Action": "FileRename",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "FileName", "FilePath", "Path", "FileObject" ]
+        }
+      ]
+    },
+    {
+      "Name": "Microsoft-Windows-Kernel-Registry",
+      "Guid": "70eb4f03-c1de-4f73-a051-33d13d5413bd",
+      "Enabled": true,
+      "Level": "Verbose",
+      "KeywordsHex": "0xFFFFFFFFFFFFFFFF",
+      "Events": [
+        {
+          "Id": 1,
+          "Name": "RegistryCreateKey",
+          "Category": "Registry",
+          "Action": "RegistryCreateKey",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "KeyName", "KeyPath", "ObjectName" ]
+        },
+        {
+          "Id": 5,
+          "Name": "RegistrySetValue",
+          "Category": "Registry",
+          "Action": "RegistrySetValue",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "KeyName", "KeyPath", "ValueName", "ObjectName" ]
+        },
+        {
+          "Id": 6,
+          "Name": "RegistryDeleteValue",
+          "Category": "Registry",
+          "Action": "RegistryDeleteValue",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "KeyName", "KeyPath", "ValueName", "ObjectName" ]
+        },
+        {
+          "Id": 7,
+          "Name": "RegistryDeleteKey",
+          "Category": "Registry",
+          "Action": "RegistryDeleteKey",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "KeyName", "KeyPath", "ObjectName" ]
+        }
+      ]
+    },
+    {
+      "Name": "Microsoft-Windows-Kernel-Network",
+      "Guid": "7dd42a49-5329-4832-8dfd-43d979153a88",
+      "Enabled": true,
+      "Level": "Verbose",
+      "KeywordsHex": "0xFFFFFFFFFFFFFFFF",
+      "Events": [
+        {
+          "Id": 10,
+          "Name": "TcpConnect",
+          "Category": "Network",
+          "Action": "Connect",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "daddr", "destaddr", "DestinationAddress", "saddr", "SourceAddress" ]
+        },
+        {
+          "Id": 42,
+          "Name": "UdpSend",
+          "Category": "Network",
+          "Action": "Connect",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "daddr", "destaddr", "DestinationAddress", "saddr", "SourceAddress" ]
+        }
+      ]
+    },
+    {
+      "Name": "Microsoft-Windows-DNS-Client",
+      "Enabled": true,
+      "Level": "Verbose",
+      "KeywordsHex": "0xFFFFFFFFFFFFFFFF",
+      "Events": [
+        {
+          "Id": 3008,
+          "Name": "Query",
+          "Category": "Dns",
+          "Action": "DnsQuery",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID", "ClientProcessId", "ClientPID" ],
+          "ProcessNameFields": [ "ProcessName", "Application" ],
+          "ImagePathFields": [ "ProcessPath", "ApplicationPath", "ImagePath" ],
+          "TargetFields": [ "QueryName", "Query", "Name" ]
+        },
+        {
+          "Id": 3010,
+          "Name": "Response",
+          "Category": "Dns",
+          "Action": "DnsQuery",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID", "ClientProcessId", "ClientPID" ],
+          "ProcessNameFields": [ "ProcessName", "Application" ],
+          "ImagePathFields": [ "ProcessPath", "ApplicationPath", "ImagePath" ],
+          "TargetFields": [ "QueryName", "Query", "Name", "Answer" ]
+        }
+      ]
+    },
+    {
+      "Name": "Microsoft-Windows-WMI-Activity",
+      "Guid": "1418ef04-b0b4-4623-bf7e-d74ab47bbdaa",
+      "Enabled": true,
+      "Level": "Verbose",
+      "KeywordsHex": "0xFFFFFFFFFFFFFFFF",
+      "Events": [
+        {
+          "Id": 5857,
+          "Name": "WmiProviderStarted",
+          "Category": "Wmi",
+          "Action": "WmiEvent",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "ClientProcessId", "ClientPID" ],
+          "ProcessNameFields": [ "ProcessName", "Provider" ],
+          "TargetFields": [ "Provider", "NamespaceName", "Operation" ]
+        },
+        {
+          "Id": 5858,
+          "Name": "WmiOperation",
+          "Category": "Wmi",
+          "Action": "WmiEvent",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "ClientProcessId", "ClientPID" ],
+          "ProcessNameFields": [ "ProcessName", "ClientMachine" ],
+          "TargetFields": [ "Operation", "NamespaceName", "Query", "User" ]
+        },
+        {
+          "Id": 5860,
+          "Name": "WmiTemporaryConsumer",
+          "Category": "Wmi",
+          "Action": "WmiConsumer",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "ClientProcessId", "ClientPID" ],
+          "TargetFields": [ "Consumer", "NamespaceName", "Query" ]
+        },
+        {
+          "Id": 5861,
+          "Name": "WmiPermanentConsumer",
+          "Category": "Wmi",
+          "Action": "WmiConsumer",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "ClientProcessId", "ClientPID" ],
+          "TargetFields": [ "Consumer", "NamespaceName", "Query" ]
+        }
+      ]
+    },
+    {
+      "Name": "Microsoft-Windows-Threat-Intelligence",
+      "Guid": "f4e1897c-bb5d-5668-f1d8-040f4d8dd344",
+      "Enabled": true,
+      "Level": "Verbose",
+      "KeywordsHex": "0xFFFFFFFFFFFFFFFF",
+      "Events": []
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+<Window x:Class="ProcInsider.SqlitePerformanceDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SQLite Performance"
+        Width="1060"
+        Height="700"
+        MinWidth="840"
+        MinHeight="520"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+            <TextBlock Text="{Binding StatusLine}" FontWeight="SemiBold" FontSize="14" TextWrapping="Wrap"/>
+            <TextBlock Text="Refreshing automatically every second. Throughput is measured from the change in completed SQLite rows." Foreground="#666666" Margin="0,2,0,0"/>
+        </StackPanel>
+
+        <Border Grid.Row="1" BorderBrush="#D9A400" BorderThickness="1" Background="#FFF9E6" Padding="8" Margin="0,0,0,10">
+            <TextBlock Text="{Binding Bottleneck}" TextWrapping="Wrap"/>
+        </Border>
+
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <TextBlock Text="Pipeline stages" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <DataGrid ItemsSource="{Binding StageRows}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal" MaxHeight="280" Margin="0,0,0,12">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Stage" Binding="{Binding Stage}" Width="150"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="190"/>
+                        <DataGridTextColumn Header="Throughput" Binding="{Binding Throughput}" Width="110"/>
+                        <DataGridTextColumn Header="Backlog" Binding="{Binding Backlog}" Width="180"/>
+                        <DataGridTextColumn Header="Detail" Binding="{Binding Detail}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <TextBlock Text="Source ingress" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <DataGrid ItemsSource="{Binding SourceRows}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal" MaxHeight="220" Margin="0,0,0,12">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="120"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100"/>
+                        <DataGridTextColumn Header="Ingress" Binding="{Binding Ingress}" Width="120"/>
+                        <DataGridTextColumn Header="Queued" Binding="{Binding Queued}" Width="100"/>
+                        <DataGridTextColumn Header="Failures" Binding="{Binding Failures}" Width="100"/>
+                        <DataGridTextColumn Header="Detail" Binding="{Binding Detail}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <TextBlock Text="Diagnostics log" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <TextBox Text="{Binding DiagnosticLogPath, Mode=OneWay}" IsReadOnly="True" IsTabStop="False" TextWrapping="Wrap"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Close" MinWidth="76" Padding="10,3" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

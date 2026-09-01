@@ -1,0 +1,334 @@
+﻿<UserControl x:Class="ProcInsider.Views.Features.Agents.ExplorerAgentsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="150"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,4" LastChildFill="False">
+            <Button Content="Connect / Add"
+                    Command="{Binding DataContext.AddAgentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,0"
+                    ToolTip="Securely reconnect an existing verified local Agent, or add and start one when no Agent is present"/>
+            <Button Content="Reconnect Local Agent"
+                    Command="{Binding DataContext.ReconnectRunningLocalAgentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,0"
+                    ToolTip="Authenticate and recover the exact verified local agent/workspace from its protected lease without starting another agent"/>
+        </DockPanel>
+
+        <TextBox Grid.Row="1"
+                 Text="{Binding StatusMessage, Mode=OneWay}"
+                 Foreground="#555555"
+                 IsReadOnly="True"
+                 IsTabStop="False"
+                 BorderThickness="0"
+                 Background="Transparent"
+                 TextWrapping="Wrap"
+                 Margin="0,0,0,4"/>
+
+        <Grid Grid.Row="2">
+            <TextBlock Margin="10"
+                       Text="No agents configured."
+                       Foreground="#666666"
+                       TextWrapping="Wrap"
+                       VerticalAlignment="Center"
+                       HorizontalAlignment="Center"
+                       Visibility="{Binding HasAgents, Converter={StaticResource InverseBoolToVisibilityConverter}}"/>
+
+            <DataGrid ItemsSource="{Binding Agents}"
+                      SelectedItem="{Binding SelectedAgent, Mode=TwoWay}"
+                      PreviewMouseRightButtonDown="OnAgentsGridPreviewMouseRightButtonDown"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      SelectionMode="Single"
+                      EnableRowVirtualization="True"
+                      EnableColumnVirtualization="True"
+                      GridLinesVisibility="Horizontal"
+                      HeadersVisibility="Column"
+                      FontSize="11"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"
+                      Visibility="{Binding HasAgents, Converter={StaticResource BoolToVisibilityConverter}}">
+                <DataGrid.RowStyle>
+                    <Style TargetType="{x:Type DataGridRow}">
+                        <Setter Property="Tag"
+                                Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                        <Setter Property="ContextMenu">
+                            <Setter.Value>
+                                <ContextMenu>
+                                    <MenuItem Header="_Advanced actions"
+                                              ToolTip="Terminal capture and pairing actions for the exact agent row">
+                                        <MenuItem Header="_End Capture"
+                                                  Command="{Binding PlacementTarget.Tag.StopAgentConfiguredCaptureCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                  ToolTip="Permanently end the right-clicked agent's configured capture after confirmation"/>
+                                        <Separator/>
+                                        <MenuItem Header="_Re-pair"
+                                                  Command="{Binding PlacementTarget.Tag.RePairAgentCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                  ToolTip="Rotate the right-clicked agent's current authenticated pairing secret"/>
+                                        <MenuItem Header="Re_voke pairing"
+                                                  Command="{Binding PlacementTarget.Tag.RevokeAgentPairingCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                  ToolTip="Revoke protected reconnect access for the right-clicked agent without deleting evidence"/>
+                                    </MenuItem>
+                                </ContextMenu>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </DataGrid.RowStyle>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Agent" Binding="{Binding DisplayName}" Width="120"/>
+                    <DataGridTextColumn Header="ID" Binding="{Binding AgentId}" Width="70"/>
+                    <DataGridTextColumn Header="Host" Binding="{Binding HostId}" Width="110"/>
+                     <DataGridTextColumn Header="Transport" Binding="{Binding TransportKindDisplay}" Width="110"/>
+                     <DataGridTextColumn Header="Endpoint" Binding="{Binding Endpoint}" Width="120"/>
+                     <DataGridTextColumn Header="RAM" Binding="{Binding AgentMemoryLimitDisplay}" Width="70"/>
+                     <DataGridTextColumn Header="Viewer" Binding="{Binding ViewerConnectionDisplay}" Width="105"/>
+                     <DataGridTextColumn Header="Pairing" Binding="{Binding PairingStateDisplay}" Width="105"/>
+                     <DataGridTextColumn Header="Deployment" Binding="{Binding DeploymentStateDisplay}" Width="95"/>
+                    <DataGridTextColumn Header="Saved config" Binding="{Binding CaptureConfigurationDisplay}" Width="135"/>
+                    <DataGridTextColumn Header="Runtime" Binding="{Binding OperationalCaptureStateDisplay}" Width="85"/>
+                    <DataGridTextColumn Header="Health" Binding="{Binding HealthSummary}" Width="180"/>
+                    <DataGridTextColumn Header="Checked" Binding="{Binding LastCheckDisplay}" Width="130"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+
+        <ScrollViewer Grid.Row="3"
+                      Margin="0,6,0,0"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      DataContext="{Binding SelectedAgent}"
+                      Visibility="{Binding DataContext.HasSelectedAgent, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVisibilityConverter}}">
+            <Border Padding="6"
+                    Background="#FFFFFFFF"
+                    BorderBrush="#FFD8D8D8"
+                    BorderThickness="1">
+                <StackPanel>
+                <TextBlock Text="{Binding DisplayName}"
+                           FontWeight="SemiBold"
+                           Margin="0,0,0,4"/>
+                <TextBox Foreground="#555555"
+                         IsReadOnly="True"
+                         IsTabStop="False"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         TextWrapping="Wrap">
+                    <TextBox.Text>
+                        <MultiBinding Mode="OneWay" StringFormat="ID {0}; {1}; {2}; {3}">
+                            <Binding Path="AgentId" Mode="OneWay"/>
+                            <Binding Path="ViewerConnectionDisplay" Mode="OneWay"/>
+                            <Binding Path="DeploymentStateDisplay" Mode="OneWay"/>
+                            <Binding Path="OperationalCaptureStateDisplay" Mode="OneWay"/>
+                        </MultiBinding>
+                    </TextBox.Text>
+                </TextBox>
+                <TextBlock Text="Live control"
+                           FontWeight="SemiBold"
+                           Margin="0,8,0,4"/>
+                <WrapPanel Margin="0,0,0,5">
+                    <Button Content="Start Agent"
+                            Command="{Binding DataContext.DeployAgentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            Padding="8,2"
+                            Margin="0,0,4,0"
+                            ToolTip="Configure, start or safely reuse, connect, and optionally begin capture for this exact local agent"/>
+                    <Button Content="Terminate Agent"
+                            Command="{Binding DataContext.StopAgentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            Padding="8,2"
+                            Margin="0,0,4,0"
+                            Visibility="{Binding IsTerminationConfirmationPending, Converter={StaticResource InverseBoolToVisibilityConverter}}"
+                            ToolTip="Gracefully shut down only the selected, verified local agent"/>
+                    <Button Content="Cancel Termination"
+                            Command="{Binding DataContext.CancelStopAgentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            Padding="8,2"
+                            Margin="0,0,4,0"
+                            Visibility="{Binding IsTerminationConfirmationPending, Converter={StaticResource BoolToVisibilityConverter}}"
+                            ToolTip="Disarm termination without sending a shutdown request"/>
+                    <Button Content="Confirm Terminate"
+                            Command="{Binding DataContext.ConfirmStopAgentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            Padding="8,2"
+                            Margin="0,0,4,0"
+                            FontWeight="SemiBold"
+                            Foreground="#FF8B0000"
+                            BorderBrush="#FF8B0000"
+                            Visibility="{Binding IsTerminationConfirmationPending, Converter={StaticResource BoolToVisibilityConverter}}"
+                            ToolTip="Revalidate this exact connected local agent, then request graceful shutdown and only the existing verified process fallback"/>
+                    <Button Content="{Binding ConfiguredCapturePrimaryActionLabel}"
+                            Command="{Binding DataContext.StartAgentConfiguredCaptureCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            ToolTip="{Binding OperationalCaptureDetail}"
+                            Padding="8,2"
+                            Margin="0,0,4,0"/>
+                    <Button Content="Pause Capture"
+                            Command="{Binding DataContext.PauseAgentConfiguredCaptureCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            ToolTip="{Binding OperationalCaptureDetail}"
+                            Padding="8,2"
+                            Margin="0,0,4,0"/>
+                    <Button Content="Refresh from db"
+                            Command="{Binding DataContext.RefreshViewFromStagingCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Padding="8,2"
+                            Margin="0,0,4,0"/>
+                    <Button Content="Agent health"
+                            Command="{Binding DataContext.ShowAgentHealthCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            Padding="8,2"
+                            Margin="0,0,4,0"/>
+                </WrapPanel>
+                <TextBlock Text="Termination is armed only for this selected Agent. Confirm Terminate rechecks the authenticated session and exact process identity before shutdown; Cancel sends nothing."
+                           Foreground="#FF8B0000"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,5"
+                           Visibility="{Binding IsTerminationConfirmationPending, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                <TextBox Text="{Binding HealthSummary, Mode=OneWay}"
+                         FontWeight="SemiBold"
+                         IsReadOnly="True"
+                         IsTabStop="False"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         TextWrapping="Wrap"/>
+                <TextBox IsReadOnly="True"
+                         IsTabStop="False"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         TextWrapping="Wrap"
+                         Foreground="#555555"
+                         Margin="0,2,0,0">
+                    <TextBox.Text>
+                        <MultiBinding Mode="OneWay" StringFormat="Pairing: {0}; generation {1}; expires {2}. {3}">
+                            <Binding Path="PairingStateDisplay"/>
+                            <Binding Path="PairingGeneration"/>
+                            <Binding Path="PairingExpiryDisplay"/>
+                            <Binding Path="PairingStatus"/>
+                        </MultiBinding>
+                    </TextBox.Text>
+                </TextBox>
+                <TextBox Text="{Binding OperationalCaptureDetail, Mode=OneWay}"
+                         Foreground="#555555"
+                         IsReadOnly="True"
+                         IsTabStop="False"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         TextWrapping="Wrap"
+                         Margin="0,2,0,0"/>
+                <DataGrid ItemsSource="{Binding CaptureOptions}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          FontSize="11"
+                          MaxHeight="190"
+                          Margin="0,8,0,4">
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow">
+                            <Setter Property="Visibility"
+                                    Value="{Binding IsPublished, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                        </Style>
+                    </DataGrid.RowStyle>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Capture type" Binding="{Binding DisplayName}" Width="150"/>
+                        <DataGridTextColumn Header="Saved configuration" Binding="{Binding ConfigurationDisplay}" Width="115"/>
+                        <DataGridTextColumn Header="Runtime status" Binding="{Binding StatusText}" Width="*"/>
+                        <DataGridTextColumn Header="Evidence items" Binding="{Binding CountDisplay}" Width="90"/>
+                        <DataGridTemplateColumn Header="Start action" Width="92">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Button Content="Start"
+                                            Command="{Binding DataContext.StartAgentCaptureOptionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            IsEnabled="{Binding CanStart}"
+                                            Padding="6,1"
+                                            ToolTip="{Binding Description}"/>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="Stop action" Width="92">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Button Content="Stop"
+                                            Command="{Binding DataContext.StopAgentCaptureOptionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            IsEnabled="{Binding CanStop}"
+                                            Padding="6,1"
+                                            ToolTip="{Binding Description}"/>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <StackPanel Visibility="{Binding DataContext.FeaturePublication.EventTelemetry, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Margin="0,8,0,4">
+                    <TextBlock Text="Event capture tools"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,4"/>
+                    <Grid Margin="0,0,0,5">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="260"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="ETW profile"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0"/>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding DataContext.EtwCaptureProfiles, RelativeSource={RelativeSource AncestorType=Window}}"
+                                  SelectedItem="{Binding DataContext.SelectedEtwCaptureProfile, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
+                                  DisplayMemberPath="DisplayName"
+                                  IsEnabled="{Binding DataContext.HasEtwCaptureProfiles, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                    </Grid>
+                    <WrapPanel>
+                        <Button Content="Select Process Monitor executable..."
+                                Command="{Binding DataContext.SelectProcessMonitorExecutableCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Padding="8,2"
+                                Margin="0,0,4,0"
+                                ToolTip="{Binding DataContext.ProcessMonitorExecutablePath, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                        <Button Content="Import Process Monitor output..."
+                                Command="{Binding DataContext.QueueProcessMonitorImportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Padding="8,2"
+                                Margin="0,0,4,0"/>
+                    </WrapPanel>
+                </StackPanel>
+                <TextBlock Text="Host monitoring configuration"
+                           FontWeight="SemiBold"
+                           Visibility="{Binding DataContext.FeaturePublication.SecurityMonitoringConfiguration, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}"
+                           Margin="0,8,0,4"/>
+                <WrapPanel Margin="0,0,0,5"
+                           Visibility="{Binding DataContext.FeaturePublication.SecurityMonitoringConfiguration, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Button Content="Check Monitoring"
+                            IsEnabled="{Binding DataContext.IsAgentViewerConnected, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Command="{Binding DataContext.CheckAgentMonitoringConfigurationCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            Padding="8,2"
+                            Margin="0,0,4,0"/>
+                    <Button Content="Configure Monitoring"
+                            IsEnabled="{Binding DataContext.IsAgentViewerConnected, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Command="{Binding DataContext.ConfigureAgentMonitoringCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            Padding="8,2"
+                            Margin="0,0,4,0"/>
+                    <Button Content="Revert to original config"
+                            Command="{Binding DataContext.ReverseAgentMonitoringDeploymentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            Padding="8,2"
+                            Margin="0,0,4,0"/>
+                </WrapPanel>
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

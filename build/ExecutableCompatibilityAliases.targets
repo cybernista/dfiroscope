@@ -1,0 +1,41 @@
+<Project>
+  <!--
+    Keep the former build-output names as explicit transition aliases. The copied
+    apphosts still launch the primary DFIRoscope assembly embedded by the SDK,
+    while the managed aliases preserve `dotnet <legacy-name>.dll` automation.
+  -->
+  <Target Name="CreateLegacyExecutableCompatibilityAliases"
+          AfterTargets="Build"
+          Condition="'$(LegacyAssemblyName)' != ''">
+    <ItemGroup>
+      <_LegacyExecutableAlias Include="$(TargetDir)$(AssemblyName).exe"
+                              Condition="Exists('$(TargetDir)$(AssemblyName).exe')">
+        <DestinationPath>$(TargetDir)$(LegacyAssemblyName).exe</DestinationPath>
+      </_LegacyExecutableAlias>
+      <_LegacyExecutableAlias Include="$(TargetDir)$(AssemblyName).dll"
+                              Condition="Exists('$(TargetDir)$(AssemblyName).dll')">
+        <DestinationPath>$(TargetDir)$(LegacyAssemblyName).dll</DestinationPath>
+      </_LegacyExecutableAlias>
+      <_LegacyExecutableAlias Include="$(TargetDir)$(AssemblyName).deps.json"
+                              Condition="Exists('$(TargetDir)$(AssemblyName).deps.json')">
+        <DestinationPath>$(TargetDir)$(LegacyAssemblyName).deps.json</DestinationPath>
+      </_LegacyExecutableAlias>
+      <_LegacyExecutableAlias Include="$(TargetDir)$(AssemblyName).runtimeconfig.json"
+                              Condition="Exists('$(TargetDir)$(AssemblyName).runtimeconfig.json')">
+        <DestinationPath>$(TargetDir)$(LegacyAssemblyName).runtimeconfig.json</DestinationPath>
+      </_LegacyExecutableAlias>
+      <_LegacyExecutableAlias Include="$(TargetDir)$(AssemblyName).pdb"
+                              Condition="Exists('$(TargetDir)$(AssemblyName).pdb')">
+        <DestinationPath>$(TargetDir)$(LegacyAssemblyName).pdb</DestinationPath>
+      </_LegacyExecutableAlias>
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_LegacyExecutableAlias)"
+          DestinationFiles="@(_LegacyExecutableAlias->'%(DestinationPath)')"
+          SkipUnchangedFiles="true" />
+
+    <ItemGroup>
+      <FileWrites Include="@(_LegacyExecutableAlias->'%(DestinationPath)')" />
+    </ItemGroup>
+  </Target>
+</Project>

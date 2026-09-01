@@ -1,0 +1,22 @@
+<Project>
+  <!-- Shared by all projects: notices follow ordinary build and publish outputs. -->
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../NOTICE" Link="NOTICE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../TRADEMARKS.md" Link="TRADEMARKS.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/Apache-2.0-SQLitePCLRaw.txt" Link="licenses/Apache-2.0-SQLitePCLRaw.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/BSD-3-Clause-YARA-X.txt" Link="licenses/BSD-3-Clause-YARA-X.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/MIT-CommunityToolkit.txt" Link="licenses/MIT-CommunityToolkit.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/MIT-dotnet.txt" Link="licenses/MIT-dotnet.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/MIT-TraceEvent.txt" Link="licenses/MIT-TraceEvent.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/PostgreSQL-Npgsql.txt" Link="licenses/PostgreSQL-Npgsql.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/Public-Domain-SQLite.txt" Link="licenses/Public-Domain-SQLite.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/ThirdPartyNotices-CommunityToolkit.txt" Link="licenses/ThirdPartyNotices-CommunityToolkit.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/ThirdPartyNotices-dotnet-10.txt" Link="licenses/ThirdPartyNotices-dotnet-10.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/ThirdPartyNotices-dotnet-6.txt" Link="licenses/ThirdPartyNotices-dotnet-6.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/ThirdPartyNotices-dotnet-9.txt" Link="licenses/ThirdPartyNotices-dotnet-9.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/ThirdPartyNotices-dotnet-core-3.txt" Link="licenses/ThirdPartyNotices-dotnet-core-3.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildThisFileDirectory)../licenses/components.json" Link="licenses/components.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

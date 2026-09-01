@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <AssemblyName>DFIRoscope.Core</AssemblyName>
+    <RootNamespace>ProcInsider</RootNamespace>
+    <AssemblyTitle>DFIRoscope Live Core</AssemblyTitle>
+    <Product>DFIRoscope Live</Product>
+    <Description>Dependency-light evidence, agent wire, capture compatibility, and educational release policy for DFIRoscope Live.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="FeatureCatalogSelfTest" />
+  </ItemGroup>
+
+</Project>

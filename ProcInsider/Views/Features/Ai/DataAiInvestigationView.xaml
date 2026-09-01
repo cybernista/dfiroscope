@@ -1,0 +1,275 @@
+<UserControl x:Class="ProcInsider.Views.Features.Ai.DataAiInvestigationView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="2*"/>
+            <RowDefinition Height="2*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <GroupBox Grid.Row="0" Header="Provider Settings" Margin="0,0,0,5">
+            <Grid Margin="6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="190"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="170"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Provider" VerticalAlignment="Center" Margin="0,0,5,4"/>
+                <ComboBox Grid.Row="0" Grid.Column="1"
+                          ItemsSource="{Binding ProviderOptions}"
+                          SelectedItem="{Binding SelectedProviderOption, Mode=TwoWay}"
+                          DisplayMemberPath="DisplayName"
+                          Margin="0,0,10,4"
+                          ToolTip="{Binding SelectedProviderOption.Description}"/>
+                <TextBlock Grid.Row="0" Grid.Column="2" Text="Base URL" VerticalAlignment="Center" Margin="0,0,5,4"/>
+                <TextBox Grid.Row="0" Grid.Column="3"
+                         Text="{Binding BaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,10,4"
+                         ToolTip="OpenAI-compatible endpoint base URL, for example http://localhost:11434/v1"/>
+                <TextBlock Grid.Row="0" Grid.Column="4" Text="Model" VerticalAlignment="Center" Margin="0,0,5,4"/>
+                <TextBox Grid.Row="0" Grid.Column="5"
+                         Text="{Binding ModelName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,10,4"/>
+                <Button Grid.Row="0" Grid.Column="6"
+                        Content="Test"
+                        Command="{Binding TestConnectionCommand}"
+                        Padding="10,3"
+                        Margin="0,0,0,4"/>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="API key" VerticalAlignment="Center" Margin="0,0,5,4"/>
+                <TextBox Grid.Row="1" Grid.Column="1"
+                         Text="{Binding NewApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,10,4"
+                         ToolTip="New or replacement API key/token. Saved with Windows DPAPI; leave blank to keep the existing key."/>
+                <TextBlock Grid.Row="1" Grid.Column="2" Text="Timeout" VerticalAlignment="Center" Margin="0,0,5,4"/>
+                <TextBox Grid.Row="1" Grid.Column="3"
+                         Text="{Binding TimeoutSeconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Width="70"
+                         HorizontalAlignment="Left"
+                         Margin="0,0,10,4"/>
+                <TextBlock Grid.Row="1" Grid.Column="4" Text="Max response" VerticalAlignment="Center" Margin="0,0,5,4"/>
+                <TextBox Grid.Row="1" Grid.Column="5"
+                         Text="{Binding MaxResponseCharacters, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Width="90"
+                         HorizontalAlignment="Left"
+                         Margin="0,0,10,4"/>
+                <Button Grid.Row="1" Grid.Column="6"
+                        Content="Save"
+                        Command="{Binding SaveSettingsCommand}"
+                        Padding="10,3"
+                        Margin="0,0,0,4"/>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Max context" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                <TextBox Grid.Row="2" Grid.Column="1"
+                         Text="{Binding MaxContextCharacters, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Width="90"
+                         HorizontalAlignment="Left"
+                         Margin="0,0,10,0"/>
+                <TextBlock Grid.Row="2" Grid.Column="2"
+                           Grid.ColumnSpan="4"
+                           Text="{Binding ProviderStatusDisplay}"
+                           VerticalAlignment="Center"
+                           Foreground="#555555"
+                           TextWrapping="Wrap"/>
+                <Button Grid.Row="2" Grid.Column="6"
+                        Content="Clear Key"
+                        Command="{Binding ClearApiKeyCommand}"
+                        Padding="10,3"/>
+            </Grid>
+        </GroupBox>
+
+        <Border Grid.Row="1"
+                Background="#FFFFF6DF"
+                BorderBrush="#FFE0B95C"
+                BorderThickness="1"
+                Padding="6"
+                Margin="0,0,0,5"
+                Visibility="{Binding IsCloudProvider, Converter={StaticResource BoolToVisibilityConverter}}">
+            <TextBlock Text="{Binding PrivacyWarning}" TextWrapping="Wrap" Foreground="#664400"/>
+        </Border>
+
+        <Grid Grid.Row="2" Margin="0,0,0,5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="260"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="3*"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="2*"/>
+            </Grid.ColumnDefinitions>
+
+            <GroupBox Grid.Column="0" Header="Evidence Sources">
+                <DockPanel Margin="6">
+                    <Button DockPanel.Dock="Bottom"
+                            Content="Refresh Preview"
+                            Command="{Binding RefreshEvidencePreviewCommand}"
+                            Padding="8,3"
+                            Margin="0,6,0,0"/>
+                    <TextBlock DockPanel.Dock="Bottom"
+                               Text="{Binding EvidenceSummary}"
+                               TextWrapping="Wrap"
+                               Foreground="#555555"
+                               Margin="0,6,0,0"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding EvidenceSourceOptions}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox Content="{Binding DisplayName}"
+                                              IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                              ToolTip="{Binding Description}"
+                                              Margin="0,0,0,4"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </GroupBox>
+
+            <GridSplitter Grid.Column="1"
+                          Width="6"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Stretch"
+                          Background="#CCCCCC"
+                          Cursor="SizeWE"
+                          ShowsPreview="True"/>
+
+            <GroupBox Grid.Column="2" Header="Prompt">
+                <Grid Margin="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,5">
+                        <Button DockPanel.Dock="Left"
+                                Content="Investigate"
+                                Command="{Binding RunInvestigationCommand}"
+                                Padding="12,4"
+                                Margin="0,0,6,0"/>
+                        <Button DockPanel.Dock="Left"
+                                Content="Cancel"
+                                Command="{Binding CancelInvestigationCommand}"
+                                Padding="10,4"
+                                Margin="0,0,6,0"/>
+                        <ComboBox DockPanel.Dock="Left"
+                                  ItemsSource="{Binding PromptTemplates}"
+                                  SelectedItem="{Binding SelectedPromptTemplate, Mode=TwoWay}"
+                                  DisplayMemberPath="Title"
+                                  Width="210"
+                                  Margin="0,0,6,0"/>
+                        <TextBlock Text="{Binding CurrentTargetDisplay}"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </DockPanel>
+                    <TextBox Grid.Row="1"
+                             Text="{Binding AnalystPromptSuffix, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             FontFamily="Consolas"
+                             FontSize="11"/>
+                </Grid>
+            </GroupBox>
+
+            <GridSplitter Grid.Column="3"
+                          Width="6"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Stretch"
+                          Background="#CCCCCC"
+                          Cursor="SizeWE"
+                          ShowsPreview="True"/>
+
+            <GroupBox Grid.Column="4" Header="Evidence Preview">
+                <TextBox Text="{Binding EvidencePreview, Mode=OneWay}"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         AcceptsReturn="True"
+                         VerticalScrollBarVisibility="Auto"
+                         FontFamily="Consolas"
+                         FontSize="11"
+                         Margin="6"/>
+            </GroupBox>
+        </Grid>
+
+        <Grid Grid.Row="3" Margin="0,0,0,5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="2*"/>
+            </Grid.ColumnDefinitions>
+
+            <GroupBox Grid.Column="0" Header="Output">
+                <TextBox Text="{Binding ResponseText, Mode=OneWay}"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         AcceptsReturn="True"
+                         VerticalScrollBarVisibility="Auto"
+                         FontFamily="Consolas"
+                         FontSize="12"
+                         Margin="6"/>
+            </GroupBox>
+
+            <GridSplitter Grid.Column="1"
+                          Width="6"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Stretch"
+                          Background="#CCCCCC"
+                          Cursor="SizeWE"
+                          ShowsPreview="True"/>
+
+            <GroupBox Grid.Column="2" Header="Saved Outputs">
+                <DataGrid ItemsSource="{Binding InvestigationHistory}"
+                          SelectedItem="{Binding SelectedInvestigation, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          Margin="6"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Requested" Binding="{Binding RequestedDisplay}" Width="135" SortMemberPath="RequestedUtc"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="105" SortMemberPath="Status"/>
+                        <DataGridTextColumn Header="Provider" Binding="{Binding ProviderDisplay}" Width="180" SortMemberPath="ProviderName"/>
+                        <DataGridTextColumn Header="Preview" Binding="{Binding ResponsePreview}" Width="*" SortMemberPath="ResponsePreview">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding ResponsePreview}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </GroupBox>
+        </Grid>
+
+        <DockPanel Grid.Row="4">
+            <ProgressBar DockPanel.Dock="Left"
+                         Width="100"
+                         Height="16"
+                         IsIndeterminate="{Binding IsBusy}"
+                         Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"
+                         Margin="0,0,8,0"/>
+            <TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+        </DockPanel>
+    </Grid>
+</UserControl>

@@ -1,0 +1,68 @@
+<UserControl x:Class="ProcInsider.Features.Infrastructure.InfrastructureCaseWorkspaceDataView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             MinWidth="400"
+             MinHeight="220">
+    <Grid Margin="6">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="180"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <ComboBox Grid.Column="0" ItemsSource="{Binding QueryKinds}" SelectedItem="{Binding SelectedQueryKind}" AutomationProperties.Name="Infrastructure query kind"/>
+            <TextBox Grid.Column="1" Margin="6,0,0,0" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" ToolTip="Bounded Server search text" AutomationProperties.Name="Infrastructure search text"/>
+            <TextBox Grid.Column="2" Margin="6,0,0,0" Text="{Binding FilterExpression, UpdateSourceTrigger=PropertyChanged}" ToolTip="Bounded Server filter expression" AutomationProperties.Name="Infrastructure filter expression"/>
+            <Button Grid.Column="3" Margin="6,0,0,0" Content="Run query" Command="{Binding RunQueryCommand}" Padding="10,4"/>
+            <Button Grid.Column="4" Margin="6,0,0,0" Content="Next page" Command="{Binding QueryNextPageCommand}" Padding="10,4"/>
+        </Grid>
+
+        <DataGrid Grid.Row="1"
+                  ItemsSource="{Binding Rows}"
+                  SelectedItem="{Binding SelectedRow}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  EnableRowVirtualization="True"
+                  EnableColumnVirtualization="True"
+                  VirtualizingPanel.IsVirtualizing="True"
+                  VirtualizingPanel.VirtualizationMode="Recycling"
+                  AutomationProperties.Name="Infrastructure case query results">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="120"/>
+                <DataGridTextColumn Header="Host" Binding="{Binding HostId}" Width="130"/>
+                <DataGridTextColumn Header="Agent" Binding="{Binding AgentId}" Width="130"/>
+                <DataGridTextColumn Header="Capture" Binding="{Binding CaptureId}" Width="130"/>
+                <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="70"/>
+                <DataGridTextColumn Header="Name / identity" Binding="{Binding DisplayName}" Width="180"/>
+                <DataGridTextColumn Header="Clock uncertainty" Binding="{Binding ClockUncertaintyDisplay}" Width="115"/>
+                <DataGridTextColumn Header="Relationship" Binding="{Binding RelationshipDisplay}" Width="135"/>
+                <DataGridTextColumn Header="Risk" Binding="{Binding RiskDisplay}" Width="70"/>
+                <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="130"/>
+                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="110"/>
+                <DataGridTextColumn Header="Native UTC" Binding="{Binding NativeTimestampDisplay}" Width="190"/>
+                <DataGridTextColumn Header="Server receipt UTC" Binding="{Binding ServerReceiptTimeDisplay}" Width="190"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <Grid Grid.Row="2" Margin="0,6,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="130"/>
+                <ColumnDefinition Width="160"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <ComboBox Grid.Column="0" ItemsSource="{Binding AnnotationKinds}" SelectedItem="{Binding SelectedAnnotationKind}" AutomationProperties.Name="Infrastructure annotation kind"/>
+            <TextBox Grid.Column="1" Margin="6,0,0,0" Text="{Binding AnnotationId, UpdateSourceTrigger=PropertyChanged}" ToolTip="Stable annotation ID" AutomationProperties.Name="Infrastructure annotation ID"/>
+            <TextBox Grid.Column="2" Margin="6,0,0,0" Text="{Binding AnnotationBodyJson, UpdateSourceTrigger=PropertyChanged}" ToolTip="Bounded annotation JSON" AutomationProperties.Name="Infrastructure annotation JSON"/>
+            <Button Grid.Column="3" Margin="6,0,0,0" Content="Save annotation" Command="{Binding SaveAnnotationCommand}" Padding="10,4"/>
+        </Grid>
+    </Grid>
+</UserControl>

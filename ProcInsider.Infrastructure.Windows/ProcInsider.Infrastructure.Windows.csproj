@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <AssemblyName>DFIRoscope.Infrastructure.Windows</AssemblyName>
+    <RootNamespace>ProcInsider</RootNamespace>
+    <AssemblyTitle>DFIRoscope Live Windows Infrastructure</AssemblyTitle>
+    <Product>DFIRoscope Live</Product>
+    <Description>Headless shared Windows infrastructure for DFIRoscope Live.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\DirectoryCompatibilityMigration.cs" Link="Compatibility\DirectoryCompatibilityMigration.cs" />
+    <Compile Include="..\Shared\EnvironmentVariableCompatibility.cs" Link="Compatibility\EnvironmentVariableCompatibility.cs" />
+    <InternalsVisibleTo Include="DFIRoscope.Live" />
+    <InternalsVisibleTo Include="DFIRoscope.VmFunctionalTest" />
+    <InternalsVisibleTo Include="AgentConfigurationSelfTest" />
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
+    <PackageReference Include="System.Diagnostics.EventLog" />
+    <PackageReference Include="System.Management" />
+    <ProjectReference Include="..\ProcInsider.Core\ProcInsider.Core.csproj" />
+  </ItemGroup>
+
+</Project>

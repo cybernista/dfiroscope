@@ -1,0 +1,325 @@
+{
+  "schemaVersion": 1,
+  "description": "Reviewed NuGet package versions from committed lock files; notices may cover a superset of a release payload. Text hashes use UTF-8 with LF line endings.",
+  "packages": [
+    {
+      "id": "CommunityToolkit.Mvvm",
+      "version": "8.4.0",
+      "license": "MIT",
+      "copyright": "(c) .NET Foundation and Contributors. All rights reserved.",
+      "licenseFile": "licenses/MIT-CommunityToolkit.txt",
+      "noticeFiles": [
+        "licenses/ThirdPartyNotices-CommunityToolkit.txt"
+      ],
+      "packageUrl": "https://www.nuget.org/packages/CommunityToolkit.Mvvm/8.4.0",
+      "repository": "https://github.com/CommunityToolkit/dotnet",
+      "repositoryCommit": "638b41dad30dffabb123a39aa38eabc7e3721371"
+    },
+    {
+      "id": "Microsoft.Data.Sqlite.Core",
+      "version": "10.0.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [],
+      "packageUrl": "https://www.nuget.org/packages/Microsoft.Data.Sqlite.Core/10.0.0",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa"
+    },
+    {
+      "id": "Microsoft.Data.Sqlite",
+      "version": "10.0.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [],
+      "packageUrl": "https://www.nuget.org/packages/Microsoft.Data.Sqlite/10.0.0",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa"
+    },
+    {
+      "id": "Microsoft.Diagnostics.NETCore.Client",
+      "version": "0.2.510501",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [],
+      "packageUrl": "https://www.nuget.org/packages/Microsoft.Diagnostics.NETCore.Client/0.2.510501",
+      "repository": "https://github.com/dotnet/diagnostics",
+      "repositoryCommit": "8c08c89a0643d31db91e119b1adb463be3e0ffe5"
+    },
+    {
+      "id": "Microsoft.Diagnostics.Tracing.TraceEvent",
+      "version": "3.2.3",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-TraceEvent.txt",
+      "noticeFiles": [],
+      "packageUrl": "https://www.nuget.org/packages/Microsoft.Diagnostics.Tracing.TraceEvent/3.2.3",
+      "repository": "",
+      "repositoryCommit": ""
+    },
+    {
+      "id": "Microsoft.Extensions.DependencyInjection.Abstractions",
+      "version": "10.0.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [
+        "licenses/ThirdPartyNotices-dotnet-10.txt"
+      ],
+      "packageUrl": "https://www.nuget.org/packages/Microsoft.Extensions.DependencyInjection.Abstractions/10.0.0",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa"
+    },
+    {
+      "id": "Microsoft.Extensions.DependencyInjection",
+      "version": "6.0.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [
+        "licenses/ThirdPartyNotices-dotnet-6.txt"
+      ],
+      "packageUrl": "https://www.nuget.org/packages/Microsoft.Extensions.DependencyInjection/6.0.0",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "4822e3c3aa77eb82b2fb33c9321f923cf11ddde6"
+    },
+    {
+      "id": "Microsoft.Extensions.Logging.Abstractions",
+      "version": "10.0.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [
+        "licenses/ThirdPartyNotices-dotnet-10.txt"
+      ],
+      "packageUrl": "https://www.nuget.org/packages/Microsoft.Extensions.Logging.Abstractions/10.0.0",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa"
+    },
+    {
+      "id": "Microsoft.Extensions.Logging",
+      "version": "6.0.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [
+        "licenses/ThirdPartyNotices-dotnet-6.txt"
+      ],
+      "packageUrl": "https://www.nuget.org/packages/Microsoft.Extensions.Logging/6.0.0",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "4822e3c3aa77eb82b2fb33c9321f923cf11ddde6"
+    },
+    {
+      "id": "Microsoft.Extensions.Options",
+      "version": "6.0.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [
+        "licenses/ThirdPartyNotices-dotnet-6.txt"
+      ],
+      "packageUrl": "https://www.nuget.org/packages/Microsoft.Extensions.Options/6.0.0",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "4822e3c3aa77eb82b2fb33c9321f923cf11ddde6"
+    },
+    {
+      "id": "Microsoft.Extensions.Primitives",
+      "version": "6.0.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [
+        "licenses/ThirdPartyNotices-dotnet-6.txt"
+      ],
+      "packageUrl": "https://www.nuget.org/packages/Microsoft.Extensions.Primitives/6.0.0",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "4822e3c3aa77eb82b2fb33c9321f923cf11ddde6"
+    },
+    {
+      "id": "Npgsql",
+      "version": "10.0.3",
+      "license": "PostgreSQL",
+      "copyright": "Copyright 2025 © The Npgsql Development Team",
+      "licenseFile": "licenses/PostgreSQL-Npgsql.txt",
+      "noticeFiles": [],
+      "packageUrl": "https://www.nuget.org/packages/Npgsql/10.0.3",
+      "repository": "https://github.com/npgsql/npgsql",
+      "repositoryCommit": "d3768398c17877b3a916c3c4d87e8e11698991fc"
+    },
+    {
+      "id": "SourceGear.sqlite3",
+      "version": "3.53.4",
+      "license": "LicenseRef-SQLite-Public-Domain",
+      "copyright": "Copyright 2014-2026 SourceGear, LLC",
+      "licenseFile": "licenses/Public-Domain-SQLite.txt",
+      "noticeFiles": [],
+      "packageUrl": "https://www.nuget.org/packages/SourceGear.sqlite3/3.53.4",
+      "repository": "",
+      "repositoryCommit": ""
+    },
+    {
+      "id": "SQLitePCLRaw.bundle_e_sqlite3",
+      "version": "3.0.3",
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2014-2026 SourceGear, LLC",
+      "licenseFile": "licenses/Apache-2.0-SQLitePCLRaw.txt",
+      "noticeFiles": [],
+      "packageUrl": "https://www.nuget.org/packages/SQLitePCLRaw.bundle_e_sqlite3/3.0.3",
+      "repository": "https://github.com/ericsink/SQLitePCL.raw",
+      "repositoryCommit": ""
+    },
+    {
+      "id": "SQLitePCLRaw.config.e_sqlite3",
+      "version": "3.0.3",
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2014-2026 SourceGear, LLC",
+      "licenseFile": "licenses/Apache-2.0-SQLitePCLRaw.txt",
+      "noticeFiles": [],
+      "packageUrl": "https://www.nuget.org/packages/SQLitePCLRaw.config.e_sqlite3/3.0.3",
+      "repository": "https://github.com/ericsink/SQLitePCL.raw",
+      "repositoryCommit": "96043b8cff323f21919df86a431c136655d81b4a"
+    },
+    {
+      "id": "SQLitePCLRaw.core",
+      "version": "3.0.3",
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2014-2025 SourceGear, LLC",
+      "licenseFile": "licenses/Apache-2.0-SQLitePCLRaw.txt",
+      "noticeFiles": [],
+      "packageUrl": "https://www.nuget.org/packages/SQLitePCLRaw.core/3.0.3",
+      "repository": "https://github.com/ericsink/SQLitePCL.raw",
+      "repositoryCommit": "f3f967adafad853375597a6387cacb7573c5b343"
+    },
+    {
+      "id": "SQLitePCLRaw.provider.e_sqlite3",
+      "version": "3.0.3",
+      "license": "Apache-2.0",
+      "copyright": "Copyright 2014-2025 SourceGear, LLC",
+      "licenseFile": "licenses/Apache-2.0-SQLitePCLRaw.txt",
+      "noticeFiles": [],
+      "packageUrl": "https://www.nuget.org/packages/SQLitePCLRaw.provider.e_sqlite3/3.0.3",
+      "repository": "https://github.com/ericsink/SQLitePCL.raw",
+      "repositoryCommit": "f3f967adafad853375597a6387cacb7573c5b343"
+    },
+    {
+      "id": "System.CodeDom",
+      "version": "9.0.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [
+        "licenses/ThirdPartyNotices-dotnet-9.txt"
+      ],
+      "packageUrl": "https://www.nuget.org/packages/System.CodeDom/9.0.0",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
+    },
+    {
+      "id": "System.Diagnostics.EventLog",
+      "version": "10.0.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [
+        "licenses/ThirdPartyNotices-dotnet-10.txt"
+      ],
+      "packageUrl": "https://www.nuget.org/packages/System.Diagnostics.EventLog/10.0.0",
+      "repository": "https://github.com/dotnet/dotnet",
+      "repositoryCommit": "b0f34d51fccc69fd334253924abd8d6853fad7aa"
+    },
+    {
+      "id": "System.Management",
+      "version": "9.0.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [
+        "licenses/ThirdPartyNotices-dotnet-9.txt"
+      ],
+      "packageUrl": "https://www.nuget.org/packages/System.Management/9.0.0",
+      "repository": "https://github.com/dotnet/runtime",
+      "repositoryCommit": "9d5a6a9aa463d6d10b0b0ba6d5982cc82f363dc3"
+    },
+    {
+      "id": "System.Reflection.TypeExtensions",
+      "version": "4.7.0",
+      "license": "MIT",
+      "copyright": "© Microsoft Corporation. All rights reserved.",
+      "licenseFile": "licenses/MIT-dotnet.txt",
+      "noticeFiles": [
+        "licenses/ThirdPartyNotices-dotnet-core-3.txt"
+      ],
+      "packageUrl": "https://www.nuget.org/packages/System.Reflection.TypeExtensions/4.7.0",
+      "repository": "",
+      "repositoryCommit": ""
+    }
+  ],
+  "files": [
+    {
+      "path": "LICENSE",
+      "textSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "NOTICE",
+      "textSha256": "92a5ace8bcb58bd9cf88151a78f9c4d90849353ae8068b17c3c965d8ddda0880"
+    },
+    {
+      "path": "TRADEMARKS.md",
+      "textSha256": "1c8024d37f36ffab0dd03bdc8b3413b7c7d9fbf7e1efc183a5d559a165918fb1"
+    },
+    {
+      "path": "THIRD-PARTY-NOTICES.md",
+      "textSha256": "f861cc920527045c6c6afcfb1adcdf9224a93231d1c581427c1c1fd6a5d20851"
+    },
+    {
+      "path": "licenses/Apache-2.0-SQLitePCLRaw.txt",
+      "textSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "licenses/BSD-3-Clause-YARA-X.txt",
+      "textSha256": "fdf05444c9178e662fa28810d94a1fa6ec32d7be798241c98094213317265880"
+    },
+    {
+      "path": "licenses/MIT-CommunityToolkit.txt",
+      "textSha256": "1e1101b893f295b4526da2c167e4234610f1078e2fe43a0e814c1a883656877b"
+    },
+    {
+      "path": "licenses/MIT-dotnet.txt",
+      "textSha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310"
+    },
+    {
+      "path": "licenses/MIT-TraceEvent.txt",
+      "textSha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310"
+    },
+    {
+      "path": "licenses/PostgreSQL-Npgsql.txt",
+      "textSha256": "2e1d9cc6ed4eb7fe6fa82091846c06b4f58571a2c3b54777db6baeca10dd2d74"
+    },
+    {
+      "path": "licenses/Public-Domain-SQLite.txt",
+      "textSha256": "99464c3a88df7b708ce59e462cdcb85f72dfc9b1335b4fcc68be56131b634b95"
+    },
+    {
+      "path": "licenses/ThirdPartyNotices-CommunityToolkit.txt",
+      "textSha256": "79498b27081bbec29c504798c727761e0898963259fb7421ea587a758e803ed3"
+    },
+    {
+      "path": "licenses/ThirdPartyNotices-dotnet-10.txt",
+      "textSha256": "66f1d4e44973185519bb4aa8a9718eb22fc7af2cc532e3ae9cfc4c127ee7fc54"
+    },
+    {
+      "path": "licenses/ThirdPartyNotices-dotnet-6.txt",
+      "textSha256": "df255d595f29db06c6d462ceb7c04b33d627e98ac2f1745e1f1fb9f08eaaecb0"
+    },
+    {
+      "path": "licenses/ThirdPartyNotices-dotnet-9.txt",
+      "textSha256": "fa3e9d0a2c52476f04fe798d7dc4f6e7edb7b68a3d2f4d5f59a39bce957eedc8"
+    },
+    {
+      "path": "licenses/ThirdPartyNotices-dotnet-core-3.txt",
+      "textSha256": "c5859ea3599a4fab9ab4d490b8e342fbc1ecd009bd73421c94eecaec3f8e87e5"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+<UserControl x:Class="ProcInsider.Features.Infrastructure.InfrastructureCaseWorkspaceView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             MinWidth="210">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="8">
+            <TextBlock Text="Infrastructure case" FontSize="15" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding ModeDisplay}" Margin="0,3,0,0" FontWeight="SemiBold" Foreground="#006A8E" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding ActiveScopeDisplay}" Margin="0,3,0,0" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding RevisionDisplay}" Margin="0,3,0,0" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding RevisionFreshnessDisplay}" Margin="0,3,0,0" Foreground="#555555" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding AvailableRevisionDisplay}" Margin="0,4,0,0" Foreground="#9A6700" TextWrapping="Wrap"/>
+
+            <TextBlock Text="Authorized case inventory" Margin="0,10,0,2" FontWeight="SemiBold"/>
+            <TreeView ItemsSource="{Binding ScopeTree}" MaxHeight="170" AutomationProperties.Name="Infrastructure authorized case inventory">
+                <TreeView.ItemContainerStyle>
+                    <Style TargetType="TreeViewItem">
+                        <Setter Property="IsExpanded" Value="True"/>
+                    </Style>
+                </TreeView.ItemContainerStyle>
+                <TreeView.ItemTemplate>
+                    <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding DisplayText}"/>
+                            <TextBlock Text="{Binding RelationshipState}" Margin="5,0,0,0" Foreground="#9A6700" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </HierarchicalDataTemplate>
+                </TreeView.ItemTemplate>
+            </TreeView>
+
+            <TextBlock Text="Case ID" Margin="0,10,0,2" FontWeight="SemiBold"/>
+            <TextBox Text="{Binding CaseId, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Infrastructure case ID"/>
+            <TextBlock Text="Host ID" Margin="0,7,0,2" FontWeight="SemiBold"/>
+            <TextBox Text="{Binding HostId, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Infrastructure host ID"/>
+            <TextBlock Text="Agent ID" Margin="0,7,0,2" FontWeight="SemiBold"/>
+            <TextBox Text="{Binding AgentId, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Infrastructure agent ID"/>
+            <TextBlock Text="Capture ID" Margin="0,7,0,2" FontWeight="SemiBold"/>
+            <TextBox Text="{Binding CaptureId, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Infrastructure capture ID"/>
+            <TextBlock Text="Source run ID" Margin="0,7,0,2" FontWeight="SemiBold"/>
+            <TextBox Text="{Binding SourceRunId, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Infrastructure source run ID"/>
+            <TextBlock Text="Process entity ID" Margin="0,7,0,2" FontWeight="SemiBold"/>
+            <TextBox Text="{Binding ProcessEntityId, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Infrastructure process entity ID"/>
+
+            <Button Content="Open case" Command="{Binding OpenCaseCommand}" Padding="10,5" Margin="0,10,0,0" AutomationProperties.HelpText="Validate this Server case before replacing the current workspace."/>
+            <Button Content="Refresh from Server" Command="{Binding RefreshFromServerCommand}" Padding="10,5" Margin="0,6,0,0" AutomationProperties.HelpText="Validate a newer immutable revision before replacing the active revision."/>
+            <Button Content="Detach" Command="{Binding DetachCommand}" Padding="10,5" Margin="0,6,0,0" AutomationProperties.HelpText="Clear the Server workspace without opening a local fallback."/>
+
+            <TextBlock Text="Results and annotations are shown in Data → Infrastructure Case."
+                       Margin="0,10,0,0" TextWrapping="Wrap" Foreground="#555555"/>
+            <TextBlock Text="{Binding ErrorCode}" Margin="0,8,0,0" Foreground="#C62828" FontWeight="SemiBold" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding StatusMessage}" Margin="0,3,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

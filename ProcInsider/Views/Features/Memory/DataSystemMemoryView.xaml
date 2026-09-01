@@ -1,0 +1,195 @@
+<UserControl x:Class="ProcInsider.Views.Features.Memory.DataSystemMemoryView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="5">
+            <Button Content="Refresh Memory"
+                    Command="{Binding RefreshMemoryInvestigationCommand}"
+                    Padding="10,3" Margin="0,0,10,0"/>
+            <Button Content="Import Image"
+                    Command="{Binding DataContext.QueueMemoryImageImportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="10,3" Margin="0,0,10,0"/>
+            <Button Content="Run Volatility"
+                    Command="{Binding DataContext.QueueSelectedMemoryImageVolatilityAnalysisCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="10,3" Margin="0,0,10,0"/>
+            <TextBlock Text="{Binding StatusMessage}"
+                       VerticalAlignment="Center"
+                       TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <TabControl Grid.Row="1" Margin="5">
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding MemoryImages.Count, StringFormat='Images ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding MemoryImagesView}"
+                          SelectedItem="{Binding SelectedMemoryImage, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          Margin="0,5,0,0"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Imported" Binding="{Binding ImportedDisplay}" Width="135" SortMemberPath="ImportedUtc"/>
+                        <DataGridTextColumn Header="Name" Binding="{Binding DisplayName}" Width="170" SortMemberPath="DisplayName"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="90" SortMemberPath="Status"/>
+                        <DataGridTextColumn Header="Format" Binding="{Binding ImageFormat}" Width="80" SortMemberPath="ImageFormat"/>
+                        <DataGridTextColumn Header="Size" Binding="{Binding FileSizeDisplay}" Width="90" SortMemberPath="FileSizeBytes"/>
+                        <DataGridTextColumn Header="Host" Binding="{Binding HostName}" Width="130" SortMemberPath="HostName"/>
+                        <DataGridTextColumn Header="Path" Binding="{Binding FilePath}" Width="320" SortMemberPath="FilePath">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding FilePath}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="SHA256" Binding="{Binding Sha256Hash}" Width="220" SortMemberPath="Sha256Hash">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding Sha256Hash}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                    <Setter Property="FontFamily" Value="Consolas"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Error" Binding="{Binding ErrorMessage}" Width="240" SortMemberPath="ErrorMessage">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding ErrorMessage}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding PluginRuns.Count, StringFormat='Volatility Runs ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding PluginRunsView}"
+                          SelectedItem="{Binding SelectedPluginRun, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          Margin="0,5,0,0"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Requested" Binding="{Binding RequestedDisplay}" Width="135" SortMemberPath="RequestedUtc"/>
+                        <DataGridTextColumn Header="Plugin" Binding="{Binding PluginName}" Width="160" SortMemberPath="PluginName"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="90" SortMemberPath="Status"/>
+                        <DataGridTextColumn Header="Rows" Binding="{Binding NormalizedRowCount}" Width="70" SortMemberPath="NormalizedRowCount"/>
+                        <DataGridTextColumn Header="Output" Binding="{Binding StdoutPath}" Width="300" SortMemberPath="StdoutPath">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding StdoutPath}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Command" Binding="{Binding CommandLine}" Width="360" SortMemberPath="CommandLine">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding CommandLine}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Error" Binding="{Binding ErrorMessage}" Width="260" SortMemberPath="ErrorMessage">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding ErrorMessage}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding MemoryProcesses.Count, StringFormat='Memory Processes ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding MemoryProcessesView}"
+                          SelectedItem="{Binding SelectedMemoryProcess, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True"
+                          Margin="0,5,0,0"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Plugin" Binding="{Binding PluginName}" Width="145" SortMemberPath="PluginName"/>
+                        <DataGridTextColumn Header="Evidence" Binding="{Binding EvidenceKind}" Width="80" SortMemberPath="EvidenceKind"/>
+                        <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="70" SortMemberPath="ProcessId"/>
+                        <DataGridTextColumn Header="PPID" Binding="{Binding ParentProcessId}" Width="70" SortMemberPath="ParentProcessId"/>
+                        <DataGridTextColumn Header="Name" Binding="{Binding ProcessName}" Width="150" SortMemberPath="ProcessName"/>
+                        <DataGridTextColumn Header="Correlation" Binding="{Binding CorrelationState}" Width="110" SortMemberPath="CorrelationState"/>
+                        <DataGridTextColumn Header="Process Key" Binding="{Binding ProcessKey}" Width="190" SortMemberPath="ProcessKey"/>
+                        <DataGridTextColumn Header="Created" Binding="{Binding CreateTimeDisplay}" Width="135" SortMemberPath="CreateTimeDisplay"/>
+                        <DataGridTextColumn Header="Path" Binding="{Binding ImagePath}" Width="260" SortMemberPath="ImagePath">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding ImagePath}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Command Line" Binding="{Binding CommandLine}" Width="340" SortMemberPath="CommandLine">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding CommandLine}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+        </TabControl>
+
+        <TextBlock Grid.Row="2" Margin="5,0,5,5">
+            <Run Text="Images: "/>
+            <Run Text="{Binding MemoryImages.Count, Mode=OneWay}" FontWeight="Bold"/>
+            <Run Text="  Volatility runs: "/>
+            <Run Text="{Binding PluginRuns.Count, Mode=OneWay}" FontWeight="Bold"/>
+            <Run Text="  Memory processes: "/>
+            <Run Text="{Binding MemoryProcesses.Count, Mode=OneWay}" FontWeight="Bold"/>
+        </TextBlock>
+    </Grid>
+</UserControl>

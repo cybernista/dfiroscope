@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Sysmon broad selected-events configuration with known-good noise exclusions
+
+  Purpose:
+    Broad logging for the selected IR/SOC event families, excluding common known-good noise.
+    This avoids read-heavy telemetry and does not enable RawAccessRead.
+
+  Included event IDs:
+    1   ProcessCreate
+    3   NetworkConnect
+    7   ImageLoad
+    8   CreateRemoteThread
+    10  ProcessAccess
+    11  FileCreate
+    12  Registry object create/delete
+    13  Registry value set
+    14  Registry key/value rename
+    15  FileCreateStreamHash
+    17  Pipe created
+    18  Pipe connected
+    19  WMI filter
+    20  WMI consumer
+    21  WMI binding
+    22  DNSQuery
+    25  ProcessTampering
+    26  FileDeleteDetected - deletion logging without file archiving
+
+  Intentionally not included:
+    2   FileCreateTime
+    5   ProcessTerminate
+    6   DriverLoad
+    9   RawAccessRead - raw disk/volume read telemetry
+    23  FileDelete - archives deleted files; Event ID 26 is used instead
+    24  ClipboardChange
+    27-29 File blocking/executable detection
+
+  Filtering model:
+    The event filters below use onmatch="exclude".
+    - If an event matches one of the child rules, Sysmon suppresses it.
+    - If it does not match, Sysmon logs it.
+
+  Notes:
+    - Sysmon does not provide normal registry-read or filesystem-read events.
+    - RegistryEvent here covers create/delete/set/rename, not registry reads.
+    - Tune the exclusions after reviewing real event volume in your environment.
+-->
+<Sysmon schemaversion="4.90">
+  <HashAlgorithms>SHA256,IMPHASH</HashAlgorithms>
+  <CheckRevocation>true</CheckRevocation>
+  <DnsLookup>false</DnsLookup>
+
+  <EventFiltering>
+    <!-- Event ID 1: Process creation. Keep broad; only suppress very high-volume trusted updaters/helpers. -->
+    <ProcessCreate onmatch="exclude">
+      <Image condition="end with">\MicrosoftEdgeUpdate.exe</Image>
+      <Image condition="end with">\GoogleUpdate.exe</Image>
+      <Image condition="end with">\OneDriveStandaloneUpdater.exe</Image>
+      <Image condition="end with">\OfficeClickToRun.exe</Image>
+      <Image condition="end with">\TrustedInstaller.exe</Image>
+      <Image condition="end with">\TiWorker.exe</Image>
+      <CommandLine condition="contains">\Windows Defender\Definition Updates\</CommandLine>
+    </ProcessCreate>
+
+    <!-- Event ID 3: Network connection. Suppress localhost, link-local multicast, and browser/updater noise. -->
+    <NetworkConnect onmatch="exclude">
+      <DestinationIp condition="is">127.0.0.1</DestinationIp>
+      <DestinationIp condition="is">::1</DestinationIp>
+      <DestinationIp condition="begin with">224.</DestinationIp>
+      <DestinationIp condition="begin with">239.</DestinationIp>
+      <DestinationIp condition="begin with">ff02:</DestinationIp>
+      <DestinationIp condition="is">255.255.255.255</DestinationIp>
+      <DestinationHostname condition="is">localhost</DestinationHostname>
+      <DestinationPort condition="is">5353</DestinationPort>
+      <DestinationPort condition="is">5355</DestinationPort>
+      <DestinationPort condition="is">1900</DestinationPort>
+      <Image condition="end with">\MicrosoftEdgeUpdate.exe</Image>
+      <Image condition="end with">\GoogleUpdate.exe</Image>
+      <Image condition="end with">\OneDrive.exe</Image>
+      <Image condition="end with">\OneDriveStandaloneUpdater.exe</Image>
+      <Image condition="end with">\OfficeClickToRun.exe</Image>
+      <Image condition="end with">\Teams.exe</Image>
+      <Image condition="end with">\msedge.exe</Image>
+      <Image condition="end with">\chrome.exe</Image>
+      <Image condition="end with">\firefox.exe</Image>
+    </NetworkConnect>
+
+    <!-- Event ID 7: Image/DLL loaded. Very high volume; suppress common trusted OS/library locations. -->
+    <ImageLoad onmatch="exclude">
+      <ImageLoaded condition="begin with">C:\Windows\System32\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\Windows\SysWOW64\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\Windows\WinSxS\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\Windows\Microsoft.NET\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\Program Files\WindowsApps\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\Program Files\Windows Defender\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\ProgramData\Microsoft\Windows Defender\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\Program Files\Microsoft Office\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\Program Files\Microsoft\Edge\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\Program Files (x86)\Microsoft\Edge\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\Program Files\Google\Chrome\Application\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\Program Files (x86)\Google\Chrome\Application\</ImageLoaded>
+      <ImageLoaded condition="begin with">C:\Program Files\Mozilla Firefox\</ImageLoaded>
+    </ImageLoad>
+
+    <!-- Event ID 8: CreateRemoteThread. Keep broad; only suppress well-known Microsoft security tooling. -->
+    <CreateRemoteThread onmatch="exclude">
+      <SourceImage condition="end with">\MsMpEng.exe</SourceImage>
+      <SourceImage condition="end with">\NisSrv.exe</SourceImage>
+      <SourceImage condition="end with">\SenseIR.exe</SourceImage>
+      <SourceImage condition="end with">\SenseNdr.exe</SourceImage>
+    </CreateRemoteThread>
+
+    <!-- Event ID 10: ProcessAccess. Useful for injection and credential-theft hunting; suppress trusted noisy sources. -->
+    <ProcessAccess onmatch="exclude">
+      <SourceImage condition="end with">\MsMpEng.exe</SourceImage>
+      <SourceImage condition="end with">\NisSrv.exe</SourceImage>
+      <SourceImage condition="end with">\SenseIR.exe</SourceImage>
+      <SourceImage condition="end with">\SenseNdr.exe</SourceImage>
+      <SourceImage condition="end with">\Sysmon.exe</SourceImage>
+      <SourceImage condition="end with">\Sysmon64.exe</SourceImage>
+      <SourceImage condition="end with">\procmon.exe</SourceImage>
+      <SourceImage condition="end with">\procmon64.exe</SourceImage>
+      <SourceImage condition="end with">\procexp.exe</SourceImage>
+      <SourceImage condition="end with">\procexp64.exe</SourceImage>
+      <SourceImage condition="end with">\Taskmgr.exe</SourceImage>
+      <GrantedAccess condition="is">0x1000</GrantedAccess>
+      <GrantedAccess condition="is">0x1400</GrantedAccess>
+    </ProcessAccess>
+
+    <!-- Event ID 11: File created/overwritten. Suppress caches, update stores, and routine telemetry/log churn. -->
+    <FileCreate onmatch="exclude">
+      <TargetFilename condition="begin with">C:\Windows\Prefetch\</TargetFilename>
+      <TargetFilename condition="begin with">C:\Windows\SoftwareDistribution\Download\</TargetFilename>
+      <TargetFilename condition="begin with">C:\Windows\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\</TargetFilename>
+      <TargetFilename condition="begin with">C:\ProgramData\Microsoft\Windows Defender\Definition Updates\</TargetFilename>
+      <TargetFilename condition="begin with">C:\ProgramData\Microsoft\Windows Defender\Scans\</TargetFilename>
+      <TargetFilename condition="begin with">C:\ProgramData\Microsoft\Windows\WER\</TargetFilename>
+      <TargetFilename condition="begin with">C:\Windows\Logs\CBS\</TargetFilename>
+      <TargetFilename condition="begin with">C:\Windows\Logs\DISM\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Microsoft\Windows\INetCache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Microsoft\Windows\WebCache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Microsoft\Edge\User Data\Default\Cache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Microsoft\Edge\User Data\Default\Code Cache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Google\Chrome\User Data\Default\Cache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Google\Chrome\User Data\Default\Code Cache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Mozilla\Firefox\Profiles\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Packages\Microsoft.MicrosoftEdge_</TargetFilename>
+      <TargetFilename condition="end with">.etl</TargetFilename>
+      <TargetFilename condition="end with">.blf</TargetFilename>
+      <TargetFilename condition="end with">.regtrans-ms</TargetFilename>
+    </FileCreate>
+
+    <!-- Event IDs 12, 13, 14: Registry create/delete, value set, rename. Suppress MRU/cache churn, not persistence keys. -->
+    <RegistryEvent onmatch="exclude">
+      <TargetObject condition="contains">\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist\</TargetObject>
+      <TargetObject condition="contains">\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs\</TargetObject>
+      <TargetObject condition="contains">\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\</TargetObject>
+      <TargetObject condition="contains">\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU\</TargetObject>
+      <TargetObject condition="contains">\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\BagMRU\</TargetObject>
+      <TargetObject condition="contains">\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\Bags\</TargetObject>
+      <TargetObject condition="contains">\Software\Microsoft\Windows\ShellNoRoam\MUICache\</TargetObject>
+      <TargetObject condition="contains">\Software\Microsoft\Windows\CurrentVersion\Search\</TargetObject>
+      <TargetObject condition="contains">\Software\Microsoft\Office\16.0\Common\Experiment</TargetObject>
+      <TargetObject condition="contains">\Software\Microsoft\OneDrive\</TargetObject>
+      <Image condition="end with">\MsMpEng.exe</Image>
+      <Image condition="end with">\OfficeClickToRun.exe</Image>
+      <Image condition="end with">\OneDrive.exe</Image>
+    </RegistryEvent>
+
+    <!-- Event ID 15: Alternate data stream created/hash, e.g., Zone.Identifier. Keep broad. -->
+    <FileCreateStreamHash onmatch="exclude">
+      <TargetFilename condition="contains">\AppData\Local\Microsoft\Edge\User Data\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Google\Chrome\User Data\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Mozilla\Firefox\Profiles\</TargetFilename>
+    </FileCreateStreamHash>
+
+    <!-- Event IDs 17, 18: Named pipe created/connected. Suppress common Windows RPC/service pipes. -->
+    <PipeEvent onmatch="exclude">
+      <PipeName condition="is">\lsass</PipeName>
+      <PipeName condition="is">\samr</PipeName>
+      <PipeName condition="is">\netlogon</PipeName>
+      <PipeName condition="is">\ntsvcs</PipeName>
+      <PipeName condition="is">\scerpc</PipeName>
+      <PipeName condition="is">\wkssvc</PipeName>
+      <PipeName condition="is">\srvsvc</PipeName>
+      <PipeName condition="is">\spoolss</PipeName>
+      <PipeName condition="begin with">\Winsock2\CatalogChangeListener-</PipeName>
+      <PipeName condition="begin with">\mojo.</PipeName>
+      <PipeName condition="begin with">\crashpad_</PipeName>
+      <Image condition="end with">\chrome.exe</Image>
+      <Image condition="end with">\msedge.exe</Image>
+      <Image condition="end with">\Teams.exe</Image>
+    </PipeEvent>
+
+    <!-- Event IDs 19, 20, 21: WMI persistence objects. Keep broad. -->
+    <WmiEvent onmatch="exclude" />
+
+    <!-- Event ID 22: DNS query. Suppress localhost/reverse lookups and common Microsoft/update/PKI noise. -->
+    <DnsQuery onmatch="exclude">
+      <QueryName condition="is">localhost</QueryName>
+      <QueryName condition="is">wpad</QueryName>
+      <QueryName condition="end with">.local</QueryName>
+      <QueryName condition="end with">.in-addr.arpa</QueryName>
+      <QueryName condition="end with">.ip6.arpa</QueryName>
+      <QueryName condition="end with">.microsoft.com</QueryName>
+      <QueryName condition="end with">.windows.com</QueryName>
+      <QueryName condition="end with">.windowsupdate.com</QueryName>
+      <QueryName condition="end with">.msftconnecttest.com</QueryName>
+      <QueryName condition="end with">.msedge.net</QueryName>
+      <QueryName condition="end with">.office.com</QueryName>
+      <QueryName condition="end with">.office365.com</QueryName>
+      <QueryName condition="end with">.live.com</QueryName>
+      <QueryName condition="end with">.skype.com</QueryName>
+      <QueryName condition="end with">.teams.microsoft.com</QueryName>
+      <QueryName condition="end with">.trafficmanager.net</QueryName>
+      <QueryName condition="end with">.azureedge.net</QueryName>
+      <QueryName condition="end with">.akadns.net</QueryName>
+      <QueryName condition="end with">.akamaiedge.net</QueryName>
+      <QueryName condition="end with">.akadns6.net</QueryName>
+      <QueryName condition="end with">.digicert.com</QueryName>
+      <QueryName condition="end with">.msocsp.com</QueryName>
+      <QueryName condition="end with">.lencr.org</QueryName>
+      <QueryName condition="contains">ocsp</QueryName>
+      <QueryName condition="contains">crl</QueryName>
+      <Image condition="end with">\chrome.exe</Image>
+      <Image condition="end with">\msedge.exe</Image>
+      <Image condition="end with">\firefox.exe</Image>
+      <Image condition="end with">\Teams.exe</Image>
+      <Image condition="end with">\OneDrive.exe</Image>
+    </DnsQuery>
+
+    <!-- Event ID 25: Process tampering/hollowing/herpaderping. Keep broad. -->
+    <ProcessTampering onmatch="exclude" />
+
+    <!-- Event ID 26: File delete detected without archiving deleted files. Suppress cache/update/log deletion churn. -->
+    <FileDeleteDetected onmatch="exclude">
+      <TargetFilename condition="begin with">C:\Windows\Prefetch\</TargetFilename>
+      <TargetFilename condition="begin with">C:\Windows\SoftwareDistribution\Download\</TargetFilename>
+      <TargetFilename condition="begin with">C:\Windows\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\</TargetFilename>
+      <TargetFilename condition="begin with">C:\ProgramData\Microsoft\Windows Defender\Definition Updates\</TargetFilename>
+      <TargetFilename condition="begin with">C:\ProgramData\Microsoft\Windows Defender\Scans\</TargetFilename>
+      <TargetFilename condition="begin with">C:\ProgramData\Microsoft\Windows\WER\</TargetFilename>
+      <TargetFilename condition="begin with">C:\Windows\Logs\CBS\</TargetFilename>
+      <TargetFilename condition="begin with">C:\Windows\Logs\DISM\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Microsoft\Windows\INetCache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Microsoft\Windows\WebCache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Microsoft\Edge\User Data\Default\Cache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Microsoft\Edge\User Data\Default\Code Cache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Google\Chrome\User Data\Default\Cache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Google\Chrome\User Data\Default\Code Cache\</TargetFilename>
+      <TargetFilename condition="contains">\AppData\Local\Mozilla\Firefox\Profiles\</TargetFilename>
+      <TargetFilename condition="end with">.etl</TargetFilename>
+      <TargetFilename condition="end with">.blf</TargetFilename>
+      <TargetFilename condition="end with">.regtrans-ms</TargetFilename>
+    </FileDeleteDetected>
+  </EventFiltering>
+</Sysmon>

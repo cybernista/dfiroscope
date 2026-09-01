@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "procinsider-security-monitoring-baseline",
+      "kind": "SecurityMonitoring",
+      "displayName": "DFIRoscope Live Security Monitoring Baseline",
+      "description": "Agent-owned local malware-triage monitoring baseline for audit policy, event log sizing, PowerShell logging, and optional Sysmon configuration.",
+      "warning": "This profile is intentionally noisy and may capture sensitive command lines, PowerShell script contents, transcript contents, file activity, and registry writes.",
+      "filePath": "auditpol\\monitoring-audit-policy.json",
+      "isDefault": true
+    }
+  ]
+}

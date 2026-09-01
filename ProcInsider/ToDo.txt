@@ -1,0 +1,36 @@
+Handles are nor refreshed. Im mostly interested in mutexes.
+Add staging managment:
+  - Button to clear staging data
+  - Button to start live capture 
+  - Button to process data sources retrospectively and build the staging (event logs, process monitor captures, TCP dumps captures (future use). - maybe load button for each source. Default behaviour should be staging enrichment, but there should be clear and load option as well.
+  - There are already options to export and import - this hould be loading data to staging
+  
+ Live view managment:
+ 
+  - clear the data
+  - load from staging (refresh)
+  
+  
+After some time of runnign, refresh is taking very long time - improve it, check for bottlenecks. Establish maximu sensible staging capacity and stop caprutimg to staging. Possibly save current staging and start another one. After a longer time is freezing likely due to staging size. Maybe it would be worth to keep staging on the disk as sqlite database? There's more and more data that I'm including. SO staging would load to the sqlite on the disk and I would have detailed control what to load to the viewer.
+ 
+Change the view to the forensic  style - left, just expandabkle tree with the green button - endable and green button from the top level. Right object listing - in this case process listing. So if i select root tree , I will see all processes. Behaviour of green button like in forensic tools - Encase, FTK, xways.  So I should be able to select/deselect many trees or deselect some objects within selected tree.
+
+
+The new  top left shhould be tabbed and please create  explore tab, search and sigma. Explore would be for the tree of processes. Seacrh and sigma for well search and sigma - and when I select the process it should be displayed in the process tree, If I select other item, say dll, it should take me to the bottom screen to the specific DLL, and respective process should be also selected in the top-left window.
+
+Make search syntax more advanced - especially ability to exclude keywords. Make this basic "AND", "OR", "NOT" and brackets. I think probably searches scope would be per record. SO say it will return only a handle if keyword a and b is there, but no results if A is in handle and B is in dll.
+
+Sigma - make sure I can batch sigmas - entire folder with subfolder.
+
+Workout the way to load them without modifications - I'm looking to load SigmaHQ rules. Download SIgmaHQ rules to the project folder
+
+
+Ability to bookmark pocesses and related events/handles , etc and display bookmarked only.
+
+Ability do dump process memory (both procdump and memdump style)  - for the processes listed in the process view and display 2 additional tabs with procdump and memdump strings in the bottom left window (data window).
+
+For the Procdump dump and as well for the image on disk, I would like an ability to process PE headers in the way that PEstudio or PEframe works and display strings, imports, exports and other metadata.
+
+Naming convention for windows - tope left (Explorer window) , Top right(Listing window) , Bottom left (Data window), Bottom right(Details windows)
+
+I would like to add ability to run TCP dump at the time of capture and then run zeek for each segment wrom WSL ubuntu and enrich mata with zeek collection.

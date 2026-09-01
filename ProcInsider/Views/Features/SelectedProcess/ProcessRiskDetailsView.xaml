@@ -1,0 +1,125 @@
+<UserControl x:Class="ProcInsider.Views.Features.SelectedProcess.ProcessRiskDetailsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="2">
+            <Border Margin="0,0,0,6"
+                    Padding="8"
+                    Background="#FFFFFFFF"
+                    BorderBrush="#FFD8D8D8"
+                    BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="{Binding HeaderText}"
+                               FontWeight="SemiBold"
+                               FontSize="13"/>
+                    <TextBlock Text="{Binding StatusText}"
+                               Margin="0,4,0,0"
+                               TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding DiagnosticText}"
+                               Margin="0,4,0,0"
+                               Foreground="#FF6A4A00"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="Projection and identity"
+                       FontWeight="SemiBold"
+                       Margin="0,2,0,4"/>
+            <DataGrid ItemsSource="{Binding SummaryProperties}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      CanUserSortColumns="True"
+                      CanUserResizeColumns="True"
+                      MaxHeight="280"
+                      FontSize="11">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="90" SortMemberPath="Group"/>
+                    <DataGridTextColumn Header="Property" Binding="{Binding Name}" Width="135" SortMemberPath="Name"/>
+                    <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*" SortMemberPath="Value">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="TextWrapping" Value="Wrap"/>
+                                <Setter Property="ToolTip" Value="{Binding Value}"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <TextBlock Text="Source coverage and gaps"
+                       FontWeight="SemiBold"
+                       Margin="0,10,0,4"/>
+            <DataGrid ItemsSource="{Binding Sources}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      CanUserSortColumns="True"
+                      CanUserResizeColumns="True"
+                      MaxHeight="300"
+                      FontSize="11">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="130" SortMemberPath="Source"/>
+                    <DataGridTextColumn Header="Availability" Binding="{Binding Availability}" Width="120" SortMemberPath="Availability"/>
+                    <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence}" Width="75" SortMemberPath="Confidence"/>
+                    <DataGridTextColumn Header="Findings" Binding="{Binding Findings}" Width="60" SortMemberPath="Findings"/>
+                    <DataGridTextColumn Header="Signals" Binding="{Binding Signals}" Width="55" SortMemberPath="Signals"/>
+                    <DataGridTextColumn Header="Diagnostic" Binding="{Binding Diagnostic}" Width="*" SortMemberPath="Diagnostic">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="TextWrapping" Value="Wrap"/>
+                                <Setter Property="ToolTip" Value="{Binding Diagnostic}"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <TextBlock Text="Ordered evidence-backed contributors"
+                       FontWeight="SemiBold"
+                       Margin="0,10,0,4"/>
+            <TextBlock Text="No positive or negative score contributors were projected for this state."
+                       Foreground="#FF666666"
+                       TextWrapping="Wrap"
+                       Visibility="{Binding HasContributors, Converter={StaticResource InverseBoolToVisibilityConverter}}"/>
+            <DataGrid ItemsSource="{Binding Contributors}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      CanUserSortColumns="True"
+                      CanUserResizeColumns="True"
+                      MaxHeight="360"
+                      FontSize="11"
+                      Visibility="{Binding HasContributors, Converter={StaticResource BoolToVisibilityConverter}}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="#" Binding="{Binding Order}" Width="35" SortMemberPath="Order"/>
+                    <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="105" SortMemberPath="Source"/>
+                    <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="70" SortMemberPath="Severity"/>
+                    <DataGridTextColumn Header="Delta" Binding="{Binding ScoreDelta}" Width="50" SortMemberPath="ScoreDelta"/>
+                    <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence}" Width="75" SortMemberPath="Confidence"/>
+                    <DataGridTextColumn Header="Finding summary" Binding="{Binding Summary}" Width="2*" SortMemberPath="Summary">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="TextWrapping" Value="Wrap"/>
+                                <Setter Property="ToolTip" Value="{Binding Summary}"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Header="Exact evidence references" Binding="{Binding EvidenceReferences}" Width="2*" SortMemberPath="EvidenceReferences">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="TextWrapping" Value="Wrap"/>
+                                <Setter Property="FontFamily" Value="Consolas"/>
+                                <Setter Property="ToolTip" Value="{Binding EvidenceReferences}"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

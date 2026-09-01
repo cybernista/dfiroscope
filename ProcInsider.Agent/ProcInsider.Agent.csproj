@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <AssemblyName>DFIRoscope.Agent</AssemblyName>
+    <RootNamespace>ProcInsider.Agent</RootNamespace>
+    <AssemblyTitle>DFIRoscope Live Agent</AssemblyTitle>
+    <Product>DFIRoscope Live</Product>
+    <Description>Local evidence capture and analysis agent for DFIRoscope Live.</Description>
+    <LegacyAssemblyName>ProcInsider.Agent</LegacyAssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ProcInsider.Core\ProcInsider.Core.csproj" />
+    <ProjectReference Include="..\ProcInsider.Infrastructure.Windows\ProcInsider.Infrastructure.Windows.csproj" />
+  </ItemGroup>
+
+  <Target Name="EnforceAgentApplicationProjectBoundary" BeforeTargets="ResolveProjectReferences">
+    <ItemGroup>
+      <_ForbiddenAgentApplicationProjectReference
+        Include="@(ProjectReference)"
+        Condition="'%(ProjectReference.Filename)' == 'ProcInsider' Or '%(ProjectReference.Filename)' == 'DFIRoscope.Live'" />
+    </ItemGroup>
+    <Error
+      Condition="'@(_ForbiddenAgentApplicationProjectReference)' != ''"
+      Code="ARCH019"
+      Text="ARCH019 Agent application boundary: DFIRoscope.Agent must not reference the viewer project. Reference only DFIRoscope.Core and DFIRoscope.Infrastructure.Windows." />
+  </Target>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AgentConfigurationSelfTest" />
+    <InternalsVisibleTo Include="AgentServiceHostSelfTest" />
+    <InternalsVisibleTo Include="InfrastructureSessionProtocolSelfTest" />
+    <InternalsVisibleTo Include="InfrastructureHttp2CarrierSelfTest" />
+    <InternalsVisibleTo Include="InfrastructureVmIntegratedSelfTest" />
+    <InternalsVisibleTo Include="InfrastructureCommandRoutingSelfTest" />
+    <InternalsVisibleTo Include="InfrastructureEvidenceTransferSelfTest" />
+    <InternalsVisibleTo Include="InfrastructureEvidenceOutboxSelfTest" />
+    <InternalsVisibleTo Include="AgentInfrastructureRuntimeSelfTest" />
+    <InternalsVisibleTo Include="AgentYaraExecutionSelfTest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content
+      Include="..\ProcInsider\Config\**\*.*"
+      Exclude="..\ProcInsider\Config\ApplicationCatalog\catalog.index.json;..\ProcInsider\Config\ApplicationCatalog\Profiles\**\*.json;..\ProcInsider\Config\ApplicationCatalog\catalog-quality.v1.json;..\ProcInsider\Config\ApplicationCatalog\README.md"
+      LinkBase="Config"
+      CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Import Project="..\build\ExecutableCompatibilityAliases.targets" />
+
+</Project>

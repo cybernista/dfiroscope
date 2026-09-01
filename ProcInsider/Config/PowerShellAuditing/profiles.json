@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "procinsider-powershell-auditing-baseline",
+      "kind": "PowerShellAuditing",
+      "displayName": "DFIRoscope Live PowerShell Auditing Baseline",
+      "description": "Enables script block logging, module logging, and transcription to the configured transcript folder for Windows PowerShell and PowerShell Core policy roots.",
+      "warning": "PowerShell auditing can capture sensitive script contents, command text, and transcript output.",
+      "filePath": "README.md",
+      "isDefault": true
+    }
+  ]
+}

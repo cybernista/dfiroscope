@@ -1,0 +1,187 @@
+<UserControl x:Class="ProcInsider.HostMonitoringConfigurationControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="170"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <CheckBox Grid.Row="0"
+                      Grid.ColumnSpan="2"
+                      Content="Install or update Sysmon"
+                      IsChecked="{Binding InstallOrUpdateSysmon, Mode=TwoWay}"
+                      Margin="0,0,0,6"/>
+            <TextBlock Grid.Row="1"
+                       Grid.Column="0"
+                       Text="Sysmon profile"
+                       VerticalAlignment="Center"
+                       Margin="0,0,10,0"/>
+            <ComboBox Grid.Row="1"
+                      Grid.Column="1"
+                      ItemsSource="{Binding SysmonProfiles}"
+                      SelectedItem="{Binding SelectedSysmonProfile, Mode=TwoWay}"
+                      DisplayMemberPath="DisplayName"
+                      IsEnabled="{Binding HasSysmonProfiles}"
+                      MinWidth="320"/>
+        </Grid>
+
+        <Grid Grid.Row="1" Margin="0,0,0,8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="170"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <CheckBox Grid.Row="0"
+                      Grid.ColumnSpan="2"
+                      Content="Configure audit policy"
+                      IsChecked="{Binding ConfigureAuditPolicy, Mode=TwoWay}"
+                      Margin="0,0,0,6"/>
+            <CheckBox Grid.Row="1"
+                      Grid.ColumnSpan="2"
+                      Content="Enable process command-line logging"
+                      IsChecked="{Binding EnableProcessCommandLineLogging, Mode=TwoWay}"
+                      Margin="0,0,0,6"/>
+            <TextBlock Grid.Row="2"
+                       Grid.Column="0"
+                       Text="Audit policy profile"
+                       VerticalAlignment="Center"
+                       Margin="0,0,10,6"/>
+            <ComboBox Grid.Row="2"
+                      Grid.Column="1"
+                      ItemsSource="{Binding SecurityMonitoringProfiles}"
+                      SelectedItem="{Binding SelectedSecurityMonitoringProfile, Mode=TwoWay}"
+                      DisplayMemberPath="DisplayName"
+                      IsEnabled="{Binding HasSecurityMonitoringProfiles}"
+                      MinWidth="320"
+                      Margin="0,0,0,6"/>
+            <TextBlock Grid.Row="3"
+                       Grid.Column="0"
+                       Text="Event log profile"
+                       VerticalAlignment="Center"
+                       Margin="0,0,10,0"/>
+            <ComboBox Grid.Row="3"
+                      Grid.Column="1"
+                      ItemsSource="{Binding EventLogProfiles}"
+                      SelectedItem="{Binding SelectedEventLogProfile, Mode=TwoWay}"
+                      DisplayMemberPath="DisplayName"
+                      IsEnabled="{Binding HasEventLogProfiles}"
+                      MinWidth="320"/>
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,0,0,8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="170"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <CheckBox Grid.Row="0"
+                      Grid.ColumnSpan="2"
+                      Content="Configure event log channels"
+                      IsChecked="{Binding ConfigureEventLogChannels, Mode=TwoWay}"
+                      Margin="0,0,0,6"/>
+            <CheckBox Grid.Row="1"
+                      Grid.ColumnSpan="2"
+                      Content="Configure event log retention"
+                      IsChecked="{Binding ConfigureEventLogRetention, Mode=TwoWay}"
+                      Margin="0,0,0,6"/>
+            <CheckBox Grid.Row="2"
+                      Grid.ColumnSpan="2"
+                      Content="Script block logging"
+                      IsChecked="{Binding EnablePowerShellScriptBlockLogging, Mode=TwoWay}"
+                      Margin="0,0,0,6"/>
+            <CheckBox Grid.Row="3"
+                      Grid.ColumnSpan="2"
+                      Content="Module logging"
+                      IsChecked="{Binding EnablePowerShellModuleLogging, Mode=TwoWay}"
+                      Margin="0,0,0,6"/>
+            <CheckBox Grid.Row="4"
+                      Grid.ColumnSpan="2"
+                      Content="Transcription"
+                      IsChecked="{Binding EnablePowerShellTranscription, Mode=TwoWay}"
+                      Margin="0,0,0,6"/>
+            <Grid Grid.Row="5" Grid.ColumnSpan="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="170"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0"
+                           Text="PowerShell profile"
+                           VerticalAlignment="Center"
+                           Margin="0,0,10,0"/>
+                <ComboBox Grid.Column="1"
+                          ItemsSource="{Binding PowerShellAuditingProfiles}"
+                          SelectedItem="{Binding SelectedPowerShellAuditingProfile, Mode=TwoWay}"
+                          DisplayMemberPath="DisplayName"
+                          IsEnabled="{Binding HasPowerShellAuditingProfiles}"
+                          MinWidth="320"/>
+            </Grid>
+        </Grid>
+
+        <Grid Grid.Row="3">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="170"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <CheckBox Grid.Row="0"
+                      Grid.ColumnSpan="2"
+                      Content="Configure ETW profile"
+                      IsChecked="{Binding ConfigureEtwSession, Mode=TwoWay}"
+                      Margin="0,0,0,6"/>
+            <TextBlock Grid.Row="1"
+                       Grid.Column="0"
+                       Text="ETW profile"
+                       VerticalAlignment="Center"
+                       Margin="0,0,10,6"/>
+            <ComboBox Grid.Row="1"
+                      Grid.Column="1"
+                      ItemsSource="{Binding EtwProfiles}"
+                      SelectedItem="{Binding SelectedEtwProfile, Mode=TwoWay}"
+                      DisplayMemberPath="DisplayName"
+                      IsEnabled="{Binding HasEtwProfiles}"
+                      MinWidth="320"
+                      Margin="0,0,0,6"/>
+            <TextBlock Grid.Row="2"
+                       Grid.Column="0"
+                       Text="Transcript folder"
+                       VerticalAlignment="Center"
+                       Margin="0,0,10,0"/>
+            <TextBox Grid.Row="2"
+                     Grid.Column="1"
+                     Text="{Binding TranscriptDirectory, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     MinWidth="320"/>
+        </Grid>
+    </Grid>
+</UserControl>

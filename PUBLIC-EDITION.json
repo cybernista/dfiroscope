@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "editionId": "edu-2026.08-s1e1",
+  "editionLabel": "S1E1",
+  "publishedGroups": [
+    "agents-capture",
+    "process-listing",
+    "selected-process-details"
+  ]
+}

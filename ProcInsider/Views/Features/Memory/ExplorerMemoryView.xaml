@@ -1,0 +1,104 @@
+<UserControl x:Class="ProcInsider.Views.Features.Memory.ExplorerMemoryView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             DataContext="{Binding DataContext.MemoryInvestigationViewModel, RelativeSource={RelativeSource AncestorType=Window}}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <WrapPanel Grid.Row="0" Margin="0,0,0,4">
+            <Button Content="Refresh"
+                    Command="{Binding RefreshMemoryInvestigationCommand}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+            <Button Content="Dump System Memory"
+                    Command="{Binding DataContext.DumpSystemMemoryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+            <Button Content="Import Image"
+                    Command="{Binding DataContext.QueueMemoryImageImportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+            <Button Content="Run Volatility"
+                    Command="{Binding DataContext.QueueSelectedMemoryImageVolatilityAnalysisCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+        </WrapPanel>
+
+        <TabControl Grid.Row="1">
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding MemoryImages.Count, StringFormat='Images ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding MemoryImagesView}"
+                          SelectedItem="{Binding SelectedMemoryImage, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Name" Binding="{Binding DisplayName}" Width="140"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="80"/>
+                        <DataGridTextColumn Header="Size" Binding="{Binding FileSizeDisplay}" Width="85"/>
+                        <DataGridTextColumn Header="Path" Binding="{Binding FilePath}" Width="260"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding PluginRuns.Count, StringFormat='Volatility ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding PluginRunsView}"
+                          SelectedItem="{Binding SelectedPluginRun, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Plugin" Binding="{Binding PluginName}" Width="140"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="80"/>
+                        <DataGridTextColumn Header="Rows" Binding="{Binding NormalizedRowCount}" Width="60"/>
+                        <DataGridTextColumn Header="Error" Binding="{Binding ErrorMessage}" Width="220"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding MemoryProcesses.Count, StringFormat='Processes ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding MemoryProcessesView}"
+                          SelectedItem="{Binding SelectedMemoryProcess, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="55"/>
+                        <DataGridTextColumn Header="PPID" Binding="{Binding ParentProcessId}" Width="55"/>
+                        <DataGridTextColumn Header="Name" Binding="{Binding ProcessName}" Width="130"/>
+                        <DataGridTextColumn Header="Plugin" Binding="{Binding PluginName}" Width="120"/>
+                        <DataGridTextColumn Header="Correlation" Binding="{Binding CorrelationState}" Width="100"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+        </TabControl>
+
+        <TextBlock Grid.Row="2"
+                   Text="{Binding StatusMessage}"
+                   Padding="0,4,0,0"
+                   Foreground="#555555"
+                   TextWrapping="Wrap"/>
+    </Grid>
+</UserControl>

@@ -1,0 +1,156 @@
+<UserControl x:Class="ProcInsider.Views.Features.Network.ExplorerNetworkView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             DataContext="{Binding DataContext.NetworkCapturesViewModel, RelativeSource={RelativeSource AncestorType=Window}}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <WrapPanel Grid.Row="0" Margin="0,0,0,4">
+            <Button Content="Refresh"
+                    Command="{Binding RefreshNetworkCapturesCommand}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+            <Button Content="Start PCAP"
+                    Command="{Binding DataContext.StartNetworkCaptureCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+            <Button Content="Stop PCAP"
+                    Command="{Binding DataContext.StopNetworkCaptureCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+            <TextBlock Text="{Binding DataContext.NetworkCaptureStateDisplay, RelativeSource={RelativeSource AncestorType=Window}}"
+                       VerticalAlignment="Center"
+                       Margin="2,2,8,4"/>
+            <Button Content="Run Zeek"
+                    Command="{Binding DataContext.QueueSelectedZeekAnalysisCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+            <TextBlock Text="WSL"
+                       VerticalAlignment="Center"
+                       Margin="4,2,3,4"/>
+            <TextBox Width="86"
+                     Text="{Binding DataContext.ZeekWslDistributionName, RelativeSource={RelativeSource AncestorType=Window}, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="WSL distribution for Zeek, such as Ubuntu or Ubuntu-22.04"
+                     Margin="0,0,4,4"/>
+            <TextBlock Text="Zeek"
+                       VerticalAlignment="Center"
+                       Margin="0,2,3,4"/>
+            <TextBox Width="86"
+                     Text="{Binding DataContext.ZeekWslCommand, RelativeSource={RelativeSource AncestorType=Window}, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="Zeek command or absolute path inside WSL"
+                     Margin="0,0,4,4"/>
+            <Button Content="Open Process"
+                    Command="{Binding DataContext.OpenSelectedZeekProcessCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+            <Button Content="Open PCAP"
+                    Command="{Binding DataContext.OpenSelectedZeekPcapCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+            <Button Content="Copy Filter"
+                    Command="{Binding DataContext.CopySelectedZeekWiresharkFilterCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+            <Button Content="Export Flow"
+                    Command="{Binding DataContext.ExportSelectedZeekFlowPcapCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Padding="8,2"
+                    Margin="0,0,4,4"/>
+        </WrapPanel>
+
+        <TabControl Grid.Row="1">
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding NetworkCaptures.Count, StringFormat='PCAP ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding NetworkCapturesView}"
+                          SelectedItem="{Binding SelectedNetworkCapture, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          HorizontalScrollBarVisibility="Auto"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Requested" Binding="{Binding RequestedDisplay}" Width="120"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="80"/>
+                        <DataGridTextColumn Header="Size" Binding="{Binding FileSizeDisplay}" Width="70"/>
+                        <DataGridTextColumn Header="PCAPNG Path" Binding="{Binding FilePath}" Width="220">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding FilePath}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Error" Binding="{Binding ErrorMessage}" Width="180">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding ErrorMessage}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock Text="{Binding ZeekArtifacts.Count, StringFormat='Zeek ({0})'}"/>
+                </TabItem.Header>
+                <DataGrid ItemsSource="{Binding ZeekArtifactsView}"
+                          SelectedItem="{Binding SelectedZeekArtifact, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          SelectionMode="Single"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          HorizontalScrollBarVisibility="Auto"
+                          FontSize="11">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Time" Binding="{Binding TimestampDisplay}" Width="120"/>
+                        <DataGridTextColumn Header="Log" Binding="{Binding LogType}" Width="70"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="80"/>
+                        <DataGridTextColumn Header="Source" Binding="{Binding SourceEndpoint}" Width="130"/>
+                        <DataGridTextColumn Header="Destination" Binding="{Binding DestinationEndpoint}" Width="140"/>
+                        <DataGridTextColumn Header="Duration" Binding="{Binding DurationDisplay}" Width="80"/>
+                        <DataGridTextColumn Header="Sent" Binding="{Binding OrigBytesDisplay}" Width="80"/>
+                        <DataGridTextColumn Header="Received" Binding="{Binding RespBytesDisplay}" Width="80"/>
+                        <DataGridTextColumn Header="State" Binding="{Binding ConnectionState}" Width="70"/>
+                        <DataGridTextColumn Header="Server" Binding="{Binding ServerName}" Width="160">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding ServerName}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Summary" Binding="{Binding Summary}" Width="220">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="ToolTip" Value="{Binding Summary}"/>
+                                    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Process" Binding="{Binding ProcessName}" Width="120"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+        </TabControl>
+
+        <TextBlock Grid.Row="2"
+                   Text="{Binding StatusMessage}"
+                   Padding="0,4,0,0"
+                   Foreground="#555555"
+                   TextWrapping="Wrap"/>
+    </Grid>
+</UserControl>

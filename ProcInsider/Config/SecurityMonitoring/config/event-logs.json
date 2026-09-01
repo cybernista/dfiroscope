@@ -1,0 +1,88 @@
+[
+  {
+    "Name": "Security",
+    "SizeBytes": 2147483648,
+    "Enable": true
+  },
+  {
+    "Name": "Windows PowerShell",
+    "SizeBytes": 2147483648,
+    "Enable": true
+  },
+  {
+    "Name": "Microsoft-Windows-PowerShell/Operational",
+    "SizeBytes": 2147483648,
+    "Enable": true
+  },
+  {
+    "Name": "Microsoft-Windows-Sysmon/Operational",
+    "SizeBytes": 2147483648,
+    "Enable": true,
+    "Optional": true
+  },
+  {
+    "Name": "Microsoft-Windows-WMI-Activity/Operational",
+    "SizeBytes": 2147483648,
+    "Enable": true
+  },
+  {
+    "Name": "Microsoft-Windows-TaskScheduler/Operational",
+    "SizeBytes": 2147483648,
+    "Enable": true
+  },
+  {
+    "Name": "System",
+    "SizeBytes": 524288000,
+    "Enable": true
+  },
+  {
+    "Name": "Application",
+    "SizeBytes": 524288000,
+    "Enable": true
+  },
+  {
+    "Name": "Microsoft-Windows-Windows Defender/Operational",
+    "SizeBytes": 524288000,
+    "Enable": true
+  },
+  {
+    "Name": "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational",
+    "SizeBytes": 524288000,
+    "Enable": true
+  },
+  {
+    "Name": "Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational",
+    "SizeBytes": 524288000,
+    "Enable": true
+  },
+  {
+    "Name": "Microsoft-Windows-CodeIntegrity/Operational",
+    "SizeBytes": 524288000,
+    "Enable": true,
+    "Optional": true
+  },
+  {
+    "Name": "Microsoft-Windows-AppLocker/EXE and DLL",
+    "SizeBytes": 524288000,
+    "Enable": true,
+    "Optional": true
+  },
+  {
+    "Name": "Microsoft-Windows-AppLocker/MSI and Script",
+    "SizeBytes": 524288000,
+    "Enable": true,
+    "Optional": true
+  },
+  {
+    "Name": "Microsoft-Windows-AppLocker/Packaged app-Deployment",
+    "SizeBytes": 524288000,
+    "Enable": true,
+    "Optional": true
+  },
+  {
+    "Name": "Microsoft-Windows-AppLocker/Packaged app-Execution",
+    "SizeBytes": 524288000,
+    "Enable": true,
+    "Optional": true
+  }
+]

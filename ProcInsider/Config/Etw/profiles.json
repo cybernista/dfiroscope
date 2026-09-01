@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "procinsider-etw-balanced-default",
+      "kind": "Etw",
+      "displayName": "DFIRoscope Live ETW Balanced Default",
+      "description": "Default ETW provider and event mapping profile for process, image, file, registry, network, DNS, WMI, and optional threat-intelligence telemetry.",
+      "warning": "ETW capture can be high volume; tune provider enablement for the investigation machine.",
+      "filePath": "balanced-default.json",
+      "isDefault": true
+    },
+    {
+      "id": "procinsider-etw-process-network",
+      "kind": "Etw",
+      "displayName": "Process and Network Focused",
+      "description": "Lower-noise ETW profile focused on process lifecycle, image-load, network, DNS, and WMI activity.",
+      "warning": "Moderate ETW volume. File and registry providers are disabled to reduce investigation noise.",
+      "filePath": "process-network-focused.json",
+      "isDefault": false
+    },
+    {
+      "id": "procinsider-etw-high-volume-diagnostic",
+      "kind": "Etw",
+      "displayName": "High-Volume Diagnostic",
+      "description": "Verbose diagnostic ETW profile for broad process, image, file, registry, network, DNS, WMI, and threat-intelligence telemetry.",
+      "warning": "High ETW volume. Use only for short captures on systems where extra overhead and event volume are acceptable.",
+      "filePath": "high-volume-diagnostic.json",
+      "isDefault": false
+    }
+  ]
+}

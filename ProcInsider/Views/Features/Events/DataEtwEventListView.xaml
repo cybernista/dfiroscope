@@ -1,0 +1,84 @@
+<UserControl x:Class="ProcInsider.Views.Features.Events.DataEtwEventListView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="5">
+            <TextBlock Text="{Binding StatusMessage}"
+                       VerticalAlignment="Center"
+                       TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <DataGrid Grid.Row="1"
+                  ItemsSource="{Binding EventsView}"
+                  SelectedItem="{Binding SelectedEvent, Mode=TwoWay}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  SelectionMode="Single"
+                  EnableRowVirtualization="True"
+                  EnableColumnVirtualization="True"
+                  VirtualizingPanel.IsVirtualizing="True"
+                  VirtualizingPanel.VirtualizationMode="Recycling"
+                  GridLinesVisibility="Horizontal"
+                  HeadersVisibility="Column"
+                  CanUserReorderColumns="True"
+                  CanUserResizeColumns="True"
+                  CanUserSortColumns="True"
+                  Margin="5"
+                  FontSize="11">
+
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Time" Binding="{Binding TimeDisplay}" Width="145"
+                                    SortMemberPath="TimeDisplay">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="FontFamily" Value="Consolas"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+
+                <DataGridTextColumn Header="EventCode" Binding="{Binding EventCodeDisplay}" Width="85"
+                                    SortMemberPath="EventCodeDisplay"/>
+
+                <DataGridTextColumn Header="Action" Binding="{Binding ActionDisplay}" Width="120"
+                                    SortMemberPath="ActionDisplay"/>
+
+                <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="270"
+                                    SortMemberPath="Target">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="ToolTip" Value="{Binding Target}"/>
+                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+
+                <DataGridTextColumn Header="Summary" Binding="{Binding Summary}" Width="360"
+                                    SortMemberPath="Summary">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="ToolTip" Value="{Binding Details}"/>
+                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+
+                <DataGridTextColumn Header="Flags" Binding="{Binding RiskFlags}" Width="110"
+                                    SortMemberPath="RiskFlags"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <TextBlock Grid.Row="2" Margin="5,0,5,5">
+            <Run Text="Projected rows loaded: "/>
+            <Run Text="{Binding VisibleEventCount, Mode=OneWay}" FontWeight="Bold"/>
+            <Run Text=" | Source: "/>
+            <Run Text="{Binding EventSourceDisplayName, Mode=OneWay}" FontWeight="Bold"/>
+            <Run Text=" | Active SQLite projection"/>
+        </TextBlock>
+    </Grid>
+</UserControl>

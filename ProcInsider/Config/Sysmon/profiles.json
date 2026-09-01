@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "procinsider-sysmon-medium",
+      "kind": "Sysmon",
+      "displayName": "DFIRoscope Live Sysmon Medium",
+      "description": "Broad selected-event Sysmon telemetry with known-good noise exclusions for process, network, file, registry, DNS, WMI, and tampering events.",
+      "warning": "Applying this profile changes the local Sysmon configuration and may increase event volume.",
+      "filePath": "Procinsider.Sysmon.Medium.xml",
+      "isDefault": true
+    },
+    {
+      "id": "procinsider-sysmon-quiet",
+      "kind": "Sysmon",
+      "displayName": "DFIRoscope Live Sysmon Quiet",
+      "description": "Lower-volume Sysmon telemetry focused on core IR process, network, DNS, persistence, and sensitive-access events.",
+      "warning": "Applying this profile changes the local Sysmon configuration and can omit noisier diagnostic events.",
+      "filePath": "ProcInsider.Sysmon.Quiet.xml"
+    }
+  ]
+}

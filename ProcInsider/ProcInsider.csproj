@@ -1,0 +1,61 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\DFIRoscope.Live.ico</ApplicationIcon>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>DFIRoscope.Live</AssemblyName>
+    <RootNamespace>ProcInsider</RootNamespace>
+    <AssemblyTitle>DFIRoscope Live</AssemblyTitle>
+    <Product>DFIRoscope Live</Product>
+    <Description>Open-source Windows investigation and cybersecurity learning platform.</Description>
+    <LegacyAssemblyName>ProcInsider</LegacyAssemblyName>
+    <StartupObject>ProcInsider.Program</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ProcInsider.Core\ProcInsider.Core.csproj" />
+    <ProjectReference Include="..\ProcInsider.Infrastructure.Windows\ProcInsider.Infrastructure.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CaptureWorkspaceSelfTest" />
+    <InternalsVisibleTo Include="DFIRoscope.VmFunctionalTest" />
+    <InternalsVisibleTo Include="ViewerCliSelfTest" />
+    <InternalsVisibleTo Include="InfrastructureAgentRegistrySelfTest" />
+    <InternalsVisibleTo Include="InfrastructureViewerWorkspaceSelfTest" />
+    <InternalsVisibleTo Include="ApplicationCatalogSelfTest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\DFIRoscope.Live.ico" />
+    <None Update="Config\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Remove="Config\ApplicationCatalog\catalog.index.json" />
+    <None Remove="Config\ApplicationCatalog\Profiles\**\*.json" />
+    <None Remove="Config\ApplicationCatalog\catalog-quality.v1.json" />
+    <None Remove="Config\ApplicationCatalog\README.md" />
+    <Content Include="Sysmon\Procinsider.Sysmon.Medium.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Sysmon\ProcInsider.Sysmon.Quiet.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="dfiroscope.cmd">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>dfiroscope.cmd</TargetPath>
+    </Content>
+  </ItemGroup>
+
+  <Import Project="..\build\ExecutableCompatibilityAliases.targets" />
+
+</Project>
