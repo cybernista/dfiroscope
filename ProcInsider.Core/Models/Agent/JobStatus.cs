@@ -56,6 +56,25 @@ public enum CaptureHealth
 }
 
 /// <summary>
+/// Durable readiness of the current live-capture run's first complete runtime
+/// process inventory. Unknown = 0 lets a newer Viewer degrade safely when an
+/// older Agent omits this additive health field.
+/// </summary>
+public enum InitialProcessInventoryState
+{
+    Unknown = 0,
+
+    /// <summary>The configured capture does not collect runtime processes.</summary>
+    NotExpected = 1,
+
+    /// <summary>The Agent is collecting or committing the first full process snapshot.</summary>
+    Pending = 2,
+
+    /// <summary>The first full runtime process snapshot committed successfully.</summary>
+    Ready = 3,
+}
+
+/// <summary>
 /// Category of work a job performs.
 /// Unknown = 0 is intentional for forward-compatibility.
 /// </summary>

@@ -214,6 +214,12 @@ public sealed record CaptureHealthReport : AgentStatusMessage
     /// <summary>Cumulative process-write total for the current or most recently completed live-capture run.</summary>
     public long TotalProcessRecordsWritten { get; init; }
 
+    /// <summary>
+    /// Indicates whether the current or most recently completed live-capture run
+    /// has durably committed its first complete runtime process inventory.
+    /// </summary>
+    public InitialProcessInventoryState InitialProcessInventory { get; init; }
+
     /// <summary>Cumulative events dropped during the current or most recently completed run.</summary>
     public long TotalEventsDropped { get; init; }
 

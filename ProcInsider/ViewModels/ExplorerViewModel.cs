@@ -857,19 +857,8 @@ public partial class ExplorerViewModel : ViewModelBase
 
     private static string BuildEvidenceRootDescription(EvidenceRootSummary root)
     {
-        var parts = new[]
-        {
-            $"Case: {FormatId(root.CaseId)}",
-            $"Session: {FormatId(root.EvidenceSessionId)}",
-            $"Capture: {FormatId(root.CaptureId)}",
-            $"Source: {FormatId(root.SourceIdentityId)}",
-            $"Host: {FormatId(root.HostId)}",
-            $"Execution: {FormatId(root.ExecutionRootId)}",
-            $"Source runs: {root.SourceRunCount}",
-            $"Missing source-run links: {root.MissingSourceRunLinkCount}"
-        };
-
-        return string.Join("; ", parts);
+        ArgumentNullException.ThrowIfNull(root);
+        return "Processes grouped within this evidence scope.";
     }
 
     private static string ShortId(string value)
@@ -882,11 +871,6 @@ public partial class ExplorerViewModel : ViewModelBase
         return value.Length <= 18
             ? value
             : $"{value[..8]}...{value[^6..]}";
-    }
-
-    private static string FormatId(string value)
-    {
-        return string.IsNullOrWhiteSpace(value) ? "<default>" : value;
     }
 
     private static string? EmptyToNull(string value)

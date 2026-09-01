@@ -23,6 +23,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
     private readonly object _healthLock = new();
     private readonly object _activeCaptureLock = new();
     private readonly AgentLiveCaptureHealthTracker _sourceHealthTracker = new();
+    private readonly InitialProcessInventoryCommitState _initialProcessInventory = new();
     private readonly HashSet<string> _stoppedSources = new(StringComparer.OrdinalIgnoreCase);
     private CaptureHealthReport _health = new()
     {
@@ -81,6 +82,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             {
                 TotalEventsReceived = Interlocked.Read(ref _eventsReceived),
                 TotalProcessRecordsWritten = Interlocked.Read(ref _processRecordsWritten),
+                InitialProcessInventory = _initialProcessInventory.State,
                 TotalEventsDropped = Interlocked.Read(ref _eventsDropped),
                 TotalProcessRecordsDropped = Interlocked.Read(ref _processRecordsDropped),
                 EventBatchesDropped = Interlocked.Read(ref _eventBatchesDropped),
@@ -340,7 +342,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
     public async Task ExecuteAsync(AgentJobContext context)
     {
         var liveOptions = ReadLiveCaptureOptions(context.Request);
-        ResetCaptureCounters();
+        ResetCaptureCounters(liveOptions.CollectRuntimeEvents);
         Volatile.Write(ref _etwStoppedByUser, 0);
         var writeThrottle = new ProcessWriteThrottle(MaxPendingProcessWriteBatches);
         await using var eventBuffer = new AgentLiveEventBuffer(
@@ -589,10 +591,11 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             _log.WriteLine($"[{DateTimeOffset.Now:O}] Live process staging failed: {ex.Message}");
         }
 
-        void OnProcessWriteCompleted(IReadOnlyList<ProcessRecord> records)
+        void OnProcessWriteCompleted(IReadOnlyList<ProcessRecord> records, bool isFullSnapshot)
         {
             Interlocked.Add(ref _processRecordsWritten, records.Count);
             AddSourceRecordsWritten("Runtime", records.Count);
+            _initialProcessInventory.ObserveCommittedBatch(isFullSnapshot);
             ProcessRecordsPersisted?.Invoke(records);
         }
 
@@ -934,6 +937,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                 Detail = detail,
                 TotalEventsReceived = Interlocked.Read(ref _eventsReceived),
                 TotalProcessRecordsWritten = Interlocked.Read(ref _processRecordsWritten),
+                InitialProcessInventory = _initialProcessInventory.State,
                 TotalEventsDropped = Interlocked.Read(ref _eventsDropped),
                 TotalProcessRecordsDropped = Interlocked.Read(ref _processRecordsDropped),
                 EventBatchesDropped = Interlocked.Read(ref _eventBatchesDropped),
@@ -1338,7 +1342,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         return string.IsNullOrWhiteSpace(incoming) ? fallback : incoming;
     }
 
-    private void ResetCaptureCounters()
+    private void ResetCaptureCounters(bool initialProcessInventoryExpected)
     {
         Interlocked.Exchange(ref _eventsReceived, 0);
         Interlocked.Exchange(ref _eventsDropped, 0);
@@ -1352,6 +1356,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         Interlocked.Exchange(ref _processBatchesDropped, 0);
         Interlocked.Exchange(ref _eventWriteFailures, 0);
         Interlocked.Exchange(ref _processWriteFailures, 0);
+        _initialProcessInventory.BeginRun(initialProcessInventoryExpected);
 
         _sourceHealthTracker.BeginRun(DateTime.UtcNow);
 
@@ -1533,7 +1538,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         private readonly AgentStagingWriter _writer;
         private readonly ProcessWriteThrottle _writeThrottle;
         private readonly Action<long> _onQueuedRecordsChanged;
-        private readonly Action<IReadOnlyList<ProcessRecord>> _onWriteCompleted;
+        private readonly Action<IReadOnlyList<ProcessRecord>, bool> _onWriteCompleted;
         private readonly Action<IReadOnlyList<ProcessRecord>, Exception> _onWriteFailed;
         private readonly object _lock = new();
         private readonly Dictionary<string, ProcessObservation> _pendingDeltas = new(StringComparer.Ordinal);
@@ -1551,7 +1556,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             AgentStagingWriter writer,
             ProcessWriteThrottle writeThrottle,
             Action<long> onQueuedRecordsChanged,
-            Action<IReadOnlyList<ProcessRecord>> onWriteCompleted,
+            Action<IReadOnlyList<ProcessRecord>, bool> onWriteCompleted,
             Action<IReadOnlyList<ProcessRecord>, Exception> onWriteFailed)
         {
             _writer = writer;
@@ -1673,7 +1678,9 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                                 cancellationToken,
                                 AgentStagingWritePriority.High)
                             .ConfigureAwait(false);
-                        _onWriteCompleted(records.Observations.Select(observation => observation.Fields).ToList());
+                        _onWriteCompleted(
+                            records.Observations.Select(observation => observation.Fields).ToList(),
+                            records.IsFullSnapshot);
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
@@ -1725,7 +1732,11 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                     _pendingDeltas.Clear();
                     _pendingDeltaAliases.Clear();
                     _pendingDeltaStatistics.Clear();
-                    records = new ProcessObservationWriteBatch(observations, aliases, statistics);
+                    records = new ProcessObservationWriteBatch(
+                        observations,
+                        aliases,
+                        statistics,
+                        IsFullSnapshot: false);
                     return true;
                 }
 
@@ -1740,14 +1751,19 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                     _pendingFullSnapshot = null;
                     _pendingFullSnapshotAliases = null;
                     _pendingFullSnapshotStatistics = null;
-                    records = new ProcessObservationWriteBatch(observations, aliases, statistics);
+                    records = new ProcessObservationWriteBatch(
+                        observations,
+                        aliases,
+                        statistics,
+                        IsFullSnapshot: true);
                     return true;
                 }
 
                 records = new ProcessObservationWriteBatch(
                     Array.Empty<ProcessObservation>(),
                     Array.Empty<ProcessAlias>(),
-                    Array.Empty<ProcessStatisticsRecord>());
+                    Array.Empty<ProcessStatisticsRecord>(),
+                    IsFullSnapshot: false);
                 _drainScheduled = false;
                 return false;
             }
@@ -1802,7 +1818,8 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
     private sealed record ProcessObservationWriteBatch(
         IReadOnlyList<ProcessObservation> Observations,
         IReadOnlyList<ProcessAlias> Aliases,
-        IReadOnlyList<ProcessStatisticsRecord> Statistics);
+        IReadOnlyList<ProcessStatisticsRecord> Statistics,
+        bool IsFullSnapshot);
 
     /// <summary>
     /// Reassembles adapter-sized normalization batches before handing one whole
@@ -1890,4 +1907,29 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
     }
 
     private sealed record ProcessBatchSummary(int TotalKnownProcesses, int NewProcesses);
+}
+
+internal sealed class InitialProcessInventoryCommitState
+{
+    private int _state = (int)InitialProcessInventoryState.Unknown;
+
+    public InitialProcessInventoryState State =>
+        (InitialProcessInventoryState)Volatile.Read(ref _state);
+
+    public void BeginRun(bool isExpected)
+    {
+        Volatile.Write(
+            ref _state,
+            (int)(isExpected
+                ? InitialProcessInventoryState.Pending
+                : InitialProcessInventoryState.NotExpected));
+    }
+
+    public void ObserveCommittedBatch(bool isFullSnapshot)
+    {
+        if (isFullSnapshot && State == InitialProcessInventoryState.Pending)
+        {
+            Volatile.Write(ref _state, (int)InitialProcessInventoryState.Ready);
+        }
+    }
 }

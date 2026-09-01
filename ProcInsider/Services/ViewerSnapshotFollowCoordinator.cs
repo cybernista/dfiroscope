@@ -24,6 +24,7 @@ public enum ViewerSnapshotFollowPhase
 
 public enum ViewerSnapshotFollowTrigger
 {
+    Initial,
     Manual,
     Automatic
 }
@@ -169,6 +170,7 @@ public sealed record ViewerSnapshotFollowState(
     int ConsecutiveAutomaticFailures,
     DateTime? NextEligibleUtc,
     DateTime? LastPublishedSnapshotUtc,
+    bool IsInitialRefreshComplete,
     ViewerSnapshotFollowTrigger? ActiveTrigger,
     ViewerSnapshotFollowDiagnostics Diagnostics,
     string StatusText)
@@ -189,6 +191,7 @@ public sealed record ViewerSnapshotFollowState(
         ConsecutiveAutomaticFailures: 0,
         NextEligibleUtc: null,
         LastPublishedSnapshotUtc: null,
+        IsInitialRefreshComplete: false,
         ActiveTrigger: null,
         new ViewerSnapshotFollowDiagnostics(
             0,
@@ -364,6 +367,7 @@ public sealed class ViewerSnapshotFollowCoordinator : IDisposable
                     ConsecutiveAutomaticFailures = 0,
                     NextEligibleUtc = null,
                     LastPublishedSnapshotUtc = null,
+                    IsInitialRefreshComplete = false,
                     ActiveTrigger = null,
                     Diagnostics = _state.Diagnostics with { ActiveExecutionCount = 0 },
                     StatusText = workspace.CanRefresh
@@ -605,6 +609,10 @@ public sealed class ViewerSnapshotFollowCoordinator : IDisposable
         CancellationToken cancellationToken = default) =>
         RunRefreshAsync(ViewerSnapshotFollowTrigger.Manual, waitForActive: true, cancellationToken);
 
+    public Task<ViewerSnapshotFollowResult> RefreshInitialAsync(
+        CancellationToken cancellationToken = default) =>
+        RunRefreshAsync(ViewerSnapshotFollowTrigger.Initial, waitForActive: false, cancellationToken);
+
     public void Dispose()
     {
         CancellationTokenSource? schedule;
@@ -720,6 +728,15 @@ public sealed class ViewerSnapshotFollowCoordinator : IDisposable
                         "Automatic snapshot refresh is not currently eligible.");
                 }
 
+                if (trigger == ViewerSnapshotFollowTrigger.Initial &&
+                    _state.IsInitialRefreshComplete)
+                {
+                    return CreateTerminalResult(
+                        ViewerSnapshotFollowOutcome.Skipped,
+                        trigger,
+                        "The initial process-inventory snapshot has already been published.");
+                }
+
                 priorSchedule = TakeScheduleLocked();
                 operationGeneration = ++_operationGeneration;
                 request = new ViewerSnapshotRefreshRuntimeRequest(
@@ -749,7 +766,9 @@ public sealed class ViewerSnapshotFollowCoordinator : IDisposable
                     Diagnostics = diagnostics,
                     StatusText = trigger == ViewerSnapshotFollowTrigger.Automatic
                         ? "Preparing a coherent snapshot update in the background."
-                        : "Preparing a manual coherent snapshot update."
+                        : trigger == ViewerSnapshotFollowTrigger.Initial
+                            ? "Publishing the first complete process inventory."
+                            : "Preparing a manual coherent snapshot update."
                 });
             }
 
@@ -886,6 +905,9 @@ public sealed class ViewerSnapshotFollowCoordinator : IDisposable
                     ConsecutiveAutomaticFailures = 0,
                     NextEligibleUtc = nextEligible,
                     LastPublishedSnapshotUtc = runtimeResult.SnapshotUtc,
+                    IsInitialRefreshComplete =
+                        _state.IsInitialRefreshComplete ||
+                        trigger == ViewerSnapshotFollowTrigger.Initial,
                     ActiveTrigger = null,
                     Diagnostics = diagnostics with
                     {

@@ -136,6 +136,7 @@ public partial class MainViewModel : ViewModelBase,
     private bool _isLocalAgentSetupInProgress;
     private long _processListingQueryGeneration;
     private long _snapshotPresentationInteractionGeneration;
+    private long _initialSnapshotRefreshWorkspaceGeneration = -1;
     private bool _isPublishingSnapshotPresentation;
     private readonly TelemetryProjectionService _telemetryProjectionService;
     private bool _isLoadingSysmonSettings;
@@ -5749,45 +5750,14 @@ public partial class MainViewModel : ViewModelBase,
 
     private static string BuildEvidenceRootDescription(EvidenceRootSummary root)
     {
-        return BuildEvidenceIdentityDescription(
-            root.CaseId,
-            root.EvidenceSessionId,
-            root.CaptureId,
-            root.SourceIdentityId,
-            root.HostId,
-            root.ExecutionRootId);
+        ArgumentNullException.ThrowIfNull(root);
+        return "Evidence available within this scope.";
     }
 
     private static string BuildEvidenceRootDescription(ExplorerProcessOwnerSummary owner)
     {
-        return BuildEvidenceIdentityDescription(
-            owner.CaseId,
-            owner.EvidenceSessionId,
-            owner.CaptureId,
-            owner.SourceIdentityId,
-            owner.HostId,
-            owner.ExecutionRootId);
-    }
-
-    private static string BuildEvidenceIdentityDescription(
-        string caseId,
-        string evidenceSessionId,
-        string captureId,
-        string sourceIdentityId,
-        string hostId,
-        string executionRootId)
-    {
-        var parts = new[]
-        {
-            $"Case: {FormatId(caseId)}",
-            $"Session: {FormatId(evidenceSessionId)}",
-            $"Capture: {FormatId(captureId)}",
-            $"Source: {FormatId(sourceIdentityId)}",
-            $"Host: {FormatId(hostId)}",
-            $"Execution: {FormatId(executionRootId)}"
-        };
-
-        return string.Join("; ", parts);
+        ArgumentNullException.ThrowIfNull(owner);
+        return "Processes grouped by this owner.";
     }
 
     private static string ShortId(string value)
@@ -5800,11 +5770,6 @@ public partial class MainViewModel : ViewModelBase,
         return value.Length <= 18
             ? value
             : $"{value[..8]}...{value[^6..]}";
-    }
-
-    private static string FormatId(string value)
-    {
-        return string.IsNullOrWhiteSpace(value) ? "<default>" : value;
     }
 
     private static string NormalizeProcessOwnerKey(string? userName)
@@ -11828,10 +11793,95 @@ public partial class MainViewModel : ViewModelBase,
         if (response.DatabaseChanged != null)
         {
             _snapshotFollowCoordinator.ObserveCursor(response.DatabaseChanged);
-            if (_snapshotFollowCoordinator.State.Mode == ViewerSnapshotFollowMode.Manual)
+            var initialInventory = response.Health?.CaptureHealth.InitialProcessInventory ??
+                                   InitialProcessInventoryState.Unknown;
+            if (initialInventory == InitialProcessInventoryState.Ready &&
+                response.Health != null &&
+                isActiveSession &&
+                IsAgentReleaseProfileCompatible(response.Health))
             {
-                StatusMessage = "Live database changed. Click Refresh from db to create a new viewer snapshot.";
+                TryScheduleInitialSnapshotRefresh(response);
             }
+            else if (_snapshotFollowCoordinator.State.Mode == ViewerSnapshotFollowMode.Manual)
+            {
+                StatusMessage = initialInventory == InitialProcessInventoryState.Pending
+                    ? "Waiting for the Agent to commit the initial process inventory..."
+                    : "Live database changed. Click Refresh from db to create a new viewer snapshot.";
+            }
+        }
+    }
+
+    private void TryScheduleInitialSnapshotRefresh(AgentIpcResponse response)
+    {
+        if (response.DatabaseChanged == null ||
+            response.Health?.CaptureHealth.InitialProcessInventory !=
+                InitialProcessInventoryState.Ready)
+        {
+            return;
+        }
+
+        var workspace = CreateSnapshotFollowWorkspace(_captureWorkspaceCoordinator.State);
+        if (!workspace.CanRefresh ||
+            !string.Equals(workspace.SessionId, _sessionPaths.SessionId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _snapshotFollowCoordinator.BindWorkspace(workspace);
+        var generation = workspace.Generation;
+        while (true)
+        {
+            var observedGeneration = Volatile.Read(ref _initialSnapshotRefreshWorkspaceGeneration);
+            if (observedGeneration == generation)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(
+                    ref _initialSnapshotRefreshWorkspaceGeneration,
+                    generation,
+                    observedGeneration) == observedGeneration)
+            {
+                break;
+            }
+        }
+
+        StatusMessage = "Initial process inventory committed; publishing the first complete viewer snapshot...";
+        _ = PublishInitialSnapshotAsync(generation);
+    }
+
+    private async Task PublishInitialSnapshotAsync(long workspaceGeneration)
+    {
+        try
+        {
+            var result = await _snapshotFollowCoordinator.RefreshInitialAsync();
+            if (result.Succeeded || _snapshotFollowCoordinator.State.IsInitialRefreshComplete)
+            {
+                return;
+            }
+
+            if (result.Outcome is ViewerSnapshotFollowOutcome.Skipped or
+                ViewerSnapshotFollowOutcome.Superseded or
+                ViewerSnapshotFollowOutcome.Canceled)
+            {
+                Interlocked.CompareExchange(
+                    ref _initialSnapshotRefreshWorkspaceGeneration,
+                    -1,
+                    workspaceGeneration);
+                return;
+            }
+
+            await InvokeOnViewerDispatcherAsync(
+                () => StatusMessage =
+                    $"The initial process inventory committed, but its viewer snapshot could not be published: {result.Error}. Use Refresh from db to retry.",
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            await InvokeOnViewerDispatcherAsync(
+                () => StatusMessage =
+                    $"The initial process inventory committed, but its viewer snapshot could not be published: {ex.Message}. Use Refresh from db to retry.",
+                CancellationToken.None);
         }
     }
 

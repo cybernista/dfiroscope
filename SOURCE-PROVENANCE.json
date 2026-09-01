@@ -7,9 +7,9 @@
   "disclosurePolicyId": "dfiroscope-public-product-source-inventory-v1",
   "disclosurePolicySha256": "12e5992426812a867766e2d9e933330e3346964e0c08cb44d90d1103b209a684",
   "disclosureLegacyPathBaselineId": "edu-2026.08-s1e1-production-path-baseline",
-  "sourceCommit": "e784bb0825aedb988f4d54fa4ca1f6e22ccfd4bb",
-  "sourceTree": "2bbb0b2427d1f3a06961360b7fec71e4b4d9d4c3",
-  "exportedTreeSha256": "d7c429818f48126f99bc083b606f7ce01bdd0c5fe0c4fcd81f047cdb0dd7c462",
+  "sourceCommit": "352109a071dc1d2c265dab3f392b518b6b901547",
+  "sourceTree": "6b44257244742facdb111e3d8888e79840fb09bc",
+  "exportedTreeSha256": "31ba9a2f12241d3716b92dcb6ba0968567394c2d6985397c39d9d69c0791f6c6",
   "editionId": "edu-2026.08-s1e1",
   "publishedGroups": [
     "agents-capture",
@@ -287,8 +287,8 @@
     },
     {
       "path": "ProcInsider.Agent/AgentLiveCaptureJobHandler.cs",
-      "length": 80283,
-      "sha256": "41f36dbe72789a2b0de140d1d552809937fd0f9472f4ae22d75704650083b02a"
+      "length": 81952,
+      "sha256": "e7cbb28c205163104dcffee1ba9f8db5a2068edfd6bdb6c7b364a007500c8c16"
     },
     {
       "path": "ProcInsider.Agent/AgentLiveEventBuffer.cs",
@@ -557,8 +557,8 @@
     },
     {
       "path": "ProcInsider.Core/Models/Agent/AgentStatus.cs",
-      "length": 16074,
-      "sha256": "80a6e401e053a19f08e91fd199f3cf98719b7a39747db7a4d2844fc643f72091"
+      "length": 16355,
+      "sha256": "2e059cdd07bc344a3779539d49f9eba51f0ea418ad10e72d1dbd893f8ca12f70"
     },
     {
       "path": "ProcInsider.Core/Models/Agent/AgentToolActionPolicy.cs",
@@ -567,8 +567,8 @@
     },
     {
       "path": "ProcInsider.Core/Models/Agent/JobStatus.cs",
-      "length": 2399,
-      "sha256": "742d0b831e22b88db132f51551ebaaa10a55796a986f3e6161674f4868ecea90"
+      "length": 3048,
+      "sha256": "84467d1f25fb136ec6df8c292af5299f66a4fd4c62e4c7357fd6d6eee682f993"
     },
     {
       "path": "ProcInsider.Core/Models/Analysis/AnalysisFindingContracts.cs",
@@ -2492,8 +2492,8 @@
     },
     {
       "path": "ProcInsider/Services/ViewerSnapshotFollowCoordinator.cs",
-      "length": 48365,
-      "sha256": "07fbec7c314d8f4753b5ff943b9b1089e2853d46faebd77bd1362abbd87938d7"
+      "length": 49491,
+      "sha256": "3aaca60f5f62de4e6e7222c2927c79da2474bfaa9a825d0b4b35425057c31885"
     },
     {
       "path": "ProcInsider/Services/ViewerSnapshotFollowPresentation.cs",
@@ -2627,8 +2627,8 @@
     },
     {
       "path": "ProcInsider/ViewModels/ExplorerViewModel.cs",
-      "length": 46100,
-      "sha256": "b0568ac642a07bf5f1b18792c01e0778846a7f4d6f9e80c3115876cb918b4809"
+      "length": 45528,
+      "sha256": "28c837f51391da37e10b6ff7a997f50830e6ff9a5ff97ec0582237da84940eac"
     },
     {
       "path": "ProcInsider/ViewModels/FeaturePublicationViewModel.cs",
@@ -2677,8 +2677,8 @@
     },
     {
       "path": "ProcInsider/ViewModels/MainViewModel.cs",
-      "length": 605944,
-      "sha256": "4f445de5f7ea4f83ccf24705e0a24861b8ae9193cd43b6ff73554665daec22fa"
+      "length": 608421,
+      "sha256": "e9f7007f0eec60cf488e72fa0be135634f46d52102fa7419dd117abdad8eec51"
     },
     {
       "path": "ProcInsider/ViewModels/MemoryDumpRowViewModel.cs",
@@ -2832,8 +2832,8 @@
     },
     {
       "path": "ProcInsider/Views/Explorer/ExploreView.xaml",
-      "length": 1824,
-      "sha256": "8b6e97370829e14b2fdff297fcf6d16ec30a081798071e51e096fa320063ad21"
+      "length": 984,
+      "sha256": "0ab197371b89f4bada50f7baf8256eafb481bc11fa0d3bb115d9ab0ad65e04ef"
     },
     {
       "path": "ProcInsider/Views/Explorer/ExploreView.xaml.cs",
