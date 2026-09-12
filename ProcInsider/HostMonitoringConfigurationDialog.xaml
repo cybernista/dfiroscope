@@ -2,7 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:ProcInsider"
-        Title="Host Monitoring Configuration"
+        xmlns:viewModels="clr-namespace:ProcInsider.ViewModels"
+        Title="Change config of my computer"
         SizeToContent="WidthAndHeight"
         MinWidth="620"
         MaxHeight="760"
@@ -17,28 +18,56 @@
         <ScrollViewer Grid.Row="0"
                       VerticalScrollBarVisibility="Auto">
             <StackPanel>
-                <TextBlock Text="Host monitoring configuration"
+                <TextBlock Text="Computer audit and logging settings"
                            FontWeight="SemiBold"
                            Margin="0,0,0,8"/>
+                <Border Background="#FFF4DB" BorderBrush="#BA8222" BorderThickness="1"
+                        Padding="10" Margin="0,0,0,12" MaxWidth="570" HorizontalAlignment="Left">
+                    <StackPanel>
+                        <TextBlock Text="Review the impact on this computer" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                        <TextBlock Text="{x:Static viewModels:HostMonitoringConfigurationViewModel.ComputerConfigurationWarning}"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
                 <local:HostMonitoringConfigurationControl DataContext="{Binding MonitoringConfiguration, RelativeSource={RelativeSource AncestorType=Window}}"/>
             </StackPanel>
         </ScrollViewer>
 
         <StackPanel Grid.Row="1"
-                    Orientation="Horizontal"
-                    HorizontalAlignment="Right"
                     Margin="0,10,0,0">
+            <CheckBox x:Name="ComputerChangeAcknowledgement"
+                      IsChecked="False" MaxWidth="570" HorizontalAlignment="Left" Margin="0,0,0,10"
+                      Visibility="{Binding RequiresComputerChangeAcknowledgement, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="I am authorized to change this computer and understand the effects and recovery limits described above."
+                           TextWrapping="Wrap"/>
+            </CheckBox>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="AcceptButton"
                     Content="{Binding PrimaryButtonContent, RelativeSource={RelativeSource AncestorType=Window}}"
                     MinWidth="86"
                     Padding="10,3"
                     Margin="0,0,6,0"
                     IsDefault="True"
-                    Click="AcceptButton_Click"/>
+                    Click="AcceptButton_Click">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding RequiresComputerChangeAcknowledgement, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"/>
+                                    <Condition Binding="{Binding IsChecked, ElementName=ComputerChangeAcknowledgement}" Value="False"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="IsEnabled" Value="False"/>
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
             <Button Content="Cancel"
                     MinWidth="76"
                     Padding="10,3"
                     IsCancel="True"/>
+            </StackPanel>
         </StackPanel>
     </Grid>
 </Window>

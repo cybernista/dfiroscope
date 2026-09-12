@@ -199,6 +199,8 @@ public sealed class ProcessListingService : IProcessListingPageSource, IViewerPr
                     : statistic.ProcessEntityId,
                 StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var eventCountsByOwner = _queryService.SelectedProcessEvidenceQueries
+            .CountEventsForProcesses(page.Rows, cancellationToken);
         var riskEntityIds = page.Rows
             .Select(record => record.ProcessEntityId?.Trim() ?? string.Empty)
             .Where(processEntityId => processEntityId.Length > 0)
@@ -228,6 +230,7 @@ public sealed class ProcessListingService : IProcessListingPageSource, IViewerPr
                 StringComparer.Ordinal);
         }
 
+        using var rowProgress = SqliteWorkScope.Begin("Preparing process rows", page.Rows.Count, "rows");
         var rows = new List<ProcessRowViewModel>(page.Rows.Count);
         var loadedItems = 0;
 
@@ -242,6 +245,16 @@ public sealed class ProcessListingService : IProcessListingPageSource, IViewerPr
             var ownerId = GetOwnershipId(record);
             var vm = new ProcessRowViewModel(record.ToProcessInfo());
             vm.SetStatistics(latestStatisticsByOwner.GetValueOrDefault(ownerId));
+            var eventCounts = eventCountsByOwner.GetValueOrDefault(ownerId);
+            if (eventCounts != null)
+            {
+                vm.RuntimeEventCount = eventCounts.RuntimeEventCount;
+                vm.EtwEventCount = eventCounts.EtwEventCount;
+                vm.SecurityEventCount = eventCounts.SecurityEventCount;
+                vm.PowerShellEventCount = eventCounts.PowerShellEventCount;
+                vm.OtherWindowsEventCount = eventCounts.OtherWindowsEventCount;
+                vm.SysmonEventCount = eventCounts.SysmonEventCount;
+            }
             var riskEntityId = record.ProcessEntityId?.Trim() ?? string.Empty;
             vm.SetRiskProjection(
                 riskEntityId.Length == 0
@@ -256,6 +269,7 @@ public sealed class ProcessListingService : IProcessListingPageSource, IViewerPr
             rows.Add(vm);
 
             loadedItems++;
+            rowProgress.Advance(loadedItems);
             if (loadedItems == page.Rows.Count || loadedItems % 100 == 0)
             {
                 progress?.Report(new ProcessListingLoadProgress(

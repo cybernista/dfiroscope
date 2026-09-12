@@ -1,10 +1,5 @@
 [
   {
-    "Name": "Security",
-    "SizeBytes": 2147483648,
-    "Enable": true
-  },
-  {
     "Name": "Windows PowerShell",
     "SizeBytes": 2147483648,
     "Enable": true

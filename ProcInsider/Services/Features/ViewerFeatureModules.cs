@@ -63,8 +63,116 @@ public sealed class ModulesAndHandlesFeatureModule : IDisposable
 }
 
 /// <summary>
-/// Lazily constructed event-telemetry vertical. It owns configuration helpers and
-/// projection-only event view models; live event ingress remains agent-local.
+/// Projection-only lifecycle owner for one event source. Live ingress remains agent-local and the
+/// module never creates another event-family module.
+/// </summary>
+public abstract class EventSourceFeatureModule : IDisposable
+{
+    private bool _disposed;
+
+    protected EventSourceFeatureModule(
+        TelemetryProjectionService projectionService,
+        InspectorPaneViewModel inspectorPaneViewModel,
+        string source,
+        Action<(string ProcessKey, int ProcessId, string ProcessName)>? backfill = null)
+    {
+        ViewModel = new EventsViewModel(
+            projectionService,
+            inspectorPaneViewModel,
+            source,
+            backfill);
+    }
+
+    public EventsViewModel ViewModel { get; }
+
+    public virtual void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        ViewModel.Clear();
+    }
+}
+
+public sealed class RuntimeEventsFeatureModule : EventSourceFeatureModule
+{
+    public RuntimeEventsFeatureModule(
+        TelemetryProjectionService projectionService,
+        InspectorPaneViewModel inspectorPaneViewModel)
+        : base(projectionService, inspectorPaneViewModel, "Runtime")
+    {
+    }
+}
+
+public sealed class EtwEventsFeatureModule : EventSourceFeatureModule
+{
+    public EtwEventsFeatureModule(
+        TelemetryProjectionService projectionService,
+        InspectorPaneViewModel inspectorPaneViewModel)
+        : base(projectionService, inspectorPaneViewModel, "ETW")
+    {
+    }
+}
+
+public sealed class WindowsSecurityEventsFeatureModule : EventSourceFeatureModule
+{
+    public WindowsSecurityEventsFeatureModule(
+        TelemetryProjectionService projectionService,
+        InspectorPaneViewModel inspectorPaneViewModel,
+        Action<(string ProcessKey, int ProcessId, string ProcessName)> backfill)
+        : base(projectionService, inspectorPaneViewModel, "Security", backfill)
+    {
+        ConfigProfileService = new ConfigProfileService();
+        SecurityMonitoringService = new SecurityMonitoringService(ConfigProfileService);
+        DetailsWorkflow = new ProcInsider.Features.WindowsSecurityDetails.SecurityDetailsWorkflow(ViewModel);
+    }
+
+    public ConfigProfileService ConfigProfileService { get; }
+    public SecurityMonitoringService SecurityMonitoringService { get; }
+    public ProcInsider.Features.WindowsSecurityDetails.SecurityDetailsWorkflow DetailsWorkflow { get; }
+    public override void Dispose() { DetailsWorkflow.Dispose(); base.Dispose(); }
+}
+
+public sealed class PowerShellEventsFeatureModule : EventSourceFeatureModule
+{
+    public PowerShellEventsFeatureModule(
+        TelemetryProjectionService projectionService,
+        InspectorPaneViewModel inspectorPaneViewModel,
+        Action<(string ProcessKey, int ProcessId, string ProcessName)> backfill)
+        : base(projectionService, inspectorPaneViewModel, "PowerShell", backfill)
+    {
+    }
+}
+
+public sealed class WindowsOtherEventsFeatureModule : EventSourceFeatureModule
+{
+    public WindowsOtherEventsFeatureModule(
+        TelemetryProjectionService projectionService,
+        InspectorPaneViewModel inspectorPaneViewModel,
+        Action<(string ProcessKey, int ProcessId, string ProcessName)> backfill)
+        : base(projectionService, inspectorPaneViewModel, "WindowsOther", backfill)
+    {
+    }
+}
+
+public sealed class SysmonEventsFeatureModule : EventSourceFeatureModule
+{
+    public SysmonEventsFeatureModule(
+        TelemetryProjectionService projectionService,
+        InspectorPaneViewModel inspectorPaneViewModel,
+        Action<(string ProcessKey, int ProcessId, string ProcessName)> backfill)
+        : base(projectionService, inspectorPaneViewModel, "Sysmon", backfill)
+    {
+    }
+}
+
+/// <summary>
+/// Retained composer for the event-telemetry gate. It owns the Runtime, ETW, PowerShell,
+/// WindowsOther, and Sysmon modules as one publication unit. Windows Security is never composed
+/// here and activates only through its source-owned publication group.
 /// </summary>
 public sealed class EventTelemetryFeatureModule : IDisposable
 {
@@ -73,7 +181,6 @@ public sealed class EventTelemetryFeatureModule : IDisposable
     public EventTelemetryFeatureModule(
         TelemetryProjectionService projectionService,
         InspectorPaneViewModel inspectorPaneViewModel,
-        Action<(string ProcessKey, int ProcessId, string ProcessName)> backfillSecurity,
         Action<(string ProcessKey, int ProcessId, string ProcessName)> backfillPowerShell,
         Action<(string ProcessKey, int ProcessId, string ProcessName)> backfillOtherWindows,
         Action<(string ProcessKey, int ProcessId, string ProcessName)> backfillSysmon)
@@ -82,27 +189,19 @@ public sealed class EventTelemetryFeatureModule : IDisposable
         PowerShellAuditingService = new PowerShellAuditingService(ConfigProfileService);
         SysmonService = new SysmonService(ConfigProfileService);
 
-        RuntimeEventsViewModel = new EventsViewModel(projectionService, inspectorPaneViewModel, "Runtime");
-        EtwEventsViewModel = new EventsViewModel(projectionService, inspectorPaneViewModel, "ETW");
-        SecurityEventsViewModel = new EventsViewModel(
+        RuntimeEventsModule = new RuntimeEventsFeatureModule(projectionService, inspectorPaneViewModel);
+        EtwEventsModule = new EtwEventsFeatureModule(projectionService, inspectorPaneViewModel);
+        PowerShellEventsModule = new PowerShellEventsFeatureModule(
             projectionService,
             inspectorPaneViewModel,
-            "Security",
-            backfillSecurity);
-        PowerShellEventsViewModel = new EventsViewModel(
-            projectionService,
-            inspectorPaneViewModel,
-            "PowerShell",
             backfillPowerShell);
-        OtherWindowsEventsViewModel = new EventsViewModel(
+        WindowsOtherEventsModule = new WindowsOtherEventsFeatureModule(
             projectionService,
             inspectorPaneViewModel,
-            "WindowsOther",
             backfillOtherWindows);
-        SysmonEventsViewModel = new EventsViewModel(
+        SysmonEventsModule = new SysmonEventsFeatureModule(
             projectionService,
             inspectorPaneViewModel,
-            "Sysmon",
             backfillSysmon);
         SystemActivityViewModel = new SystemActivityViewModel(projectionService, inspectorPaneViewModel);
     }
@@ -110,13 +209,18 @@ public sealed class EventTelemetryFeatureModule : IDisposable
     public ConfigProfileService ConfigProfileService { get; }
     public PowerShellAuditingService PowerShellAuditingService { get; }
     public SysmonService SysmonService { get; }
-    public EventsViewModel RuntimeEventsViewModel { get; }
-    public EventsViewModel EtwEventsViewModel { get; }
-    public EventsViewModel SecurityEventsViewModel { get; }
-    public EventsViewModel PowerShellEventsViewModel { get; }
-    public EventsViewModel OtherWindowsEventsViewModel { get; }
-    public EventsViewModel SysmonEventsViewModel { get; }
+    public RuntimeEventsFeatureModule RuntimeEventsModule { get; }
+    public EtwEventsFeatureModule EtwEventsModule { get; }
+    public PowerShellEventsFeatureModule PowerShellEventsModule { get; }
+    public WindowsOtherEventsFeatureModule WindowsOtherEventsModule { get; }
+    public SysmonEventsFeatureModule SysmonEventsModule { get; }
+    public EventsViewModel RuntimeEventsViewModel => RuntimeEventsModule.ViewModel;
+    public EventsViewModel EtwEventsViewModel => EtwEventsModule.ViewModel;
+    public EventsViewModel PowerShellEventsViewModel => PowerShellEventsModule.ViewModel;
+    public EventsViewModel OtherWindowsEventsViewModel => WindowsOtherEventsModule.ViewModel;
+    public EventsViewModel SysmonEventsViewModel => SysmonEventsModule.ViewModel;
     public SystemActivityViewModel SystemActivityViewModel { get; }
+
     public void Dispose()
     {
         if (_disposed)
@@ -125,12 +229,11 @@ public sealed class EventTelemetryFeatureModule : IDisposable
         }
 
         _disposed = true;
-        RuntimeEventsViewModel.Clear();
-        EtwEventsViewModel.Clear();
-        SecurityEventsViewModel.Clear();
-        PowerShellEventsViewModel.Clear();
-        OtherWindowsEventsViewModel.Clear();
-        SysmonEventsViewModel.Clear();
+        RuntimeEventsModule.Dispose();
+        EtwEventsModule.Dispose();
+        PowerShellEventsModule.Dispose();
+        WindowsOtherEventsModule.Dispose();
+        SysmonEventsModule.Dispose();
         SystemActivityViewModel.Clear();
     }
 }
@@ -151,7 +254,6 @@ public sealed class AgentFeatureModule : IDisposable
         _statusTimerTick = statusTimerTick;
         AgentsViewModel = new AgentsViewModel();
         AgentClient = new AgentNamedPipeClient(
-            timeout: TimeSpan.FromSeconds(3),
             viewerReleaseId: viewerReleaseId);
         AgentStatusClient = new AgentNamedPipeClient(
             timeout: TimeSpan.FromSeconds(2),

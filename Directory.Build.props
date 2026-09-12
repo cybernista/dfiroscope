@@ -3,6 +3,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- The current compiled release publishes Windows Security. Explicit hidden-profile tests
+         may still pass PublishWindowsSecurityEvents=false to prove asset exclusion. -->
+    <PublishWindowsSecurityEvents Condition="'$(PublishWindowsSecurityEvents)' == ''">true</PublishWindowsSecurityEvents>
 
     <Deterministic>true</Deterministic>
     <DebugType>portable</DebugType>

@@ -1,0 +1,100 @@
+<UserControl x:Class="ProcInsider.Views.Features.Agents.MonitoringStatusDetailsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <Style TargetType="TextBox">
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="AcceptsReturn" Value="True"/>
+        </Style>
+    </UserControl.Resources>
+    <StackPanel>
+        <ItemsControl ItemsSource="{Binding MonitoringStatusSections}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="0,10,0,6">
+                        <TextBox Text="{Binding Heading, Mode=OneWay}" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <ItemsControl ItemsSource="{Binding Findings}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,8">
+                                        <StackPanel>
+                                            <TextBox Text="{Binding Summary, Mode=OneWay}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                            <TextBox Text="{Binding Detail, Mode=OneWay}" Foreground="#444444">
+                                                <TextBox.Style>
+                                                    <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasComparisons}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBox.Style>
+                                            </TextBox>
+                                            <DataGrid ItemsSource="{Binding Comparisons}" AutoGenerateColumns="False" IsReadOnly="True"
+                                                      CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
+                                                      HeadersVisibility="Column" GridLinesVisibility="Horizontal" RowHeaderWidth="0"
+                                                      MaxHeight="340" MinHeight="60" ClipboardCopyMode="IncludeHeader"
+                                                      HorizontalScrollBarVisibility="Disabled" BorderThickness="0" Background="White"
+                                                      AlternatingRowBackground="#F3F6F9" AutomationProperties.Name="Expected and current audit settings">
+                                                <DataGrid.Style>
+                                                    <Style TargetType="DataGrid">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers><DataTrigger Binding="{Binding HasComparisons}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+                                                    </Style>
+                                                </DataGrid.Style>
+                                                <DataGrid.Resources>
+                                                    <Style x:Key="AuditComparisonCell" TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="Margin" Value="4"/></Style>
+                                                </DataGrid.Resources>
+                                                <DataGrid.Columns>
+                                                    <DataGridTextColumn Header="Audit setting" Binding="{Binding Setting}" Width="2*" ElementStyle="{StaticResource AuditComparisonCell}"/>
+                                                    <DataGridTextColumn Header="Expected" Binding="{Binding Expected}" Width="*" ElementStyle="{StaticResource AuditComparisonCell}"/>
+                                                    <DataGridTextColumn Header="Current" Binding="{Binding Current}" Width="*" ElementStyle="{StaticResource AuditComparisonCell}"/>
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                            <DataGrid ItemsSource="{Binding PolicyStates}" AutoGenerateColumns="False" IsReadOnly="True"
+                                                      CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
+                                                      HeadersVisibility="Column" GridLinesVisibility="Horizontal" RowHeaderWidth="0"
+                                                      MaxHeight="340" MinHeight="60" ClipboardCopyMode="IncludeHeader"
+                                                      HorizontalScrollBarVisibility="Disabled" BorderThickness="0" Background="White"
+                                                      AlternatingRowBackground="#F3F6F9" AutomationProperties.Name="Effective advanced audit policy configuration">
+                                                <DataGrid.Style>
+                                                    <Style TargetType="DataGrid">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers><DataTrigger Binding="{Binding HasPolicyStates}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+                                                    </Style>
+                                                </DataGrid.Style>
+                                                <DataGrid.Resources>
+                                                    <Style x:Key="AuditPolicyCell" TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="Margin" Value="4"/></Style>
+                                                </DataGrid.Resources>
+                                                <DataGrid.Columns>
+                                                    <DataGridTextColumn Header="Policy name" Binding="{Binding PolicyName}" Width="2*" ElementStyle="{StaticResource AuditPolicyCell}"/>
+                                                    <DataGridTextColumn Header="Success" Binding="{Binding Success}" Width="*" ElementStyle="{StaticResource AuditPolicyCell}"/>
+                                                    <DataGridTextColumn Header="Failure" Binding="{Binding Failure}" Width="*" ElementStyle="{StaticResource AuditPolicyCell}"/>
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                            <TextBox Text="{Binding Remediation, Mode=OneWay}" Margin="0,8,0,0" Foreground="#36516B"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBox Text="{Binding MonitoringStatusDetails, Mode=OneWay}" Foreground="#555555">
+            <TextBox.Style>
+                <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding MonitoringStatusSections.Length}" Value="0">
+                            <Setter Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBox.Style>
+        </TextBox>
+    </StackPanel>
+</UserControl>

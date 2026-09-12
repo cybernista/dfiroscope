@@ -134,6 +134,7 @@ public partial class MainViewModel : ViewModelBase,
     private Task? _agentLateExitObservationTask;
     private long _agentLateExitObservationGeneration;
     private bool _isLocalAgentSetupInProgress;
+    private int _hostMonitoringActionInProgress;
     private long _processListingQueryGeneration;
     private long _snapshotPresentationInteractionGeneration;
     private long _initialSnapshotRefreshWorkspaceGeneration = -1;
@@ -176,6 +177,8 @@ public partial class MainViewModel : ViewModelBase,
         _featureModules.GetOrActivate<ModulesAndHandlesFeatureModule>(FeatureIds.ModulesAndHandles);
     private EventTelemetryFeatureModule? EventTelemetryFeature =>
         _featureModules.GetOrActivate<EventTelemetryFeatureModule>(FeatureIds.EventTelemetry);
+    private WindowsSecurityEventsFeatureModule? WindowsSecurityEventsFeature =>
+        _featureModules.GetOrActivate<WindowsSecurityEventsFeatureModule>(FeatureIds.WindowsSecurityEvents);
     private AgentFeatureModule? AgentFeature =>
         _featureModules.GetOrActivate<AgentFeatureModule>(FeatureIds.AgentsAndCapture);
     private DumpsAndPeFeatureModule? DumpsAndPeFeature =>
@@ -192,12 +195,15 @@ public partial class MainViewModel : ViewModelBase,
         _featureModules.GetOrActivate<SecurityMonitoringFeatureModule>(FeatureIds.SecurityMonitoringConfiguration);
 
     private ConfigProfileService _configProfileService =>
-        SecurityMonitoringFeature?.ConfigProfileService ?? EventTelemetryFeature?.ConfigProfileService!;
+        WindowsSecurityEventsFeature?.ConfigProfileService ??
+        SecurityMonitoringFeature?.ConfigProfileService ??
+        EventTelemetryFeature?.ConfigProfileService!;
     private PowerShellAuditingService _powerShellAuditingService =>
         SecurityMonitoringFeature?.PowerShellAuditingService ?? EventTelemetryFeature?.PowerShellAuditingService!;
     private SysmonService _sysmonService =>
         SecurityMonitoringFeature?.SysmonService ?? EventTelemetryFeature?.SysmonService!;
     private SecurityMonitoringService _securityMonitoringService =>
+        WindowsSecurityEventsFeature?.SecurityMonitoringService ??
         SecurityMonitoringFeature?.SecurityMonitoringService!;
     private AiInvestigationService _aiInvestigationService => AiFeature?.Service!;
     private SigmaRuleParser _sigmaRuleParser =>
@@ -400,6 +406,20 @@ public partial class MainViewModel : ViewModelBase,
     [ObservableProperty]
     private bool isRefreshing;
 
+    private ViewerRefreshOperation? _snapshotRefreshOperation;
+    [ObservableProperty]
+    private bool isSnapshotRefreshActive;
+    [ObservableProperty]
+    private string snapshotRefreshProgressTitle = string.Empty;
+    [ObservableProperty]
+    private string snapshotRefreshProgressDetail = string.Empty;
+    [ObservableProperty]
+    private double snapshotRefreshProgressCurrent;
+    [ObservableProperty]
+    private double snapshotRefreshProgressMaximum = 1;
+    [ObservableProperty]
+    private bool isSnapshotRefreshProgressIndeterminate = true;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StagingLoadProgressText))]
     private bool isStagingLoadInProgress;
@@ -564,7 +584,14 @@ public partial class MainViewModel : ViewModelBase,
     public HandlesViewModel HandlesViewModel => ModulesAndHandlesFeature?.HandlesViewModel!;
     public EventsViewModel EventsViewModel => EventTelemetryFeature?.RuntimeEventsViewModel!;
     public EventsViewModel EtwProviderEventsViewModel => EventTelemetryFeature?.EtwEventsViewModel!;
-    public EventsViewModel WindowsAuditLogViewModel => EventTelemetryFeature?.SecurityEventsViewModel!;
+    public EventsViewModel WindowsAuditLogViewModel => WindowsSecurityEventsFeature?.ViewModel!;
+
+    [RelayCommand]
+    private void EditWindowsSecurityDetailsDefinitions()
+    {
+        if (FeaturePublication.WindowsSecurityEvents)
+            WindowsSecurityEventsFeature?.DetailsWorkflow.ShowEditor(System.Windows.Application.Current?.MainWindow);
+    }
     public EventsViewModel PowerShellLogViewModel => EventTelemetryFeature?.PowerShellEventsViewModel!;
     public EventsViewModel WindowsOtherLogViewModel => EventTelemetryFeature?.OtherWindowsEventsViewModel!;
     public EventsViewModel SysmonEventsViewModel => EventTelemetryFeature?.SysmonEventsViewModel!;
@@ -631,11 +658,12 @@ public partial class MainViewModel : ViewModelBase,
     private string scopedSelectionDetail = "No green scope or exclusion filters are active.";
 
     public bool IsLiveCaptureEnabled =>
-        IsEtwCollectionEnabled ||
-        IsWindowsAuditLogCollectionEnabled ||
-        IsPowerShellLogCollectionEnabled ||
-        IsWindowsOtherLogCollectionEnabled ||
-        IsSysmonIntegrationEnabled;
+        FeaturePublication.EventTelemetry &&
+        (IsEtwCollectionEnabled ||
+         IsPowerShellLogCollectionEnabled ||
+         IsWindowsOtherLogCollectionEnabled ||
+         IsSysmonIntegrationEnabled) ||
+        FeaturePublication.WindowsSecurityEvents && IsWindowsAuditLogCollectionEnabled;
 
     public bool IsArtifactEnrichmentEnabled => IsModuleCollectionEnabled || IsHandleCollectionEnabled;
     public string LiveCaptureStateDisplay =>
@@ -978,7 +1006,7 @@ public partial class MainViewModel : ViewModelBase,
             LoadEtwCaptureProfiles();
         }
 
-        if (_featureAccess.IsPublished(FeatureIds.SecurityMonitoringConfiguration) && SecurityMonitoringFeature != null)
+        if (FeaturePublication.HostMonitoringConfiguration)
         {
             LoadSecurityMonitoringProfileManifests();
         }
@@ -1012,9 +1040,42 @@ public partial class MainViewModel : ViewModelBase,
             () => new EventTelemetryFeatureModule(
                 _telemetryProjectionService,
                 InspectorPaneViewModel,
-                BackfillSecurityEventsForProcess,
                 BackfillPowerShellEventsForProcess,
                 BackfillOtherWindowsEventsForProcess,
+                BackfillSysmonEventsForProcess));
+        _featureModules.Register(
+            FeatureIds.RuntimeEvents,
+            () => new RuntimeEventsFeatureModule(
+                _telemetryProjectionService,
+                InspectorPaneViewModel));
+        _featureModules.Register(
+            FeatureIds.EtwEvents,
+            () => new EtwEventsFeatureModule(
+                _telemetryProjectionService,
+                InspectorPaneViewModel));
+        _featureModules.Register(
+            FeatureIds.WindowsSecurityEvents,
+            () => new WindowsSecurityEventsFeatureModule(
+                _telemetryProjectionService,
+                InspectorPaneViewModel,
+                BackfillSecurityEventsForProcess));
+        _featureModules.Register(
+            FeatureIds.PowerShellEvents,
+            () => new PowerShellEventsFeatureModule(
+                _telemetryProjectionService,
+                InspectorPaneViewModel,
+                BackfillPowerShellEventsForProcess));
+        _featureModules.Register(
+            FeatureIds.WindowsOtherEvents,
+            () => new WindowsOtherEventsFeatureModule(
+                _telemetryProjectionService,
+                InspectorPaneViewModel,
+                BackfillOtherWindowsEventsForProcess));
+        _featureModules.Register(
+            FeatureIds.SysmonEvents,
+            () => new SysmonEventsFeatureModule(
+                _telemetryProjectionService,
+                InspectorPaneViewModel,
                 BackfillSysmonEventsForProcess));
         _featureModules.Register(
             FeatureIds.AgentsAndCapture,
@@ -1137,7 +1198,7 @@ public partial class MainViewModel : ViewModelBase,
             new(DataTabKeys.SystemActivity, "System Activity", FeatureIds.EventTelemetry, 1100, () => new Views.Features.Events.DataSystemActivityView { DataContext = SystemActivityViewModel }, showCount: true),
             new(DataTabKeys.RuntimeEvents, "Runtime Events", FeatureIds.EventTelemetry, 1200, () => new Views.Features.Events.DataRuntimeEventsView { DataContext = EventsViewModel }, showCount: true),
             new(DataTabKeys.EtwEvents, "ETW Providers", FeatureIds.EventTelemetry, 1300, () => new Views.Features.Events.DataEtwEventListView { DataContext = EtwProviderEventsViewModel }, showCount: true),
-            new(DataTabKeys.SecurityEvents, "Windows Audit Log", FeatureIds.EventTelemetry, 1400, () => new Views.Features.Events.DataEventListView { DataContext = WindowsAuditLogViewModel }, showCount: true),
+            new(DataTabKeys.SecurityEvents, "Windows Audit Log", FeatureIds.WindowsSecurityEvents, 1400, () => new Views.Features.Events.DataWindowsSecurityEventsView { DataContext = WindowsAuditLogViewModel }, showCount: true),
             new(DataTabKeys.PowerShellEvents, "PowerShell Logs", FeatureIds.EventTelemetry, 1500, () => new Views.Features.Events.DataEventListView { DataContext = PowerShellLogViewModel }, showCount: true),
             new(DataTabKeys.WindowsOtherEvents, "Windows Logs (Other)", FeatureIds.EventTelemetry, 1600, () => new Views.Features.Events.DataEventListView { DataContext = WindowsOtherLogViewModel }, showCount: true),
             new(DataTabKeys.SysmonEvents, "Sysmon", FeatureIds.EventTelemetry, 1700, () => new Views.Features.Events.DataEventListView { DataContext = SysmonEventsViewModel }, showCount: true),
@@ -1748,13 +1809,8 @@ public partial class MainViewModel : ViewModelBase,
         AgentRegistryEntryViewModel? agent,
         bool isExistingAgentSetup)
     {
-        var hostMonitoringPublished =
-            _featureAccess.IsPublished(FeatureIds.SecurityMonitoringConfiguration);
         return new ProcInsider.AddAgentDialog(
             _featureAccess.Catalog,
-            hostMonitoringPublished
-                ? CreateHostMonitoringConfigurationSettings(agent?.HostMonitoringConfiguration)
-                : null,
             agent?.CaptureOptions,
             agent?.AgentMemoryLimitMegabytes ?? 500,
             isExistingAgentSetup)
@@ -1770,9 +1826,6 @@ public partial class MainViewModel : ViewModelBase,
     {
         var workspaceGeneration = _captureWorkspaceCoordinator.Generation;
         var captureOptions = dialog.GetCaptureOptions();
-        var monitoringSettings = dialog.IsHostMonitoringPublished
-            ? dialog.GetMonitoringConfiguration()
-            : null;
         agent.AgentMemoryLimitMegabytes = dialog.SelectedAgentMemoryMegabytes;
         agent.ApplyCaptureOptionSelections(captureOptions);
         AgentStatusMessage = "Agent: local setup requested";
@@ -1791,27 +1844,18 @@ public partial class MainViewModel : ViewModelBase,
             new DelegateLocalAgentSetupRuntime(
                 () => DispatchLocalAgentSetup(
                     () => IsCurrentLocalAgentSetupTarget(agent, workspaceGeneration)),
-                () => DispatchLocalAgentSetupAsync(async () =>
+                () => DispatchViewerAsync(async () =>
                     {
                         authenticatedBinding = await StartSelectedLocalAgentAsync(
                             agent,
                             initiatedByAdd);
                         return authenticatedBinding != null;
                     }),
-                () => DispatchLocalAgentSetupAsync(
+                () => DispatchViewerAsync(
                     () => AttachVerifiedLocalAgentSetupBindingAsync(
                         agent,
                         authenticatedBinding)),
-                () => DispatchLocalAgentSetupAsync(
-                    () => SaveAgentMonitoringConfigurationAsync(
-                        agent,
-                        requireViewerConnection: true,
-                        monitoringSettings)),
-                () => DispatchLocalAgentSetupAsync(
-                    () => DeploySavedAgentMonitoringConfigurationAsync(
-                        agent,
-                        showConfirmation: false)),
-                () => DispatchLocalAgentSetupAsync(
+                () => DispatchViewerAsync(
                     () => SaveAgentCaptureConfigurationAsync(
                         agent,
                         requireViewerConnection: true,
@@ -1823,7 +1867,7 @@ public partial class MainViewModel : ViewModelBase,
                             availability.CanStart,
                             availability.StartUnavailableReason);
                     }),
-                () => DispatchLocalAgentSetupAsync(async () =>
+                () => DispatchViewerAsync(async () =>
                     {
                         captureStarted = await StartSavedAgentConfiguredCaptureAsync(agent);
                         return captureStarted;
@@ -1832,8 +1876,6 @@ public partial class MainViewModel : ViewModelBase,
             initiatedByAdd
                 ? LocalAgentSetupOrigin.Add
                 : LocalAgentSetupOrigin.SelectedRowStart,
-            HasMonitoringConfiguration: monitoringSettings != null,
-            DeployMonitoring: monitoringSettings?.HasRequestedDeployment == true,
             HasSelectedCaptureSources: captureRequested));
 
         if (result.Outcome == LocalAgentSetupOutcome.Superseded)
@@ -1886,13 +1928,17 @@ public partial class MainViewModel : ViewModelBase,
             : dispatcher.Invoke(action, DispatcherPriority.Background);
     }
 
-    private static Task<T> DispatchLocalAgentSetupAsync<T>(Func<Task<T>> action)
+    private static Task<T> DispatchViewerAsync<T>(Func<Task<T>> action, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(action);
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled<T>(cancellationToken);
+        }
         var dispatcher = Application.Current?.Dispatcher;
         return dispatcher == null || dispatcher.CheckAccess()
             ? action()
-            : dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task.Unwrap();
+            : dispatcher.InvokeAsync(action, DispatcherPriority.Background, cancellationToken).Task.Unwrap();
     }
 
     private bool IsCurrentLocalAgentSetupTarget(
@@ -2188,7 +2234,7 @@ public partial class MainViewModel : ViewModelBase,
 
     private void ShowAgentMonitoringStatusDialog(AgentRegistryEntryViewModel agent)
     {
-        var dialog = new ProcInsider.AgentMonitoringStatusDialog(agent, this)
+        var dialog = new ProcInsider.AgentMonitoringStatusDialog(agent)
         {
             Owner = GetDialogOwner(),
             Title = $"Monitoring Status - {agent.DisplayName}"
@@ -2556,56 +2602,129 @@ public partial class MainViewModel : ViewModelBase,
     [RelayCommand]
     private async Task CheckAgentMonitoringConfigurationAsync(AgentRegistryEntryViewModel? agent)
     {
-        agent ??= AgentsViewModel.SelectedAgent;
+        agent ??= GetLocalAgent();
         if (!CanRunAgentConfigurationCommand(agent, AgentConfigurationTargetKind.HostMonitoring, "configuration checks"))
         {
+            ShowMonitoringCheckDiagnostic(StatusMessage);
             return;
         }
 
         var targetAgent = agent!;
-        var result = await _hostMonitoringActionService.Value.CheckConfigurationAsync(
-            CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: true),
-            CreateHostMonitoringConfigurationDraft(targetAgent));
-        if (!result.Succeeded)
+        if (!TryBeginHostMonitoringAction())
         {
-            StatusMessage = result.Diagnostic;
+            ShowMonitoringCheckDiagnostic(StatusMessage);
+            return;
         }
 
-        var response = result.Response;
-        ApplyConfigurationCheckResponse(targetAgent, AgentConfigurationTargetKind.HostMonitoring, response);
-        if (ShouldShowAgentMonitoringStatusDialog(response))
+        var showStatusDialog = false;
+        var target = CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: true);
+        string? diagnostic = null;
+        try
+        {
+            AgentsViewModel.ApplyMonitoringActionProgress(
+                targetAgent,
+                "Checking Windows Security monitoring...",
+                "The authenticated Agent is reading effective audit policy, command-line policy, Security log settings, and watcher health.");
+            StatusMessage = targetAgent.MonitoringStatusSummary;
+            var result = await _hostMonitoringActionService.Value.CheckSavedConfigurationAsync(target);
+            // Do not publish a completion into a different investigation or retain its row in a dialog.
+            if (target.WorkspaceGeneration != _captureWorkspaceCoordinator.Generation ||
+                result.Outcome is ViewerHostMonitoringActionOutcome.Superseded or ViewerHostMonitoringActionOutcome.Canceled)
+            {
+                diagnostic = FirstNonEmpty(result.Diagnostic, "The monitoring check was canceled or its workspace changed. Run the check again for the current workspace.");
+            }
+            else
+            {
+                if (!result.Succeeded)
+                {
+                    StatusMessage = result.Diagnostic;
+                    diagnostic = result.Diagnostic;
+                }
+
+                var response = result.Response;
+                ApplyConfigurationCheckResponse(targetAgent, AgentConfigurationTargetKind.HostMonitoring, response);
+                showStatusDialog = ShouldShowAgentMonitoringStatusDialog(response);
+                if (!showStatusDialog)
+                {
+                    diagnostic = FirstNonEmpty(diagnostic, StatusMessage, "The Agent returned no monitoring check result.");
+                    AgentsViewModel.MarkConfigurationCheckUnavailable(targetAgent, AgentConfigurationTargetKind.HostMonitoring, diagnostic);
+                }
+            }
+        }
+        finally
+        {
+            EndHostMonitoringAction();
+        }
+
+        if (showStatusDialog)
         {
             ShowAgentMonitoringStatusDialog(targetAgent);
         }
+        else
+        {
+            ShowMonitoringCheckDiagnostic(diagnostic ?? "The monitoring check did not return a result.");
+        }
+    }
+
+    private void ShowMonitoringCheckDiagnostic(string diagnostic)
+    {
+        StatusMessage = diagnostic;
+        MessageBox.Show(GetDialogOwner(), diagnostic, "Monitoring Check", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     [RelayCommand]
     private async Task ConfigureAgentMonitoringAsync(AgentRegistryEntryViewModel? agent)
     {
-        agent ??= AgentsViewModel.SelectedAgent;
+        agent ??= GetLocalAgent();
         if (!CanRunAgentConfigurationCommand(agent, AgentConfigurationTargetKind.HostMonitoring, "monitoring configuration"))
         {
             return;
         }
 
-        var targetAgent = agent!;
-        var settings = ShowHostMonitoringConfigurationDialog(
-            targetAgent,
-            "Apply",
-            "Configure Monitoring",
-            targetAgent.HostMonitoringConfiguration);
-        if (settings == null)
-        {
-            StatusMessage = "Monitoring configuration canceled.";
-            return;
-        }
-
-        if (!await SaveAgentMonitoringConfigurationAsync(targetAgent, requireViewerConnection: true, settings))
+        if (!TryBeginHostMonitoringAction())
         {
             return;
         }
 
-        await DeploySavedAgentMonitoringConfigurationAsync(targetAgent, showConfirmation: true);
+        try
+        {
+            var targetAgent = agent!;
+            var target = CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: true);
+            var backup = await ShowSaveMonitoringConfigurationAsync(target);
+            if (backup == null) return;
+            _hostMonitoringActionService.Value.RequireCurrentSettingsTarget(target);
+            var settings = ShowHostMonitoringConfigurationDialog(
+                targetAgent,
+                "Apply changes to this computer",
+                "Change config of my computer",
+                targetAgent.HostMonitoringConfiguration,
+                requiresComputerChangeAcknowledgement: true);
+            if (settings == null)
+            {
+                StatusMessage = "Monitoring configuration canceled.";
+                return;
+            }
+
+            _hostMonitoringActionService.Value.RequireCurrentSettingsTarget(target);
+            if (!ConfirmComputerConfigurationChange(restoring: false)) { StatusMessage = "Computer configuration change canceled."; return; }
+            var result = await new ViewerPreconfiguredAuditApplyWorkflow(_hostMonitoringActionService.Value, new WindowsSettingsFolderStore())
+                .ApplyAsync(target, backup.Entry, CreateHostMonitoringConfigurationDraft(targetAgent, settings));
+            ApplyHostMonitoringConfigurationResponse(targetAgent, result.Saved.Response);
+            if (result.Applied != null) ApplyMonitoringDeploymentResponse(targetAgent, result.Applied.Response);
+            StatusMessage = result.Summary;
+            AgentsViewModel.ApplyMonitoringActionProgress(targetAgent, result.Summary, result.Details);
+            new ProcInsider.AuditApplyResultDialog(new AuditApplyResultViewModel(result))
+                { Owner = GetDialogOwner() }.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = "Audit settings were not confirmed as applied: " + ex.Message;
+            MessageBox.Show(GetDialogOwner(), StatusMessage, "Apply audit settings", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            EndHostMonitoringAction();
+        }
     }
 
     [RelayCommand]
@@ -2617,12 +2736,23 @@ public partial class MainViewModel : ViewModelBase,
             return;
         }
 
-        await DeploySavedAgentMonitoringConfigurationAsync(agent!, showConfirmation: true);
+        if (!TryBeginHostMonitoringAction())
+        {
+            return;
+        }
+
+        try
+        {
+            await DeploySavedAgentMonitoringConfigurationAsync(agent!);
+        }
+        finally
+        {
+            EndHostMonitoringAction();
+        }
     }
 
     private async Task<bool> DeploySavedAgentMonitoringConfigurationAsync(
-        AgentRegistryEntryViewModel targetAgent,
-        bool showConfirmation)
+        AgentRegistryEntryViewModel targetAgent)
     {
         if (!HasSavedMonitoringConfiguration(targetAgent))
         {
@@ -2630,19 +2760,16 @@ public partial class MainViewModel : ViewModelBase,
             return false;
         }
 
-        if (showConfirmation)
+        if (!ConfirmComputerConfigurationChange(restoring: false))
         {
-            var warning =
-                "Deploy monitoring configuration through the selected local agent?\n\n" +
-                "This may change Sysmon configuration, Windows audit policy, command-line logging, event-log retention, PowerShell auditing, and scheduled dump policy.\n\n" +
-                "Deployment does not start capture.";
-            if (MessageBox.Show(warning, "Deploy Monitoring Configuration", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-            {
-                StatusMessage = "Monitoring deployment canceled.";
-                return false;
-            }
+            StatusMessage = "Computer configuration change canceled.";
+            return false;
         }
 
+        AgentsViewModel.ApplyMonitoringActionProgress(
+            targetAgent,
+            "Applying Windows Security monitoring...",
+            "The authenticated elevated Agent is preserving or reusing the first active original baseline before applying the selected policy and Security log settings.");
         var result = await _hostMonitoringActionService.Value.DeploySavedConfigurationAsync(
             CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: true));
         if (!result.Succeeded)
@@ -2652,53 +2779,172 @@ public partial class MainViewModel : ViewModelBase,
 
         var response = result.Response;
         ApplyMonitoringDeploymentResponse(targetAgent, response);
-        return response?.MonitoringDeployment != null;
+        return result.Succeeded &&
+               response?.MonitoringDeployment?.Status == AgentConfigurationOperationStatus.Success;
+    }
+
+    private static bool ConfirmComputerConfigurationChange(bool restoring)
+    {
+        var action = restoring ? "Restore recorded original settings" : "Apply the selected audit and logging settings";
+        var recovery = restoring
+            ? "Only settings with a recorded baseline can be restored. Later intentional changes may be replaced; unsupported or changed objects require manual review."
+            : "The Agent preserves the original supported settings before applying changes. Deployment does not start capture.";
+        return MessageBox.Show(
+            GetDialogOwner(),
+            $"{action} on {Environment.MachineName}?\n\n" +
+            HostMonitoringConfigurationViewModel.ComputerConfigurationWarning + "\n\n" + recovery,
+            "Change config of my computer",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
+    }
+
+    [RelayCommand]
+    private async Task SaveMonitoringConfigurationAsync()
+    {
+        var agent = GetLocalAgent();
+        if (!CanRunAgentConfigurationCommand(agent, AgentConfigurationTargetKind.HostMonitoring, "save monitoring configuration") ||
+            !TryBeginHostMonitoringAction()) return;
+        try
+        {
+            var target = CreateHostMonitoringActionTarget(agent!, requireViewerConnection: true);
+            await ShowSaveMonitoringConfigurationAsync(target);
+        }
+        catch (Exception ex) { StatusMessage = "Configuration export failed: " + ex.Message; }
+        finally { EndHostMonitoringAction(); }
+    }
+
+    private async Task<WindowsSettingsSaveResult?> ShowSaveMonitoringConfigurationAsync(ViewerHostMonitoringActionTarget target)
+    {
+            var settings = new WindowsSettingsTransferViewModel();
+            var form = new ProcInsider.WindowsSettingsTransferDialog(settings) { Owner = GetDialogOwner() };
+            if (form.ShowDialog() != true) { StatusMessage = "Saving configuration canceled."; return null; }
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Save current settings in a new hostname/timestamp subfolder",
+                InitialDirectory = WindowsSettingsFolderStore.PrepareDefaultDirectory(),
+                FileName = WindowsSettingsFolderStore.DefaultName(Environment.MachineName, DateTime.UtcNow),
+                Filter = "DFIRoscope settings export (*.dfirconfig)|*.dfirconfig", DefaultExt = ".dfirconfig", AddExtension = true
+            };
+            if (dialog.ShowDialog(GetDialogOwner()) != true) { StatusMessage = "Saving configuration canceled."; return null; }
+            var saved = await new ViewerWindowsSettingsTransferWorkflow(_hostMonitoringActionService.Value, new WindowsSettingsFolderStore())
+                .SaveWithResultAsync(target, settings.SelectedAreas, dialog.FileName);
+            StatusMessage = saved.Message;
+            return saved;
+    }
+
+    [RelayCommand]
+    private async Task RestoreSavedMonitoringConfigurationAsync()
+    {
+        var agent = GetLocalAgent();
+        if (!CanRunAgentConfigurationCommand(agent, AgentConfigurationTargetKind.HostMonitoring, "restore saved configuration") ||
+            !TryBeginHostMonitoringAction()) return;
+        try
+        {
+            var target = CreateHostMonitoringActionTarget(agent!, requireViewerConnection: true);
+            var workflow = new ViewerWindowsSettingsTransferWorkflow(_hostMonitoringActionService.Value, new WindowsSettingsFolderStore());
+            var directory = SessionPathService.GetMonitoringConfigurationDirectory();
+            WindowsSettingsFolderEntry[] entries = [];
+            var discoveryError = string.Empty;
+            try { entries = await workflow.ListAsync(target, directory); }
+            catch (Exception ex) { discoveryError = "Saved configurations could not be listed: " + ex.Message + " Use Browse to choose a folder."; }
+            _hostMonitoringActionService.Value.RequireCurrentSettingsTarget(target);
+            var settings = new WindowsSettingsTransferViewModel(entries, directory, discoveryError);
+            var form = new ProcInsider.WindowsSettingsTransferDialog(settings,
+                async folder => settings.AddBackup(await workflow.InspectAsync(target, folder))) { Owner = GetDialogOwner() };
+            if (form.ShowDialog() != true) { StatusMessage = "Restoration canceled; Windows settings were not changed."; return; }
+            var chosen = settings.SelectedBackup?.Entry ?? throw new InvalidOperationException("Choose a saved configuration.");
+            if (MessageBox.Show(GetDialogOwner(),
+                $"Restore the selected settings on {Environment.MachineName}?\n\nBackup: {chosen.FolderPath}\n\n" +
+                "The current selected settings will be saved before restoration. " + HostMonitoringConfigurationViewModel.ComputerConfigurationWarning,
+                "Restore saved config", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+            { StatusMessage = "Restoration canceled; Windows settings were not changed."; return; }
+            var result = await workflow.RestoreAsync(target, chosen, settings.SelectedAreas);
+            _hostMonitoringActionService.Value.RequireCurrentSettingsTarget(target);
+            ApplyHostMonitoringConfigurationResponse(agent!, result.Saved.Response);
+            if (result.Applied != null) ApplyMonitoringDeploymentResponse(agent!, result.Applied.Response);
+            StatusMessage = result.Summary;
+            AgentsViewModel.ApplyMonitoringActionProgress(agent!, result.Summary, result.Details);
+            MessageBox.Show(GetDialogOwner(), result.Summary + "\n\n" + result.Details,
+                "Restore saved config", MessageBoxButton.OK, result.Succeeded ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = "Saved configuration restoration failed: " + ex.Message;
+            MessageBox.Show(GetDialogOwner(), StatusMessage, "Restore saved config", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally { EndHostMonitoringAction(); }
     }
 
     [RelayCommand(CanExecute = nameof(CanReverseAgentMonitoringDeployment))]
     private async Task ReverseAgentMonitoringDeploymentAsync(AgentRegistryEntryViewModel? agent)
     {
-        agent ??= AgentsViewModel.SelectedAgent;
+        agent ??= GetLocalAgent();
         if (!CanRunAgentConfigurationCommand(agent, AgentConfigurationTargetKind.HostMonitoring, "monitoring reverse deployment"))
         {
             return;
         }
 
-        var targetAgent = agent!;
-        var warning =
-            $"Reverse the {ProductIdentity.DisplayName} monitoring deployment through the selected local agent?\n\n" +
-            "Only settings with recorded pre-deployment state are restored. Unsupported areas return manual cleanup guidance instead of guessing.";
-        if (MessageBox.Show(warning, "Reverse Monitoring Deployment", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        if (!TryBeginHostMonitoringAction())
         {
-            StatusMessage = "Monitoring reverse deployment canceled.";
             return;
         }
 
-        var result = await _hostMonitoringActionService.Value.ReverseSavedDeploymentAsync(
-            CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: true));
-        if (!result.Succeeded)
+        try
         {
-            StatusMessage = result.Diagnostic;
-        }
+            var targetAgent = agent!;
+            if (!ConfirmComputerConfigurationChange(restoring: true))
+            {
+                StatusMessage = "Monitoring reverse deployment canceled.";
+                return;
+            }
 
-        ApplyMonitoringDeploymentResponse(targetAgent, result.Response);
+            AgentsViewModel.ApplyMonitoringActionProgress(
+                targetAgent,
+                "Reverting Windows Security monitoring...",
+                "The authenticated elevated Agent is restoring only settings covered by the recorded original baseline.");
+            var result = await _hostMonitoringActionService.Value.ReverseSavedDeploymentAsync(
+                CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: true));
+            if (!result.Succeeded)
+            {
+                StatusMessage = result.Diagnostic;
+            }
+
+            ApplyMonitoringDeploymentResponse(targetAgent, result.Response);
+        }
+        finally
+        {
+            EndHostMonitoringAction();
+        }
     }
 
     private async Task LoadConnectedAgentMonitoringConfigurationAsync(AgentRegistryEntryViewModel targetAgent)
     {
-        var result = await _hostMonitoringActionService.Value.GetConfigurationAsync(
-            CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: false));
-        if (!result.Succeeded)
+        if (!TryBeginHostMonitoringAction())
         {
-            StatusMessage = result.Diagnostic;
+            return;
         }
 
-        var response = result.Response;
-
-        if (response?.HostMonitoringConfiguration != null)
+        try
         {
-            ApplyHostMonitoringConfigurationResponse(targetAgent, response);
-            StatusMessage = "Viewer connected to the local agent. Monitoring configuration and original baseline status were refreshed.";
+            var result = await _hostMonitoringActionService.Value.GetConfigurationAsync(
+                CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: false));
+            if (!result.Succeeded)
+            {
+                StatusMessage = result.Diagnostic;
+            }
+
+            var response = result.Response;
+
+            if (response?.HostMonitoringConfiguration != null)
+            {
+                ApplyHostMonitoringConfigurationResponse(targetAgent, response);
+                StatusMessage = "Viewer connected to the local agent. Monitoring configuration and original baseline status were refreshed.";
+            }
+        }
+        finally
+        {
+            EndHostMonitoringAction();
         }
     }
 
@@ -3059,10 +3305,17 @@ public partial class MainViewModel : ViewModelBase,
     private bool CanRunAgentConfigurationCommand(AgentRegistryEntryViewModel? agent, AgentConfigurationTargetKind targetKind, string actionName)
     {
         var featureId = targetKind == AgentConfigurationTargetKind.HostMonitoring
-            ? FeatureIds.SecurityMonitoringConfiguration
+            ? GetHostMonitoringFeatureId()
             : FeatureIds.AgentsAndCapture;
         if (!RequireFeaturePublished(featureId, actionName))
         {
+            return false;
+        }
+
+        if (targetKind == AgentConfigurationTargetKind.HostMonitoring &&
+            (Volatile.Read(ref _hostMonitoringActionInProgress) != 0 || _isLocalAgentSetupInProgress))
+        {
+            StatusMessage = "Another host-monitoring action is already in progress. Wait for its visible result before starting another action.";
             return false;
         }
 
@@ -3090,6 +3343,24 @@ public partial class MainViewModel : ViewModelBase,
         }
 
         return true;
+    }
+
+    private bool TryBeginHostMonitoringAction()
+    {
+        if (Interlocked.CompareExchange(ref _hostMonitoringActionInProgress, 1, 0) == 0)
+        {
+            NotifyAgentCommandCanExecuteChanged();
+            return true;
+        }
+
+        StatusMessage = "Another host-monitoring action is already in progress. Wait for its visible result before starting another action.";
+        return false;
+    }
+
+    private void EndHostMonitoringAction()
+    {
+        Interlocked.Exchange(ref _hostMonitoringActionInProgress, 0);
+        NotifyAgentCommandCanExecuteChanged();
     }
 
     private bool CanDeployAgent(AgentRegistryEntryViewModel? agent)
@@ -3195,6 +3466,8 @@ public partial class MainViewModel : ViewModelBase,
     private bool CanUseAiFeature() => FeaturePublication.AiAssistance;
 
     private bool CanUseSecurityMonitoringFeature() => FeaturePublication.SecurityMonitoringConfiguration;
+
+    private bool CanUseHostMonitoringFeature() => FeaturePublication.HostMonitoringConfiguration;
 
     private bool CanUseEventTelemetryFeature() => FeaturePublication.EventTelemetry;
 
@@ -3336,7 +3609,8 @@ public partial class MainViewModel : ViewModelBase,
             _sessionPaths.SessionId,
             _sessionPaths.SessionRoot,
             _captureWorkspaceCoordinator.Generation,
-            requireViewerConnection);
+            requireViewerConnection,
+            GetHostMonitoringConfigurationAreas());
 
     private bool IsAnyTrackedCaptureActive(bool includeStopping)
     {
@@ -3526,12 +3800,15 @@ public partial class MainViewModel : ViewModelBase,
 
     private bool CanReverseAgentMonitoringDeployment(AgentRegistryEntryViewModel? agent)
     {
-        agent ??= AgentsViewModel.SelectedAgent;
-        return _featureAccess.CanExecute(FeatureIds.SecurityMonitoringConfiguration, agent != null &&
+        agent ??= GetLocalAgent();
+        return _featureAccess.CanExecute(GetHostMonitoringFeatureId(), agent != null &&
+               Volatile.Read(ref _hostMonitoringActionInProgress) == 0 &&
+               !_isLocalAgentSetupInProgress &&
                !IsAgentShutdownInProgress &&
                IsAgentViewerConnected &&
                agent.IsViewerConnected &&
-               agent.HasMonitoringOriginalState &&
+               // The Agent re-reads and validates the protected baseline on invocation;
+               // a lost Apply response must not hide recovery behind an empty Viewer cache.
                IsLocalAgentControlTarget(agent));
     }
 
@@ -3914,81 +4191,66 @@ public partial class MainViewModel : ViewModelBase,
     /// <summary>
     /// Filter predicate for the collection view.
     /// </summary>
-    private bool FilterProcess(object obj)
+    private bool FilterProcess(object obj) => FilterProcess(obj, null);
+
+    private bool FilterProcess(object obj, string? excludedHeader)
     {
         if (obj is not ProcessRowViewModel vm)
             return false;
 
         // Check each filter
-        if (!string.IsNullOrWhiteSpace(FilterProcessName) &&
-            !vm.ProcessName.Contains(FilterProcessName, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.ProcessName, FilterProcessName))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterPid) &&
-            !vm.ProcessId.ToString().Contains(FilterPid))
+        if (!ColumnTextFilter.Matches(vm.ProcessId.ToString(), FilterPid))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterParentPid) &&
-            !vm.ParentProcessId.ToString().Contains(FilterParentPid))
+        if (!ColumnTextFilter.Matches(vm.ParentProcessId.ToString(), FilterParentPid))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterParentProcessName) &&
-            !vm.ParentProcessName.Contains(FilterParentProcessName, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.ParentProcessName, FilterParentProcessName))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterProcessPath) &&
-            !vm.ProcessPath.Contains(FilterProcessPath, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.ProcessPath, FilterProcessPath))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterCommandLine) &&
-            !vm.CommandLine.Contains(FilterCommandLine, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.CommandLine, FilterCommandLine))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterUserName) &&
-            !vm.UserName.Contains(FilterUserName, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.UserName, FilterUserName))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterSessionId) &&
-            !vm.SessionId.ToString().Contains(FilterSessionId))
+        if (!ColumnTextFilter.Matches(vm.SessionId.ToString(), FilterSessionId))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterArchitecture) &&
-            !vm.Architecture.Contains(FilterArchitecture, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.Architecture, FilterArchitecture))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterStartTime) &&
-            !vm.StartTimeDisplay.Contains(FilterStartTime, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.StartTimeDisplay, FilterStartTime))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterEndTime) &&
-            !vm.EndTimeDisplay.Contains(FilterEndTime, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.EndTimeDisplay, FilterEndTime))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterStatus) &&
-            !vm.StatusDisplay.Contains(FilterStatus, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.StatusDisplay, FilterStatus))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterCpuUsage) &&
-            !vm.CpuUsage.Contains(FilterCpuUsage, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.CpuUsage, FilterCpuUsage))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterMemoryUsage) &&
-            !vm.MemoryUsage.Contains(FilterMemoryUsage, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.MemoryUsage, FilterMemoryUsage))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterCompanyName) &&
-            !vm.CompanyName.Contains(FilterCompanyName, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.CompanyName, FilterCompanyName))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterFileDescription) &&
-            !vm.FileDescription.Contains(FilterFileDescription, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.FileDescription, FilterFileDescription))
             return false;
 
-        if (!string.IsNullOrWhiteSpace(FilterSha256Hash) &&
-            !vm.Sha256Hash.Contains(FilterSha256Hash, StringComparison.OrdinalIgnoreCase))
+        if (!ColumnTextFilter.Matches(vm.Sha256Hash, FilterSha256Hash))
             return false;
 
-        return IsProcessInActiveExplorerScope(vm) && IsProcessInScopedSelection(vm);
+        return IsProcessInActiveExplorerScope(vm) && IsProcessInScopedSelection(vm) && MatchesHeaderFilters(vm, excludedHeader);
     }
 
     /// <summary>
@@ -3997,6 +4259,8 @@ public partial class MainViewModel : ViewModelBase,
     [RelayCommand]
     public void ClearFilters()
     {
+        if (_headerFilters != null) foreach (var filter in _headerFilters.Values) filter.Reset(false);
+        if (_processListingService == null) ProcessesView?.Refresh();
         FilterProcessName = string.Empty;
         FilterPid = string.Empty;
         FilterParentPid = string.Empty;
@@ -5109,10 +5373,16 @@ public partial class MainViewModel : ViewModelBase,
             UpdateDataTabCount(DataTabKeys.SystemActivity, events.SystemActivityViewModel.VisibleActivityCount);
             UpdateDataTabCount(DataTabKeys.RuntimeEvents, events.RuntimeEventsViewModel.VisibleEventCount);
             UpdateDataTabCount(DataTabKeys.EtwEvents, events.EtwEventsViewModel.VisibleEventCount);
-            UpdateDataTabCount(DataTabKeys.SecurityEvents, events.SecurityEventsViewModel.VisibleEventCount);
             UpdateDataTabCount(DataTabKeys.PowerShellEvents, events.PowerShellEventsViewModel.VisibleEventCount);
             UpdateDataTabCount(DataTabKeys.WindowsOtherEvents, events.OtherWindowsEventsViewModel.VisibleEventCount);
             UpdateDataTabCount(DataTabKeys.SysmonEvents, events.SysmonEventsViewModel.VisibleEventCount);
+        }
+
+        if (_featureModules.TryGetActivated<WindowsSecurityEventsFeatureModule>(
+                FeatureIds.WindowsSecurityEvents,
+                out var windowsSecurity))
+        {
+            UpdateDataTabCount(DataTabKeys.SecurityEvents, windowsSecurity.ViewModel.VisibleEventCount);
         }
     }
 
@@ -6280,10 +6550,13 @@ public partial class MainViewModel : ViewModelBase,
     /// <summary>
     /// Opens Windows Event Viewer focused on a specific event log channel.
     /// </summary>
-    [RelayCommand(CanExecute = nameof(CanUseEventTelemetryFeature))]
+    [RelayCommand(CanExecute = nameof(CanOpenEventViewerLog))]
     public void OpenEventViewerLog(string? logName)
     {
-        if (!RequireFeaturePublished(FeatureIds.EventTelemetry, "Open Event Viewer log")) return;
+        var featureId = IsWindowsSecurityEventLog(logName)
+            ? FeatureIds.WindowsSecurityEvents
+            : FeatureIds.EventTelemetry;
+        if (!RequireFeaturePublished(featureId, "Open Event Viewer log")) return;
         if (string.IsNullOrWhiteSpace(logName))
         {
             StatusMessage = "No Event Viewer log was selected.";
@@ -6300,6 +6573,14 @@ public partial class MainViewModel : ViewModelBase,
             StatusMessage = $"Failed to open Event Viewer log '{logName}': {ex.Message}";
         }
     }
+
+    private bool CanOpenEventViewerLog(string? logName) =>
+        IsWindowsSecurityEventLog(logName)
+            ? FeaturePublication.WindowsSecurityEvents
+            : FeaturePublication.EventTelemetry;
+
+    private static bool IsWindowsSecurityEventLog(string? logName) =>
+        string.Equals(logName, "Security", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Opens an existing legacy Security Monitoring install log without creating it.
@@ -6319,10 +6600,10 @@ public partial class MainViewModel : ViewModelBase,
         }
     }
 
-    [RelayCommand(CanExecute = nameof(CanUseSecurityMonitoringFeature))]
+    [RelayCommand(CanExecute = nameof(CanUseHostMonitoringFeature))]
     public void OpenSecurityMonitoringPolicyProfile(ConfigProfileDefinition? profile)
     {
-        if (!RequireFeaturePublished(FeatureIds.SecurityMonitoringConfiguration, "Open security monitoring profile")) return;
+        if (!RequireFeaturePublished(GetHostMonitoringFeatureId(), "Open security monitoring profile")) return;
         if (profile == null)
         {
             StatusMessage = "No Security Monitoring profile was selected.";
@@ -6389,10 +6670,10 @@ public partial class MainViewModel : ViewModelBase,
         OpenConfigProfile(profile, "PowerShell Auditing");
     }
 
-    [RelayCommand(CanExecute = nameof(CanUseSecurityMonitoringFeature))]
+    [RelayCommand(CanExecute = nameof(CanUseHostMonitoringFeature))]
     public void OpenEventLogPolicyProfile(ConfigProfileDefinition? profile)
     {
-        if (!RequireFeaturePublished(FeatureIds.SecurityMonitoringConfiguration, "Open Event Log policy profile")) return;
+        if (!RequireFeaturePublished(GetHostMonitoringFeatureId(), "Open Event Log policy profile")) return;
         OpenConfigProfile(profile, "Event Log Policy");
     }
 
@@ -6690,6 +6971,8 @@ public partial class MainViewModel : ViewModelBase,
 
         await BeginStagingLoadOperationAsync($"Validating selected {ProductIdentity.DisplayName} capture package...");
         var committed = false;
+        var operationCompleted = false;
+        string? openFailure = null;
         string? directDatabasePathToPrepare = null;
         string? directSessionIdToPrepare = null;
         TelemetryStoreStats? stats = null;
@@ -6700,14 +6983,17 @@ public partial class MainViewModel : ViewModelBase,
                 captureManifestPath,
                 CreateWorkspaceTransitionCallbacks(),
                 new Progress<ViewerWorkspaceLifecycleProgress>(progress =>
+                {
+                    if (operationCompleted) return;
                     UpdateStagingLoadProgress(
                         1,
                         9,
                         progress.Message,
-                        progress.IsIndeterminate)));
+                        progress.IsIndeterminate);
+                }));
             if (!transition.Succeeded)
             {
-                StatusMessage = transition.PreviousWorkspaceReleased
+                openFailure = transition.PreviousWorkspaceReleased
                     ? $"Open capture failed after the previous workspace was released; no capture is active: {transition.Error}"
                     : $"Open capture failed; current viewer state was kept: {transition.Error}";
                 return;
@@ -6746,7 +7032,7 @@ public partial class MainViewModel : ViewModelBase,
         }
         catch (Exception ex)
         {
-            StatusMessage = committed
+            openFailure = committed
                 ? $"Capture was opened, but viewer refresh failed: {ex.Message}"
                 : _captureWorkspaceCoordinator.Mode == CaptureWorkspaceMode.None
                     ? $"Open capture failed after the previous workspace was released; no capture is active: {ex.Message}"
@@ -6754,7 +7040,13 @@ public partial class MainViewModel : ViewModelBase,
         }
         finally
         {
+            operationCompleted = true;
             EndStagingLoadOperation();
+            if (openFailure != null)
+            {
+                StatusMessage = openFailure;
+                MessageBox.Show(GetDialogOwner(), openFailure, "Open Capture", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
             if (committed && !string.IsNullOrWhiteSpace(directDatabasePathToPrepare))
             {
                 await _liveSnapshotRefreshCoordinator.StartAnalysisPreparationAsync(
@@ -6823,6 +7115,17 @@ public partial class MainViewModel : ViewModelBase,
             _ => $"Snapshot refresh failed; the current viewer state was kept: {result.Error}"
         };
     }
+
+    [RelayCommand(CanExecute = nameof(CanCancelSnapshotRefresh))]
+    private void CancelSnapshotRefresh()
+    {
+        _snapshotRefreshOperation?.Cancel();
+        SnapshotRefreshProgressDetail = "Cancel requested — stopping database work; displayed rows will be kept.";
+        CancelSnapshotRefreshCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool CanCancelSnapshotRefresh() =>
+        _snapshotRefreshOperation is { CanCancel: true };
 
     [RelayCommand]
     private void SelectManualSnapshotMode()
@@ -6906,6 +7209,8 @@ public partial class MainViewModel : ViewModelBase,
         IProgress<ViewerSnapshotRefreshRuntimeProgress>? progress,
         CancellationToken cancellationToken)
     {
+        using var operation = new ViewerRefreshOperation(cancellationToken);
+        cancellationToken = operation.Token;
         var presentationRequest = await InvokeOnViewerDispatcherAsync(
             () => CaptureSnapshotPresentationRequest(request),
             cancellationToken);
@@ -6944,11 +7249,40 @@ public partial class MainViewModel : ViewModelBase,
         }
 
         PreparedSnapshotPresentation? prepared = null;
+        var headerQueriesSuspended = false;
         var viewPublished = false;
         var publicationElapsedMilliseconds = 0d;
         var totalTimer = Stopwatch.StartNew();
         try
         {
+            await InvokeOnViewerDispatcherAsync(() =>
+            {
+                _snapshotRefreshOperation = operation;
+                IsSnapshotRefreshActive = true;
+                SnapshotRefreshProgressDetail = string.Empty;
+                CancelSnapshotRefreshCommand.NotifyCanExecuteChanged();
+            }, cancellationToken);
+            long latestStage = 0;
+            var stageNumber = 0;
+            var measuredProgress = new InlineViewerProgress<SqliteWorkProgress>(update =>
+            {
+                var dispatcher = Application.Current?.Dispatcher;
+                void Apply()
+                {
+                    if (!ReferenceEquals(_snapshotRefreshOperation, operation) ||
+                        operation.IsCancellationRequested || update.StageId < latestStage) return;
+                    if (update.StageId != latestStage) { latestStage = update.StageId; stageNumber++; }
+                    var display = ViewerRefreshProgressPresentation.Create(update, stageNumber);
+                    SnapshotRefreshProgressTitle = display.Title;
+                    SnapshotRefreshProgressDetail = display.Detail;
+                    SnapshotRefreshProgressCurrent = display.Completed;
+                    SnapshotRefreshProgressMaximum = display.Maximum;
+                    IsSnapshotRefreshProgressIndeterminate = display.IsIndeterminate;
+                }
+                if (dispatcher == null || dispatcher.CheckAccess()) Apply();
+                else _ = dispatcher.BeginInvoke(Apply, DispatcherPriority.Background);
+            });
+            using var workScope = new SqliteWorkScope(cancellationToken, measuredProgress);
             await ReportProgressAsync(
                 ViewerSnapshotRefreshRuntimePhase.PreparingCandidate,
                 1,
@@ -7002,6 +7336,14 @@ public partial class MainViewModel : ViewModelBase,
                         4,
                         "The prepared generation is waiting for current viewer queries to drain.",
                         isIndeterminate: true);
+                    await InvokeOnViewerDispatcherAsync(() =>
+                    {
+                        if (!headerQueriesSuspended)
+                        {
+                            headerQueriesSuspended = true;
+                            SuspendHeaderQueries();
+                        }
+                    }, token);
                     await WaitForWorkspaceQueriesToDrainAsync(token);
                 },
                 preparePresentation: async (candidate, token) =>
@@ -7130,6 +7472,17 @@ public partial class MainViewModel : ViewModelBase,
         }
         finally
         {
+            await InvokeOnViewerDispatcherAsync(() =>
+            {
+                if (ReferenceEquals(_snapshotRefreshOperation, operation))
+                {
+                    _snapshotRefreshOperation = null;
+                    IsSnapshotRefreshActive = false;
+                    CancelSnapshotRefreshCommand.NotifyCanExecuteChanged();
+                }
+            }, CancellationToken.None);
+            if (headerQueriesSuspended)
+                await InvokeOnViewerDispatcherAsync(ResumeHeaderQueries, CancellationToken.None);
             if (isManual)
             {
                 await InvokeOnViewerDispatcherAsync(
@@ -7200,19 +7553,14 @@ public partial class MainViewModel : ViewModelBase,
             var firstPage = await listingService.GetPageAsync(
                 request.ListingQuery,
                 cancellationToken);
-            var selected = await PrepareProcessAnchorPageAsync(
-                listingService,
-                request.ListingQuery,
+            var anchors = new ProcessListingAnchorResolver(listingService, request.ListingQuery, firstPage);
+            var selected = await anchors.ResolveAsync(
                 request.SelectedProcessEntityId,
                 request.SelectedProcessKey,
-                firstPage,
                 cancellationToken);
-            var viewport = await PrepareProcessAnchorPageAsync(
-                listingService,
-                request.ListingQuery,
+            var viewport = await anchors.ResolveAsync(
                 request.ViewportAnchor?.ProcessEntityId ?? string.Empty,
                 request.ViewportAnchor?.ProcessKey ?? string.Empty,
-                firstPage,
                 cancellationToken);
 
             Interlocked.Increment(ref _activeExplorerRefreshCount);
@@ -7331,6 +7679,10 @@ public partial class MainViewModel : ViewModelBase,
     {
         cancellationToken.ThrowIfCancellationRequested();
         ValidatePreparedPresentationIsCurrent(prepared.Request);
+        _snapshotRefreshOperation?.BeginPublication();
+        CancelSnapshotRefreshCommand.NotifyCanExecuteChanged();
+        using var publicationProgress = SqliteWorkScope.Begin("Publishing prepared results", 1, "generation");
+        CloseHeaderFilters();
 
         var queryService = activation.Binding.QueryService
             ?? throw new InvalidOperationException(
@@ -7470,6 +7822,7 @@ public partial class MainViewModel : ViewModelBase,
         {
             _isPublishingSnapshotPresentation = false;
         }
+        publicationProgress.Advance(1);
     }
 
     private void ValidatePreparedPresentationIsCurrent(
@@ -7553,59 +7906,6 @@ public partial class MainViewModel : ViewModelBase,
         }
 
         return null;
-    }
-
-    private static async Task<(int Index, ProcessListingWindow? Page)> PrepareProcessAnchorPageAsync(
-        ProcessListingService listingService,
-        ProcessListingQuery query,
-        string processEntityId,
-        string processKey,
-        ProcessListingWindow firstPage,
-        CancellationToken cancellationToken)
-    {
-        var resolvedKey = processKey;
-        if (!string.IsNullOrWhiteSpace(processEntityId))
-        {
-            var lookup = await listingService.FindProcessByEntityIdAsync(
-                processEntityId,
-                cancellationToken);
-            resolvedKey = lookup.IsFound && !string.IsNullOrWhiteSpace(lookup.Process?.ProcessKey)
-                ? lookup.Process.ProcessKey
-                : processKey;
-        }
-
-        if (string.IsNullOrWhiteSpace(resolvedKey))
-        {
-            return (-1, null);
-        }
-
-        var index = await listingService.GetProcessRowIndexAsync(
-            resolvedKey,
-            query,
-            cancellationToken);
-        if (index < 0)
-        {
-            return (-1, null);
-        }
-
-        var offset = (index / query.PageSize) * query.PageSize;
-        if (offset == 0)
-        {
-            return (index, firstPage);
-        }
-
-        var page = await listingService.GetPageAsync(
-            new ProcessListingQuery
-            {
-                Filters = query.Filters,
-                Sort = query.Sort,
-                Offset = offset,
-                PageSize = query.PageSize,
-                Cursor = null,
-                IncludeTotalCount = false
-            },
-            cancellationToken);
-        return (index, page);
     }
 
     private ViewerSnapshotFollowWorkspace CreateSnapshotFollowWorkspace(
@@ -7875,73 +8175,80 @@ public partial class MainViewModel : ViewModelBase,
 
     private async Task DetachAndReleaseCurrentWorkspaceAsync()
     {
-        _viewerNavigationCoordinator.InvalidateProcessNavigation();
-        await _selectedProcessFanOutCoordinator.RebindWorkspaceAsync(
-            _captureWorkspaceCoordinator.Generation);
-        await _liveSnapshotRefreshCoordinator.ReleaseActiveBindingAsync();
-        _dbRefreshDebounceTimer?.Stop();
-        _processListingRefreshCts?.Cancel();
-        _processListingRefreshCts?.Dispose();
-        _processListingRefreshCts = null;
-        var previousVirtualListing = DetachVirtualizedProcessListing();
-        previousVirtualListing?.Dispose();
-
-        if (_featureModules.TryGetActivated<AgentFeatureModule>(FeatureIds.AgentsAndCapture, out var agentFeature))
+        await InvokeOnViewerDispatcherAsync(SuspendHeaderQueries, CancellationToken.None);
+        try
         {
-            agentFeature.StatusTimer.Stop();
+            while (Volatile.Read(ref _activeHeaderQueryCount) > 0) await Task.Delay(25);
+            _viewerNavigationCoordinator.InvalidateProcessNavigation();
+            await _selectedProcessFanOutCoordinator.RebindWorkspaceAsync(
+                _captureWorkspaceCoordinator.Generation);
+            await _liveSnapshotRefreshCoordinator.ReleaseActiveBindingAsync();
+            _dbRefreshDebounceTimer?.Stop();
+            _processListingRefreshCts?.Cancel();
+            _processListingRefreshCts?.Dispose();
+            _processListingRefreshCts = null;
+            var previousVirtualListing = DetachVirtualizedProcessListing();
+            previousVirtualListing?.Dispose();
+
+            if (_featureModules.TryGetActivated<AgentFeatureModule>(FeatureIds.AgentsAndCapture, out var agentFeature))
+            {
+                agentFeature.StatusTimer.Stop();
+            }
+
+            ResetAgentStateForSessionSwitch();
+
+            _processListingService = null;
+            _sqliteStagingQueryService = null;
+            _annotationStore = null;
+            _telemetryProjectionService.SetSqliteStagingQueryService(null);
+
+            await WaitForWorkspaceQueriesToDrainAsync();
+            while (previousVirtualListing?.IsLoading == true)
+            {
+                await Task.Delay(25);
+            }
+
+            ProcessDescriptionViewModel.SetAnnotationStore(null);
+            ProcessDescriptionViewModel.SetWorkspace(null, _captureWorkspaceCoordinator.Generation);
+            NotesViewModel.SetAnnotationStore(null);
+            if (_featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var ai))
+            {
+                ai.DetachWorkspace();
+            }
+
+            _hasActiveQueryDatabase = false;
+            _activeCapturePackageInfo = null;
+            LiveDatabasePath = string.Empty;
+            SnapshotDatabasePath = string.Empty;
+            SnapshotTimestampDisplay = "Snapshot: not loaded";
+            ActiveSessionFolder = "Capture: switching";
+
+            ClearViewerStateForSessionSwitch();
+            if (_featureModules.TryGetActivated<BaselineComparisonFeatureModule>(FeatureIds.BaselineComparison, out var baseline))
+            {
+                baseline.DetachWorkspace();
+            }
+
+            if (_featureModules.TryGetActivated<AgentFeatureModule>(FeatureIds.AgentsAndCapture, out var activatedAgentFeature))
+            {
+                activatedAgentFeature.AgentsViewModel.ApplyTelemetryStats(new TelemetryStoreStats());
+            }
+
+            if (_featureModules.TryGetActivated<SearchFeatureModule>(FeatureIds.SearchAndSigma, out var search))
+            {
+                search.DetachWorkspace();
+            }
+
+            DetachCompiledPrivateFeatureWorkspace();
         }
-
-        ResetAgentStateForSessionSwitch();
-
-        _processListingService = null;
-        _sqliteStagingQueryService = null;
-        _annotationStore = null;
-        _telemetryProjectionService.SetSqliteStagingQueryService(null);
-
-        await WaitForWorkspaceQueriesToDrainAsync();
-        while (previousVirtualListing?.IsLoading == true)
-        {
-            await Task.Delay(25);
-        }
-
-        ProcessDescriptionViewModel.SetAnnotationStore(null);
-        ProcessDescriptionViewModel.SetWorkspace(null, _captureWorkspaceCoordinator.Generation);
-        NotesViewModel.SetAnnotationStore(null);
-        if (_featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var ai))
-        {
-            ai.DetachWorkspace();
-        }
-
-        _hasActiveQueryDatabase = false;
-        _activeCapturePackageInfo = null;
-        LiveDatabasePath = string.Empty;
-        SnapshotDatabasePath = string.Empty;
-        SnapshotTimestampDisplay = "Snapshot: not loaded";
-        ActiveSessionFolder = "Capture: switching";
-
-        ClearViewerStateForSessionSwitch();
-        if (_featureModules.TryGetActivated<BaselineComparisonFeatureModule>(FeatureIds.BaselineComparison, out var baseline))
-        {
-            baseline.DetachWorkspace();
-        }
-
-        if (_featureModules.TryGetActivated<AgentFeatureModule>(FeatureIds.AgentsAndCapture, out var activatedAgentFeature))
-        {
-            activatedAgentFeature.AgentsViewModel.ApplyTelemetryStats(new TelemetryStoreStats());
-        }
-
-        if (_featureModules.TryGetActivated<SearchFeatureModule>(FeatureIds.SearchAndSigma, out var search))
-        {
-            search.DetachWorkspace();
-        }
-
-        DetachCompiledPrivateFeatureWorkspace();
+        finally { await InvokeOnViewerDispatcherAsync(ResumeHeaderQueries, CancellationToken.None); }
     }
 
     private async Task WaitForWorkspaceQueriesToDrainAsync(
         CancellationToken cancellationToken = default)
     {
-        while (Volatile.Read(ref _activeDbRefreshCount) > 0 ||
+        while (Volatile.Read(ref _activeHeaderQueryCount) > 0 ||
+               Volatile.Read(ref _activeDbRefreshCount) > 0 ||
                Volatile.Read(ref _activeExplorerRefreshCount) > 0 ||
                _agentCaptureWorkflowCoordinator.State.IsPollRunning)
         {
@@ -7958,6 +8265,7 @@ public partial class MainViewModel : ViewModelBase,
         ProcessListingService? listingService,
         string? directArchivedDatabasePath = null)
     {
+        CloseHeaderFilters();
         _sessionPaths = sessionPaths;
         _activeCapturePackageInfo = capturePackageInfo;
         _annotationStore = annotationStore;
@@ -8117,7 +8425,9 @@ public partial class MainViewModel : ViewModelBase,
 
     private StartLiveCaptureCommand CreateStartLiveCaptureCommand()
     {
-        var selectedProfile = SelectedEtwCaptureProfile;
+        var eventTelemetryPublished = FeaturePublication.EventTelemetry;
+        var windowsSecurityPublished = FeaturePublication.WindowsSecurityEvents;
+        var selectedProfile = eventTelemetryPublished ? SelectedEtwCaptureProfile : null;
         return new StartLiveCaptureCommand
         {
             CaptureId = BuildViewerCaptureId(),
@@ -8128,23 +8438,31 @@ public partial class MainViewModel : ViewModelBase,
                 ? string.Empty
                 : _configProfileService.ResolveProfileFilePath(selectedProfile) ?? string.Empty,
             CollectRuntimeEvents = true,
-            CollectEtwEvents = IsEtwCollectionEnabled,
-            CollectSecurityEvents = IsWindowsAuditLogCollectionEnabled,
-            CollectPowerShellEvents = IsPowerShellLogCollectionEnabled,
-            CollectOtherWindowsEvents = IsWindowsOtherLogCollectionEnabled,
-            CollectSysmonEvents = IsSysmonIntegrationEnabled
+            CollectEtwEvents = eventTelemetryPublished && IsEtwCollectionEnabled,
+            CollectSecurityEvents = windowsSecurityPublished && IsWindowsAuditLogCollectionEnabled,
+            CollectPowerShellEvents = eventTelemetryPublished && IsPowerShellLogCollectionEnabled,
+            CollectOtherWindowsEvents = eventTelemetryPublished && IsWindowsOtherLogCollectionEnabled,
+            CollectSysmonEvents = eventTelemetryPublished && IsSysmonIntegrationEnabled
         };
     }
 
     private HostMonitoringConfigurationViewModel CreateHostMonitoringConfigurationSettings(
         AgentHostMonitoringConfiguration? configuration = null)
     {
+        var windowsSecurityOnly = IsWindowsSecurityOnlyPublication();
+        var securityProfiles = windowsSecurityOnly
+            ? _configProfileService.GetProfiles(ConfigProfileKind.WindowsSecurityAuditPolicy)
+            : SecurityMonitoringPolicyProfiles;
+        var eventLogProfiles = windowsSecurityOnly
+            ? _configProfileService.GetProfiles(ConfigProfileKind.WindowsSecurityEventLogs)
+            : EventLogPolicyProfiles;
         var settings = new HostMonitoringConfigurationViewModel(
             EtwCaptureProfiles,
             SysmonConfigProfiles,
-            SecurityMonitoringPolicyProfiles,
+            securityProfiles,
             PowerShellAuditingProfiles,
-            EventLogPolicyProfiles);
+            eventLogProfiles,
+            _featureAccess.Catalog);
 
         if (configuration != null)
         {
@@ -8156,18 +8474,18 @@ public partial class MainViewModel : ViewModelBase,
                 SysmonConfigProfiles,
                 profileId: null);
             settings.SelectedSecurityMonitoringProfile = HostMonitoringConfigurationViewModel.SelectProfile(
-                SecurityMonitoringPolicyProfiles,
+                securityProfiles,
                 profileId: null);
             settings.SelectedPowerShellAuditingProfile = HostMonitoringConfigurationViewModel.SelectProfile(
                 PowerShellAuditingProfiles,
                 profileId: null);
             settings.SelectedEventLogProfile = HostMonitoringConfigurationViewModel.SelectProfile(
-                EventLogPolicyProfiles,
+                eventLogProfiles,
                 profileId: null);
             settings.SelectedEtwProfile = HostMonitoringConfigurationViewModel.SelectProfile(
                 EtwCaptureProfiles,
                 SelectedEtwCaptureProfile?.Id);
-            settings.TranscriptDirectory = TranscriptPath;
+            settings.TranscriptDirectory = windowsSecurityOnly ? string.Empty : TranscriptPath;
         }
 
         return settings;
@@ -8183,27 +8501,34 @@ public partial class MainViewModel : ViewModelBase,
         var powerShellProfile = settings.SelectedPowerShellAuditingProfile;
         var eventLogProfile = settings.SelectedEventLogProfile;
         var etwProfile = settings.SelectedEtwProfile;
+        var windowsSecurityOnly = IsWindowsSecurityOnlyPublication();
 
-        return new AgentHostMonitoringConfiguration
+        var draft = new AgentHostMonitoringConfiguration
         {
             AgentId = agent.AgentId,
             HostId = FirstNonEmpty(agent.HostId, Environment.MachineName),
             ConfigurationVersion = "viewer-current-monitoring",
-            Sysmon = new AgentSysmonMonitoringIntent
-            {
-                InstallOrUpdate = settings.InstallOrUpdateSysmon,
-                VerifyService = settings.VerifySysmonService,
-                ProfileId = sysmonProfile?.Id ?? string.Empty,
-                ProfileDisplayName = GetProfileName(sysmonProfile),
-                ConfigurationPath = ResolveConfigProfileFilePath(sysmonProfile)
-            },
+            ConfigurationAreas = GetHostMonitoringConfigurationAreas(),
+            Sysmon = windowsSecurityOnly
+                ? new AgentSysmonMonitoringIntent { VerifyService = false }
+                : new AgentSysmonMonitoringIntent
+                {
+                    InstallOrUpdate = settings.InstallOrUpdateSysmon,
+                    VerifyService = settings.VerifySysmonService,
+                    ProfileId = sysmonProfile?.Id ?? string.Empty,
+                    ProfileDisplayName = GetProfileName(sysmonProfile),
+                    ConfigurationPath = ResolveConfigProfileFilePath(sysmonProfile)
+                },
             SecurityAuditPolicy = new AgentSecurityAuditMonitoringIntent
             {
                 ConfigureAuditPolicy = settings.ConfigureAuditPolicy,
+                AuditUserDataFolders = settings.ConfigureAuditPolicy && settings.AuditUserDataFolders,
+                AuditRegistryWrites = settings.ConfigureAuditPolicy && settings.AuditRegistryWrites,
                 EnableProcessCommandLineLogging = settings.EnableProcessCommandLineLogging,
                 PolicyProfileId = securityProfile?.Id ?? string.Empty,
                 PolicyProfileDisplayName = GetProfileName(securityProfile),
-                AuditPolicyPath = ResolveConfigProfileFilePath(securityProfile)
+                // The Agent resolves its own bundled copy; split packages have separate roots.
+                AuditPolicyPath = windowsSecurityOnly ? string.Empty : ResolveConfigProfileFilePath(securityProfile)
             },
             EventLogs = new AgentEventLogMonitoringIntent
             {
@@ -8211,37 +8536,46 @@ public partial class MainViewModel : ViewModelBase,
                 ConfigureRetention = settings.ConfigureEventLogRetention,
                 ProfileId = eventLogProfile?.Id ?? string.Empty,
                 ProfileDisplayName = GetProfileName(eventLogProfile),
-                ChannelNames =
-                [
-                    "Security",
+                ChannelNames = windowsSecurityOnly
+                    ? ["Security"]
+                    :
+                    [
                     "System",
                     "Application",
                     "Windows PowerShell",
                     "Microsoft-Windows-PowerShell/Operational",
                     "Microsoft-Windows-Sysmon/Operational"
-                ]
+                    ]
             },
-            PowerShellAuditing = new AgentPowerShellMonitoringIntent
-            {
-                EnableScriptBlockLogging = settings.EnablePowerShellScriptBlockLogging,
-                EnableModuleLogging = settings.EnablePowerShellModuleLogging,
-                EnableTranscription = settings.EnablePowerShellTranscription,
-                ProfileId = powerShellProfile?.Id ?? string.Empty,
-                TranscriptDirectory = settings.TranscriptDirectory
-            },
-            Etw = new AgentEtwMonitoringIntent
-            {
-                ConfigureSession = settings.ConfigureEtwSession,
-                ProfileId = etwProfile?.Id ?? string.Empty,
-                ProfileDisplayName = GetProfileName(etwProfile),
-                ProfilePath = ResolveConfigProfileFilePath(etwProfile)
-            },
+            PowerShellAuditing = windowsSecurityOnly
+                ? new AgentPowerShellMonitoringIntent()
+                : new AgentPowerShellMonitoringIntent
+                {
+                    EnableScriptBlockLogging = settings.EnablePowerShellScriptBlockLogging,
+                    EnableModuleLogging = settings.EnablePowerShellModuleLogging,
+                    EnableTranscription = settings.EnablePowerShellTranscription,
+                    ProfileId = powerShellProfile?.Id ?? string.Empty,
+                    TranscriptDirectory = settings.TranscriptDirectory
+                },
+            Etw = windowsSecurityOnly
+                ? new AgentEtwMonitoringIntent()
+                : new AgentEtwMonitoringIntent
+                {
+                    ConfigureSession = settings.ConfigureEtwSession,
+                    ProfileId = etwProfile?.Id ?? string.Empty,
+                    ProfileDisplayName = GetProfileName(etwProfile),
+                    ProfilePath = ResolveConfigProfileFilePath(etwProfile)
+                },
             ScheduledDumps = new AgentScheduledDumpPolicy
             {
                 Enabled = false,
-                OutputDirectory = _sessionPaths.DumpsDirectory
+                OutputDirectory = windowsSecurityOnly ? string.Empty : _sessionPaths.DumpsDirectory
             }
         };
+
+        return windowsSecurityOnly
+            ? AgentHostMonitoringConfigurationAreas.CreateWindowsSecurityScopedDraft(draft)
+            : draft;
     }
 
     private AgentCaptureConfiguration CreateCaptureConfigurationDraft(
@@ -8363,11 +8697,13 @@ public partial class MainViewModel : ViewModelBase,
         AgentRegistryEntryViewModel agent,
         string primaryButtonContent,
         string title,
-        AgentHostMonitoringConfiguration? configuration)
+        AgentHostMonitoringConfiguration? configuration,
+        bool requiresComputerChangeAcknowledgement)
     {
         var dialog = new ProcInsider.HostMonitoringConfigurationDialog(
             CreateHostMonitoringConfigurationSettings(configuration ?? agent.HostMonitoringConfiguration),
-            primaryButtonContent)
+            primaryButtonContent,
+            requiresComputerChangeAcknowledgement)
         {
             Owner = GetDialogOwner(),
             Title = title
@@ -10751,7 +11087,7 @@ public partial class MainViewModel : ViewModelBase,
         SetProcessMonitorCaptureRunState(CaptureRunState.Off);
     }
 
-    private async Task<AgentIpcResponse?> SubmitAgentCommandAsync(
+    private Task<AgentIpcResponse?> SubmitAgentCommandAsync(
         AgentCommand command,
         string action,
         bool startAgentIfNeeded = true,
@@ -10759,6 +11095,29 @@ public partial class MainViewModel : ViewModelBase,
         bool observeWorkflow = true,
         CancellationToken cancellationToken = default)
     {
+        // Headless workflows may continue on a pool thread between commands. Both preparation
+        // and response projection touch WPF state and must execute on the Viewer dispatcher.
+        var expectedWorkspaceGeneration = _captureWorkspaceCoordinator.Generation;
+        return DispatchViewerAsync(
+            () => SubmitAgentCommandOnViewerThreadAsync(command, action, startAgentIfNeeded,
+                requireViewerConnection, observeWorkflow, expectedWorkspaceGeneration, cancellationToken), cancellationToken);
+    }
+
+    private async Task<AgentIpcResponse?> SubmitAgentCommandOnViewerThreadAsync(
+        AgentCommand command,
+        string action,
+        bool startAgentIfNeeded,
+        bool requireViewerConnection,
+        bool observeWorkflow,
+        long expectedWorkspaceGeneration,
+        CancellationToken cancellationToken)
+    {
+        if (expectedWorkspaceGeneration != _captureWorkspaceCoordinator.Generation)
+        {
+            return AgentIpcResponse.Failure(command.CommandId,
+                ViewerAgentCommandErrorCodes.WorkspaceSuperseded,
+                "The capture workspace changed while the command waited for the Viewer. No command was submitted.");
+        }
         var executionContext = CreateViewerAgentCommandExecutionContext(
             command,
             requireViewerConnection);
@@ -11282,7 +11641,7 @@ public partial class MainViewModel : ViewModelBase,
             response = response with
             {
                 ErrorCode = ViewerAgentCommandErrorCodes.CommandOutcomeUnknown,
-                ErrorMessage = UnknownAgentCommandOutcomeDiagnostic,
+                ErrorMessage = UnknownAgentCommandOutcomeDiagnostic + "\n\n" + result.Diagnostic,
                 IsRetryable = false
             };
             StatusMessage =
@@ -12493,12 +12852,24 @@ public partial class MainViewModel : ViewModelBase,
             return;
         }
 
+        if (RequiresTreeAwareCompatibilityRebuild(columnName, hasProcessListingService: false))
+        {
+            UpdateProcessList(GetProjectedProcesses());
+            return;
+        }
+
         ProcessesView?.SortDescriptions.Clear();
         ProcessesView?.SortDescriptions.Add(new SortDescription(
             columnName,
             _sortAscending ? ListSortDirection.Ascending : ListSortDirection.Descending));
         ProcessesView?.Refresh();
     }
+
+    internal static bool RequiresTreeAwareCompatibilityRebuild(
+        string columnName,
+        bool hasProcessListingService)
+        => !hasProcessListingService &&
+           string.Equals(columnName, "Tree", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Gets the current sort direction for a column (for UI indicators).
@@ -12806,10 +13177,18 @@ public partial class MainViewModel : ViewModelBase,
         {
             AddSelectedProcessEventConsumer(consumers, "runtime-events", events.RuntimeEventsViewModel);
             AddSelectedProcessEventConsumer(consumers, "etw-events", events.EtwEventsViewModel);
-            AddSelectedProcessEventConsumer(consumers, "security-events", events.SecurityEventsViewModel);
             AddSelectedProcessEventConsumer(consumers, "powershell-events", events.PowerShellEventsViewModel);
             AddSelectedProcessEventConsumer(consumers, "windows-other-events", events.OtherWindowsEventsViewModel);
             AddSelectedProcessEventConsumer(consumers, "sysmon-events", events.SysmonEventsViewModel);
+        }
+
+
+        if ((!featureId.HasValue || featureId.Value == FeatureIds.WindowsSecurityEvents) &&
+            _featureModules.TryGetActivated<WindowsSecurityEventsFeatureModule>(
+                FeatureIds.WindowsSecurityEvents,
+                out var windowsSecurity))
+        {
+            AddSelectedProcessEventConsumer(consumers, "security-events", windowsSecurity.ViewModel);
         }
 
         AddCompiledPrivateSelectedProcessConsumers(featureId, consumers);
@@ -13598,10 +13977,33 @@ public partial class MainViewModel : ViewModelBase,
 
     private void LoadSecurityMonitoringProfileManifests()
     {
+        if (IsWindowsSecurityOnlyPublication())
+        {
+            UpdateSecurityMonitoringPolicyProfiles(
+                _configProfileService.GetProfiles(ConfigProfileKind.WindowsSecurityAuditPolicy));
+            UpdatePowerShellAuditingProfiles([]);
+            UpdateEventLogPolicyProfiles(
+                _configProfileService.GetProfiles(ConfigProfileKind.WindowsSecurityEventLogs));
+            return;
+        }
+
         UpdateSecurityMonitoringPolicyProfiles(_securityMonitoringService.GetPolicyProfiles());
         UpdatePowerShellAuditingProfiles(_powerShellAuditingService.GetAuditingProfiles());
         UpdateEventLogPolicyProfiles(_configProfileService.GetProfiles(ConfigProfileKind.EventLogs));
     }
+
+    private bool IsWindowsSecurityOnlyPublication() =>
+        FeaturePublication.WindowsSecurityEvents;
+
+    private FeatureId GetHostMonitoringFeatureId() =>
+        IsWindowsSecurityOnlyPublication()
+            ? FeatureIds.WindowsSecurityEvents
+            : FeatureIds.SecurityMonitoringConfiguration;
+
+    private AgentConfigurationAreaKind[] GetHostMonitoringConfigurationAreas() =>
+        IsWindowsSecurityOnlyPublication()
+            ? AgentHostMonitoringConfigurationAreas.WindowsSecurity.ToArray()
+            : [];
 
     private void UpdateSecurityMonitoringPolicyProfiles(IEnumerable<ConfigProfileDefinition> profiles)
     {
@@ -13838,6 +14240,7 @@ public partial class MainViewModel : ViewModelBase,
     /// </summary>
     private void ScheduleDbRefresh()
     {
+        CloseHeaderFilters();
         MarkSnapshotPresentationInteraction();
         if (_processListingService == null)
         {
@@ -14138,6 +14541,7 @@ public partial class MainViewModel : ViewModelBase,
 
         var f = new ProcessListingFilterSet
         {
+            ColumnFilters = GetAppliedHeaderFilters(),
             ProcessNameContains    = NullIfEmpty(FilterProcessName),
             ProcessIdContains      = NullIfEmpty(FilterPid),
             ParentProcessIdContains = NullIfEmpty(FilterParentPid),
@@ -14163,7 +14567,7 @@ public partial class MainViewModel : ViewModelBase,
         return f;
 
         static string? NullIfEmpty(string s) =>
-            string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+            ColumnTextFilter.Normalize(s);
     }
 
     private List<ExplorerScope> GetProcessListingIncludedScopes()
@@ -14257,7 +14661,7 @@ public partial class MainViewModel : ViewModelBase,
             .ToList();
     }
 
-    private static ProcessListingSortColumn MapSortColumn(string column) => column switch
+    internal static ProcessListingSortColumn MapSortColumn(string column) => column switch
     {
         "Tree"              => ProcessListingSortColumn.Tree,
         "ProcessName"       => ProcessListingSortColumn.ProcessName,
@@ -14269,16 +14673,30 @@ public partial class MainViewModel : ViewModelBase,
         "UserName"          => ProcessListingSortColumn.UserName,
         "SessionId"         => ProcessListingSortColumn.SessionId,
         "Architecture"      => ProcessListingSortColumn.Architecture,
-        "StartTimeDisplay"  => ProcessListingSortColumn.StartTime,
-        "EndTimeDisplay"    => ProcessListingSortColumn.EndTime,
-        "StatusDisplay"     => ProcessListingSortColumn.Status,
+        "StartTime" or "StartTimeDisplay" => ProcessListingSortColumn.StartTime,
+        "EndTime" or "EndTimeDisplay" => ProcessListingSortColumn.EndTime,
+        "Status" or "StatusDisplay" => ProcessListingSortColumn.Status,
         "CpuUsage"          => ProcessListingSortColumn.CpuUsage,
-        "MemoryUsage"       => ProcessListingSortColumn.MemoryUsage,
+        "TotalProcessorTimeTicks" => ProcessListingSortColumn.TotalProcessorTime,
+        "ReadBytes"         => ProcessListingSortColumn.ReadBytes,
+        "WrittenBytes"      => ProcessListingSortColumn.WrittenBytes,
+        "MemoryUsage" or "MemoryUsageBytes" => ProcessListingSortColumn.MemoryUsage,
+        "ModuleCount"       => ProcessListingSortColumn.ModuleCount,
+        "HandleCount"       => ProcessListingSortColumn.HandleCount,
+        "RuntimeEventCount" => ProcessListingSortColumn.RuntimeEventCount,
+        "EtwEventCount"     => ProcessListingSortColumn.EtwEventCount,
+        "SecurityEventCount" => ProcessListingSortColumn.SecurityEventCount,
+        "PowerShellEventCount" => ProcessListingSortColumn.PowerShellEventCount,
+        "OtherWindowsEventCount" => ProcessListingSortColumn.OtherWindowsEventCount,
+        "SysmonEventCount"  => ProcessListingSortColumn.SysmonEventCount,
         "CompanyName"       => ProcessListingSortColumn.CompanyName,
         "FileDescription"   => ProcessListingSortColumn.FileDescription,
         "Sha256Hash"        => ProcessListingSortColumn.Sha256Hash,
         "RiskScore"         => ProcessListingSortColumn.ProcessRisk,
-        _                   => ProcessListingSortColumn.Unknown
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(column),
+            column,
+            "The process Listing column does not have a typed database sort mapping.")
     };
 
     public void RequestProcessListingRange(int firstIndex, int itemCount = 1)

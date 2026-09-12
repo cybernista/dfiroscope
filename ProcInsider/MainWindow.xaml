@@ -15,6 +15,7 @@
         xmlns:explorerViews="clr-namespace:ProcInsider.Views.Explorer"
         xmlns:agentViews="clr-namespace:ProcInsider.Views.Features.Agents"
         xmlns:searchViews="clr-namespace:ProcInsider.Views.Features.Search"
+        xmlns:shared="clr-namespace:ProcInsider.Views.Shared"
         mc:Ignorable="d"
         Title="{x:Static models:ProductIdentity.DisplayName}"
         Icon="Assets/DFIRoscope.Live.ico"
@@ -25,6 +26,8 @@
         Closing="Window_Closing">
 
     <Window.Resources>
+      <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="Views/Shared/ColumnHeaderResources.xaml"/></ResourceDictionary.MergedDictionaries>
         <converters:ProcessGridSelectionConverter x:Key="ProcessGridSelectionConverter"/>
         <local:FeaturePublicationBindingProxy x:Key="FeaturePublicationProxy"
                                               Data="{Binding FeaturePublication}"/>
@@ -49,14 +52,6 @@
                     <Setter Property="FontStyle" Value="Italic"/>
                 </DataTrigger>
             </Style.Triggers>
-        </Style>
-
-        <!-- Style for filter text boxes -->
-        <Style x:Key="FilterTextBoxStyle" TargetType="TextBox">
-            <Setter Property="Height" Value="22"/>
-            <Setter Property="Margin" Value="1"/>
-            <Setter Property="Padding" Value="2,1"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="ScopedActionButtonStyle" TargetType="Button">
@@ -138,11 +133,7 @@
         </Style>
 
         <!-- Style for column headers with sort indicator -->
-        <Style x:Key="SortableHeaderStyle" TargetType="DataGridColumnHeader">
-            <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="Padding" Value="5,3"/>
-            <Setter Property="Cursor" Value="Hand"/>
-        </Style>
+        <Style x:Key="SortableHeaderStyle" TargetType="DataGridColumnHeader" BasedOn="{StaticResource ColumnFilterHeaderStyle}"/>
 
         <HierarchicalDataTemplate DataType="{x:Type vm:ExplorerNodeViewModel}"
                                   ItemsSource="{Binding Children}">
@@ -187,6 +178,7 @@
                 </Grid>
             </Border>
         </HierarchicalDataTemplate>
+          </ResourceDictionary>
     </Window.Resources>
 
     <Grid>
@@ -251,22 +243,27 @@
                           Command="{Binding ClearCurrentViewerStateCommand}"/>
             </MenuItem>
             <MenuItem Header="_Event Viewer"
-                      Visibility="{Binding FeaturePublication.EventTelemetry, Converter={StaticResource BoolToVisibilityConverter}}">
+                      Visibility="{Binding FeaturePublication.EventViewerMenu, Converter={StaticResource BoolToVisibilityConverter}}">
                 <MenuItem Header="Open Event Viewer"
+                          Visibility="{Binding FeaturePublication.EventTelemetry, Converter={StaticResource BoolToVisibilityConverter}}"
                           Command="{Binding OpenEventViewerCommand}"/>
                 <Separator/>
                 <MenuItem Header="Windows Logs">
                     <MenuItem Header="Application"
+                              Visibility="{Binding DataContext.FeaturePublication.EventTelemetry, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource BoolToVisibilityConverter}}"
                               Command="{Binding OpenEventViewerLogCommand}"
                               CommandParameter="Application"/>
                     <MenuItem Header="System"
+                              Visibility="{Binding DataContext.FeaturePublication.EventTelemetry, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource BoolToVisibilityConverter}}"
                               Command="{Binding OpenEventViewerLogCommand}"
                               CommandParameter="System"/>
                     <MenuItem Header="Security"
+                              Visibility="{Binding DataContext.FeaturePublication.WindowsSecurityEvents, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource BoolToVisibilityConverter}}"
                               Command="{Binding OpenEventViewerLogCommand}"
                               CommandParameter="Security"/>
                 </MenuItem>
-                <MenuItem Header="PowerShell">
+                <MenuItem Header="PowerShell"
+                          Visibility="{Binding FeaturePublication.EventTelemetry, Converter={StaticResource BoolToVisibilityConverter}}">
                     <MenuItem Header="PowerShell Operational"
                               Command="{Binding OpenEventViewerLogCommand}"
                               CommandParameter="Microsoft-Windows-PowerShell/Operational"/>
@@ -275,12 +272,15 @@
                               CommandParameter="Windows PowerShell"/>
                 </MenuItem>
                 <MenuItem Header="Sysmon"
+                          Visibility="{Binding FeaturePublication.EventTelemetry, Converter={StaticResource BoolToVisibilityConverter}}"
                           Command="{Binding OpenEventViewerLogCommand}"
                           CommandParameter="Microsoft-Windows-Sysmon/Operational"/>
                 <MenuItem Header="DNS Client"
+                          Visibility="{Binding FeaturePublication.EventTelemetry, Converter={StaticResource BoolToVisibilityConverter}}"
                           Command="{Binding OpenEventViewerLogCommand}"
                           CommandParameter="Microsoft-Windows-DNS-Client/Operational"/>
-                <MenuItem Header="Other Operational Logs">
+                <MenuItem Header="Other Operational Logs"
+                          Visibility="{Binding FeaturePublication.EventTelemetry, Converter={StaticResource BoolToVisibilityConverter}}">
                     <MenuItem Header="WMI Activity"
                               Command="{Binding OpenEventViewerLogCommand}"
                               CommandParameter="Microsoft-Windows-WMI-Activity/Operational"/>
@@ -373,31 +373,63 @@
                           Command="{Binding AiInvestigationViewModel.ClearApiKeyCommand}"/>
             </MenuItem>
             <MenuItem Header="_Security Monitoring"
-                      Visibility="{Binding FeaturePublication.SecurityMonitoringConfiguration, Converter={StaticResource BoolToVisibilityConverter}}">
-                <MenuItem Header="Check Host Monitoring Through Agent..."
-                          ToolTip="Run read-only monitoring prerequisite and status checks through the connected local agent."
-                          Command="{Binding CheckAgentMonitoringConfigurationCommand}"/>
-                <MenuItem Header="Configure Host Monitoring Through Agent..."
-                          ToolTip="Save and explicitly deploy selected Sysmon, PowerShell, and related monitoring actions through the connected elevated local agent."
-                          Command="{Binding ConfigureAgentMonitoringCommand}"/>
-                <MenuItem Header="Revert Host Monitoring Through Agent"
-                          ToolTip="Restore the original host monitoring state captured by the connected elevated local agent."
-                          Command="{Binding ReverseAgentMonitoringDeploymentCommand}"/>
+                      Visibility="{Binding FeaturePublication.HostMonitoringConfiguration, Converter={StaticResource BoolToVisibilityConverter}}">
+                <MenuItem Header="Info">
+                    <MenuItem Header="Check Host Monitoring Through Agent..."
+                              ToolTip="Run read-only monitoring prerequisite and status checks through the connected local agent."
+                              Command="{Binding CheckAgentMonitoringConfigurationCommand}"/>
+                    <MenuItem Header="Windows Security Policy Profiles (Read-only)"
+                              Visibility="{Binding FeaturePublication.WindowsSecurityEvents, Converter={StaticResource BoolToVisibilityConverter}}"
+                              ItemsSource="{Binding SecurityMonitoringPolicyProfiles}"
+                              IsEnabled="{Binding HasSecurityMonitoringPolicyProfiles}">
+                        <MenuItem.ItemContainerStyle>
+                            <Style TargetType="{x:Type MenuItem}">
+                                <Setter Property="Header" Value="{Binding DisplayName}"/>
+                                <Setter Property="ToolTip" Value="{Binding Description}"/>
+                                <Setter Property="Command"
+                                        Value="{Binding DataContext.OpenSecurityMonitoringPolicyProfileCommand, RelativeSource={RelativeSource AncestorType={x:Type MenuItem}}}"/>
+                                <Setter Property="CommandParameter" Value="{Binding}"/>
+                            </Style>
+                        </MenuItem.ItemContainerStyle>
+                    </MenuItem>
+                    <MenuItem Header="Open Event Log Policy Profile"
+                              ToolTip="Open bundled event log sizing and retention profile metadata."
+                              ItemsSource="{Binding EventLogPolicyProfiles}"
+                              IsEnabled="{Binding HasEventLogPolicyProfiles}">
+                        <MenuItem.ItemContainerStyle>
+                            <Style TargetType="{x:Type MenuItem}">
+                                <Setter Property="Header" Value="{Binding DisplayName}"/>
+                                <Setter Property="ToolTip" Value="{Binding Description}"/>
+                                <Setter Property="Command"
+                                        Value="{Binding DataContext.OpenEventLogPolicyProfileCommand, RelativeSource={RelativeSource AncestorType={x:Type MenuItem}}}"/>
+                                <Setter Property="CommandParameter" Value="{Binding}"/>
+                            </Style>
+                        </MenuItem.ItemContainerStyle>
+                    </MenuItem>
+                    <MenuItem Header="Open Security Event Log"
+                              Visibility="{Binding FeaturePublication.WindowsSecurityEvents, Converter={StaticResource BoolToVisibilityConverter}}"
+                              Command="{Binding OpenEventViewerLogCommand}"
+                              CommandParameter="Security"/>
+                </MenuItem>
+                <MenuItem Header="Change config of my computer"
+                          ToolTip="Review and explicitly authorize changes to Windows audit policy and logging on this computer.">
+                    <MenuItem Header="Apply preconfigured audit settings..."
+                              ToolTip="Review computer-wide effects before applying settings through the connected elevated local Agent."
+                              Command="{Binding ConfigureAgentMonitoringCommand}"/>
+                    <MenuItem Header="Save current configuration..."
+                              ToolTip="Save reusable settings without changing Windows."
+                              Command="{Binding SaveMonitoringConfigurationCommand}"/>
+                    <MenuItem Header="Restore saved config..."
+                              ToolTip="Choose a saved configuration, review its settings, and restore them through the Agent."
+                              Command="{Binding RestoreSavedMonitoringConfigurationCommand}"/>
+                </MenuItem>
                 <Separator/>
-                <MenuItem Header="Security Monitoring Policy Profiles (Read-only)"
-                          ItemsSource="{Binding SecurityMonitoringPolicyProfiles}"
-                          IsEnabled="{Binding HasSecurityMonitoringPolicyProfiles}">
-                    <MenuItem.ItemContainerStyle>
-                        <Style TargetType="{x:Type MenuItem}">
-                            <Setter Property="Header" Value="{Binding DisplayName}"/>
-                            <Setter Property="ToolTip" Value="{Binding Description}"/>
-                            <Setter Property="Command"
-                                    Value="{Binding DataContext.OpenSecurityMonitoringPolicyProfileCommand, RelativeSource={RelativeSource AncestorType={x:Type MenuItem}}}"/>
-                            <Setter Property="CommandParameter" Value="{Binding}"/>
-                        </Style>
-                    </MenuItem.ItemContainerStyle>
+                <MenuItem Header="Windows Security"
+                          Visibility="{Binding FeaturePublication.WindowsSecurityEvents, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <MenuItem Header="Details definitions..." Command="{Binding EditWindowsSecurityDetailsDefinitionsCommand}"/>
                 </MenuItem>
                 <MenuItem Header="PowerShell Auditing Profiles (Read-only)"
+                          Visibility="{Binding FeaturePublication.SecurityMonitoringConfiguration, Converter={StaticResource BoolToVisibilityConverter}}"
                           IsEnabled="{Binding HasPowerShellAuditingProfiles}">
                     <MenuItem Header="Verify"
                               ItemsSource="{Binding PowerShellAuditingProfiles}">
@@ -424,29 +456,19 @@
                         </MenuItem.ItemContainerStyle>
                     </MenuItem>
                 </MenuItem>
-                <MenuItem Header="Open Event Log Policy Profile"
-                          ToolTip="Open bundled event log sizing and retention profile metadata."
-                          ItemsSource="{Binding EventLogPolicyProfiles}"
-                          IsEnabled="{Binding HasEventLogPolicyProfiles}">
-                    <MenuItem.ItemContainerStyle>
-                        <Style TargetType="{x:Type MenuItem}">
-                            <Setter Property="Header" Value="{Binding DisplayName}"/>
-                            <Setter Property="ToolTip" Value="{Binding Description}"/>
-                            <Setter Property="Command"
-                                    Value="{Binding DataContext.OpenEventLogPolicyProfileCommand, RelativeSource={RelativeSource AncestorType={x:Type MenuItem}}}"/>
-                            <Setter Property="CommandParameter" Value="{Binding}"/>
-                        </Style>
-                    </MenuItem.ItemContainerStyle>
-                </MenuItem>
                 <Separator/>
                 <MenuItem Header="Open Existing PowerShell Transcript Folder"
+                          Visibility="{Binding FeaturePublication.SecurityMonitoringConfiguration, Converter={StaticResource BoolToVisibilityConverter}}"
                           Command="{Binding OpenTranscriptFolderCommand}"/>
                 <MenuItem Header="Open Event Viewer"
+                          Visibility="{Binding FeaturePublication.SecurityMonitoringConfiguration, Converter={StaticResource BoolToVisibilityConverter}}"
                           Command="{Binding OpenEventViewerCommand}"/>
                 <MenuItem Header="Open Existing Legacy Monitoring Install Log"
+                          Visibility="{Binding FeaturePublication.SecurityMonitoringConfiguration, Converter={StaticResource BoolToVisibilityConverter}}"
                           Command="{Binding OpenMonitoringInstallLogCommand}"/>
                 <Separator/>
                 <MenuItem Header="Refresh Security Monitoring Status"
+                          Visibility="{Binding FeaturePublication.SecurityMonitoringConfiguration, Converter={StaticResource BoolToVisibilityConverter}}"
                           Command="{Binding RefreshSysmonStatusCommand}"/>
             </MenuItem>
         </Menu>
@@ -671,74 +693,16 @@
                     </DockPanel>
                 </Border>
 
-                <!-- Filters Expander (moved here) -->
-                <Border Grid.Row="2" Background="#F5F5F5" Padding="5">
-                    <Expander Header="Column Filters" IsExpanded="True">
-                        <DockPanel LastChildFill="True">
-                            <Button DockPanel.Dock="Top"
-                                    HorizontalAlignment="Right"
-                                    Content="Clear Listing Filters"
-                                    Command="{Binding ClearFiltersCommand}"
-                                    ToolTip="Clear Listing column filters. Explorer green selection is unchanged."
-                                    Padding="8,4"
-                                    Margin="0,0,5,4"/>
-                            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                                <WrapPanel Orientation="Horizontal">
-                                    <StackPanel Margin="5,2">
-                                        <TextBlock Text="Process Name" FontSize="10"/>
-                                        <TextBox Text="{Binding FilterProcessName, UpdateSourceTrigger=PropertyChanged}" 
-                                                 Width="120" Style="{StaticResource FilterTextBoxStyle}"/>
-                                    </StackPanel>
-                                    <StackPanel Margin="5,2">
-                                        <TextBlock Text="PID" FontSize="10"/>
-                                        <TextBox Text="{Binding FilterPid, UpdateSourceTrigger=PropertyChanged}" 
-                                                 Width="60" Style="{StaticResource FilterTextBoxStyle}"/>
-                                    </StackPanel>
-                                    <StackPanel Margin="5,2">
-                                        <TextBlock Text="Parent PID" FontSize="10"/>
-                                        <TextBox Text="{Binding FilterParentPid, UpdateSourceTrigger=PropertyChanged}" 
-                                                 Width="60" Style="{StaticResource FilterTextBoxStyle}"/>
-                                    </StackPanel>
-                                    <StackPanel Margin="5,2">
-                                        <TextBlock Text="Parent Name" FontSize="10"/>
-                                        <TextBox Text="{Binding FilterParentProcessName, UpdateSourceTrigger=PropertyChanged}" 
-                                                 Width="100" Style="{StaticResource FilterTextBoxStyle}"/>
-                                    </StackPanel>
-                                    <StackPanel Margin="5,2">
-                                        <TextBlock Text="Path" FontSize="10"/>
-                                        <TextBox Text="{Binding FilterProcessPath, UpdateSourceTrigger=PropertyChanged}" 
-                                                 Width="120" Style="{StaticResource FilterTextBoxStyle}"/>
-                                    </StackPanel>
-                                    <StackPanel Margin="5,2">
-                                        <TextBlock Text="Command Line" FontSize="10"/>
-                                        <TextBox Text="{Binding FilterCommandLine, UpdateSourceTrigger=PropertyChanged}" 
-                                                 Width="150" Style="{StaticResource FilterTextBoxStyle}"/>
-                                    </StackPanel>
-                                    <StackPanel Margin="5,2">
-                                        <TextBlock Text="User" FontSize="10"/>
-                                        <TextBox Text="{Binding FilterUserName, UpdateSourceTrigger=PropertyChanged}" 
-                                                 Width="100" Style="{StaticResource FilterTextBoxStyle}"/>
-                                    </StackPanel>
-                                    <StackPanel Margin="5,2">
-                                        <TextBlock Text="Status" FontSize="10"/>
-                                        <TextBox Text="{Binding FilterStatus, UpdateSourceTrigger=PropertyChanged}" 
-                                                 Width="70" Style="{StaticResource FilterTextBoxStyle}"/>
-                                    </StackPanel>
-                                    <StackPanel Margin="5,2">
-                                        <TextBlock Text="SHA256" FontSize="10"/>
-                                        <TextBox Text="{Binding FilterSha256Hash, UpdateSourceTrigger=PropertyChanged}" 
-                                                 Width="150" Style="{StaticResource FilterTextBoxStyle}"/>
-                                    </StackPanel>
-                                </WrapPanel>
-                            </ScrollViewer>
-                        </DockPanel>
-                    </Expander>
-                </Border>
+                <Button Grid.Row="2" Content="Clear Listing Filters" Command="{Binding ClearFiltersCommand}"
+                        HorizontalAlignment="Right" Margin="5" Padding="8,4"
+                        ToolTip="Clear column filters. Explorer scope and green selection are unchanged."/>
 
                 <!-- Process DataGrid -->
                 <DataGrid Grid.Row="3" 
                           x:Name="ProcessDataGrid"
-                          ItemsSource="{Binding ProcessesView}"
+                          ItemsSource="{Binding ProcessesView, NotifyOnTargetUpdated=True}"
+                          TargetUpdated="ProcessDataGrid_TargetUpdated"
+                          Loaded="ProcessDataGrid_Loaded"
                           SelectedItem="{Binding SelectedProcess, Mode=TwoWay, Converter={StaticResource ProcessGridSelectionConverter}}"
                           SelectionChanged="ProcessDataGrid_SelectionChanged"
                           AutoGenerateColumns="False"
@@ -757,6 +721,7 @@
                           RowStyle="{StaticResource ExitedRowStyle}"
                           GridLinesVisibility="Horizontal"
                           HeadersVisibility="Column"
+                          ColumnHeaderStyle="{StaticResource SortableHeaderStyle}"
                           CanUserReorderColumns="True"
                           CanUserResizeColumns="True"
                           CanUserSortColumns="True"
@@ -768,6 +733,7 @@
                     <DataGrid.Columns>
                         <!-- Process Name (with tree indentation) -->
                         <DataGridTemplateColumn Header="Tree" Width="200" SortMemberPath="Tree"
+                                                SortDirection="Ascending"
                                                 CanUserSort="True">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
@@ -817,13 +783,13 @@
                                             CanUserSort="True" SortMemberPath="Architecture"/>
 
                         <DataGridTextColumn Header="Start Time" Binding="{Binding StartTimeDisplay}" Width="130"
-                                            CanUserSort="True" SortMemberPath="StartTimeDisplay"/>
+                                            CanUserSort="True" SortMemberPath="StartTime"/>
 
                         <DataGridTextColumn Header="End Time" Binding="{Binding EndTimeDisplay}" Width="130"
-                                            CanUserSort="True" SortMemberPath="EndTimeDisplay"/>
+                                            CanUserSort="True" SortMemberPath="EndTime"/>
 
                         <DataGridTextColumn Header="Status" Binding="{Binding StatusDisplay}" Width="65"
-                                            CanUserSort="True" SortMemberPath="StatusDisplay"/>
+                                            CanUserSort="True" SortMemberPath="Status"/>
 
                         <DataGridTextColumn Header="Risk Score" Binding="{Binding RiskDisplay}" Width="105"
                                             Visibility="{Binding Data.ProcessRiskScore, Source={StaticResource FeaturePublicationProxy}, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -877,7 +843,7 @@
                                             CanUserSort="True" SortMemberPath="EtwEventCount"/>
 
                         <DataGridTextColumn Header="Sec" Binding="{Binding SecurityEventCount}" Width="55"
-                                            Visibility="{Binding Data.EventTelemetry, Source={StaticResource FeaturePublicationProxy}, Converter={StaticResource BoolToVisibilityConverter}}"
+                                            Visibility="{Binding Data.WindowsSecurityEvents, Source={StaticResource FeaturePublicationProxy}, Converter={StaticResource BoolToVisibilityConverter}}"
                                             CanUserSort="True" SortMemberPath="SecurityEventCount"/>
 
                         <DataGridTextColumn Header="PS" Binding="{Binding PowerShellEventCount}" Width="55"
@@ -893,7 +859,7 @@
                                             CanUserSort="True" SortMemberPath="SysmonEventCount"/>
 
                         <DataGridTextColumn Header="Memory" Binding="{Binding MemoryUsage}" Width="80"
-                                            CanUserSort="True" SortMemberPath="MemoryUsage"/>
+                                            CanUserSort="True" SortMemberPath="MemoryUsageBytes"/>
 
                         <DataGridTextColumn Header="Company" Binding="{Binding CompanyName}" Width="150"
                                             CanUserSort="True" SortMemberPath="CompanyName">
@@ -927,6 +893,31 @@
                         </DataGridTextColumn>
                     </DataGrid.Columns>
                 </DataGrid>
+                <TextBlock x:Name="EmptyProcessListingNotice" Grid.Row="3"
+                           Margin="24,72,24,24" MaxWidth="620" VerticalAlignment="Top"
+                           HorizontalAlignment="Center" TextWrapping="Wrap"
+                           TextAlignment="Center" Foreground="#555555" IsHitTestVisible="False">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Setter Property="Text" Value="No process rows are loaded. Connect an Agent and start a configured capture, then use Refresh from DB. Refresh displays recorded evidence; it does not start capture. If evidence is already recorded, check the Listing filters and Explorer scope."/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding TotalProcessCount}" Value="0">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding CaptureWorkspaceMode}" Value="ArchivedCapture">
+                                    <Setter Property="Text" Value="No process rows are loaded in this archived view. Check the Listing status for loading errors, then check the filters and Explorer scope. If the capture contains no recorded processes, open a capture that contains evidence."/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsRefreshing}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsProcessListingLoading}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
             </Grid>
 
             <!-- Horizontal splitter -->
@@ -1115,14 +1106,18 @@
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
                                     </ScrollViewer>
-                                    <TextBox Text="{Binding RawText, Mode=OneWay}"
-                                             IsReadOnly="True"
-                                             TextWrapping="Wrap"
-                                             AcceptsReturn="True"
-                                             VerticalScrollBarVisibility="Auto"
-                                             FontFamily="Consolas"
-                                             FontSize="11"
-                                             Visibility="{Binding HasRawText, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                    <ScrollViewer x:Name="InspectorRawContentScrollViewer"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  Visibility="{Binding HasRawText, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <TextBox Text="{Binding RawText, Mode=OneWay}"
+                                                 IsReadOnly="True"
+                                                 TextWrapping="Wrap"
+                                                 AcceptsReturn="True"
+                                                 VerticalScrollBarVisibility="Disabled"
+                                                 FontFamily="Consolas"
+                                                 FontSize="11"/>
+                                    </ScrollViewer>
                                 </Grid>
                             </Grid>
                         </TabItem>
@@ -1375,15 +1370,36 @@
                                FontWeight="SemiBold"
                                TextWrapping="Wrap"
                                Margin="0,0,0,10"/>
-                    <ProgressBar Height="20"
-                                 Minimum="0"
-                                 Maximum="{Binding StagingLoadProgressTotal}"
-                                 Value="{Binding StagingLoadProgressCurrent}"
-                                 IsIndeterminate="{Binding IsStagingLoadProgressIndeterminate}"/>
-                    <TextBlock Text="{Binding StagingLoadProgressText}"
-                               Foreground="#555555"
-                               HorizontalAlignment="Right"
-                               Margin="0,6,0,0"/>
+                    <StackPanel x:Name="SnapshotRefreshProgressPanel"
+                                Visibility="{Binding IsSnapshotRefreshActive, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <TextBlock Text="{Binding SnapshotRefreshProgressTitle}" FontWeight="SemiBold"
+                                   TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <ProgressBar Height="20" Minimum="0"
+                                     Maximum="{Binding SnapshotRefreshProgressMaximum}"
+                                     Value="{Binding SnapshotRefreshProgressCurrent, Mode=OneWay}"
+                                     IsIndeterminate="{Binding IsSnapshotRefreshProgressIndeterminate}"
+                                     AutomationProperties.Name="Current refresh stage progress"/>
+                        <TextBlock Text="{Binding SnapshotRefreshProgressDetail}" TextWrapping="Wrap" Margin="0,8,0,8"/>
+                        <Button Content="Cancel refresh" Command="{Binding CancelSnapshotRefreshCommand}"
+                                HorizontalAlignment="Right" Padding="14,5" Margin="0,0,0,10"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSnapshotRefreshActive}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <ProgressBar Height="20" Minimum="0"
+                                     Maximum="{Binding StagingLoadProgressTotal}"
+                                     Value="{Binding StagingLoadProgressCurrent}"
+                                     IsIndeterminate="{Binding IsStagingLoadProgressIndeterminate}"/>
+                        <TextBlock Text="{Binding StagingLoadProgressText}" Foreground="#555555"
+                                   HorizontalAlignment="Right" Margin="0,6,0,0"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </Grid>

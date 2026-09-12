@@ -15,7 +15,8 @@ Supported host changes use the connected elevated local agent:
 - **Revert to original config** restores the pre-deployment state where the agent recorded a safe
   reversal and reports unsupported or partial areas instead of guessing.
 
-The agent consumes `auditpol/monitoring-audit-policy.json` as non-executable policy data and
-`config/event-logs.json` as event-log configuration data. Deployment results and reversal state are
-recorded under the active `SessionPathService` session. The profile intentionally has no executable
-`actions` entries or standalone install/verify/remove/clear helper package.
+Windows Security audit policy and Security-channel retention now live only under
+`../WindowsSecurity/`. This legacy directory retains no Security profile; its
+`config/event-logs.json` contains only the channels that remain in the aggregate. Deployment results
+and reversal state are recorded under the active `SessionPathService` session. The profile manifest
+intentionally has no entries or executable viewer helper actions.

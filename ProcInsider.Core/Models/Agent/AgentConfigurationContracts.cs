@@ -80,6 +80,85 @@ public enum AgentConfigurationAreaKind
     LiveDatabase = 22,
     ReverseDeployment = 23,
     ProcessCommandLineAuditing = 24,
+    WindowsSecurityEventLog = 25,
+}
+
+/// <summary>
+/// Stable area sets used to scope the existing host-monitoring command envelope. An empty area
+/// list retains the legacy aggregate behavior for older viewers; new source-family callers must
+/// send an explicit set.
+/// </summary>
+public static class AgentHostMonitoringConfigurationAreas
+{
+    private static readonly IReadOnlyList<AgentConfigurationAreaKind> WindowsSecurityValue =
+        Array.AsReadOnly(new[]
+        {
+            AgentConfigurationAreaKind.WindowsSecurityAuditPolicy,
+            AgentConfigurationAreaKind.ProcessCommandLineAuditing,
+            AgentConfigurationAreaKind.WindowsSecurityEventLog,
+        });
+
+    private static readonly IReadOnlyList<AgentConfigurationAreaKind> LegacyValue =
+        Array.AsReadOnly(new[]
+        {
+            AgentConfigurationAreaKind.Sysmon,
+            AgentConfigurationAreaKind.PowerShellAuditing,
+            AgentConfigurationAreaKind.WindowsEventLogs,
+            AgentConfigurationAreaKind.Etw,
+            AgentConfigurationAreaKind.ScheduledDumps,
+        });
+
+    public static IReadOnlyList<AgentConfigurationAreaKind> WindowsSecurity => WindowsSecurityValue;
+
+    /// <summary>
+    /// Areas that remain in the legacy aggregate after Windows Security was extracted. This is
+    /// also the effective scope for an empty, compatibility-era area list.
+    /// </summary>
+    public static IReadOnlyList<AgentConfigurationAreaKind> Legacy => LegacyValue;
+
+    public static bool IsWindowsSecurityOnly(IEnumerable<AgentConfigurationAreaKind>? areas)
+    {
+        var values = areas?.Distinct().ToArray() ?? [];
+        return values.Length == WindowsSecurityValue.Count &&
+               values.All(WindowsSecurityValue.Contains);
+    }
+
+    public static AgentConfigurationAreaKind[] Normalize(
+        IEnumerable<AgentConfigurationAreaKind>? areas) =>
+        areas?
+            .Where(area => area != AgentConfigurationAreaKind.Unknown)
+            .Distinct()
+            .OrderBy(area => (int)area)
+            .ToArray() ?? [];
+
+    public static AgentConfigurationAreaKind[] ResolveEffective(
+        IEnumerable<AgentConfigurationAreaKind>? areas)
+    {
+        var normalized = Normalize(areas);
+        return normalized.Length == 0 ? LegacyValue.ToArray() : normalized;
+    }
+
+    public static bool IsSupportedArea(AgentConfigurationAreaKind area) =>
+        WindowsSecurityValue.Contains(area) || LegacyValue.Contains(area);
+
+    /// <summary>
+    /// Produces the Viewer-owned Windows Security draft shape. This is a construction helper only;
+    /// receivers must continue to reject, rather than silently sanitize, cross-source intent.
+    /// </summary>
+    public static AgentHostMonitoringConfiguration CreateWindowsSecurityScopedDraft(
+        AgentHostMonitoringConfiguration draft)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        return draft with
+        {
+            ConfigurationAreas = WindowsSecurityValue.ToArray(),
+            Sysmon = new AgentSysmonMonitoringIntent { VerifyService = false },
+            EventLogs = draft.EventLogs with { ChannelNames = ["Security"] },
+            PowerShellAuditing = new AgentPowerShellMonitoringIntent(),
+            Etw = new AgentEtwMonitoringIntent(),
+            ScheduledDumps = new AgentScheduledDumpPolicy()
+        };
+    }
 }
 
 public enum AgentConfigurationOperationStatus
@@ -140,6 +219,13 @@ public abstract record AgentConfigurationDocument
 /// </summary>
 public sealed record AgentHostMonitoringConfiguration : AgentConfigurationDocument
 {
+    public WindowsSecuritySettingsSnapshot? SettingsSnapshot { get; init; }
+
+    /// <summary>
+    /// Explicit source-owned areas in this document. Empty identifies a legacy aggregate document.
+    /// </summary>
+    public AgentConfigurationAreaKind[] ConfigurationAreas { get; init; } = [];
+
     public AgentSysmonMonitoringIntent Sysmon { get; init; } = new();
 
     public AgentSecurityAuditMonitoringIntent SecurityAuditPolicy { get; init; } = new();
@@ -179,6 +265,12 @@ public sealed record AgentSysmonMonitoringIntent
 public sealed record AgentSecurityAuditMonitoringIntent
 {
     public bool ConfigureAuditPolicy { get; init; }
+
+    /// <summary>Explicit opt-in; absent in older saved configurations means no SACL change.</summary>
+    public bool AuditUserDataFolders { get; init; }
+
+    /// <summary>Audit reviewed machine and loaded-user registry keys; never all hives.</summary>
+    public bool AuditRegistryWrites { get; init; }
 
     public bool EnableProcessCommandLineLogging { get; init; }
 
@@ -494,7 +586,11 @@ public sealed record AgentConfigurationFinding
     public string TechnicalDetail { get; init; } = string.Empty;
 
     public string SuggestedRemediation { get; init; } = string.Empty;
+
+    public AgentAuditPolicySubcategoryState[] AuditPolicyStates { get; init; } = [];
 }
+
+public sealed record AgentAuditPolicySubcategoryState(string PolicyName, bool? Success, bool? Failure);
 
 public sealed record AgentConfigurationCheckResult
 {
@@ -519,6 +615,8 @@ public sealed record AgentConfigurationCheckResult
 
 public sealed record AgentMonitoringDeploymentAreaResult
 {
+    /// <summary>Reverse completed despite an auxiliary compatibility warning; never overrides a failure status.</summary>
+    public bool OriginalStateRestored { get; init; }
     public AgentConfigurationAreaKind Area { get; init; }
 
     public AgentConfigurationOperationStatus Status { get; init; }

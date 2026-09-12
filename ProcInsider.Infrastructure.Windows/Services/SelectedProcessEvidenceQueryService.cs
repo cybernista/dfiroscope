@@ -17,6 +17,10 @@ public interface ISelectedProcessEvidenceQueryService
 
     IReadOnlyDictionary<string, ProcessSourceEventCounts> CountEventsByProcessAndSource();
 
+    IReadOnlyDictionary<string, ProcessSourceEventCounts> CountEventsForProcesses(
+        IReadOnlyCollection<ProcessRecord> processes,
+        CancellationToken cancellationToken = default);
+
     IReadOnlyDictionary<string, int> CountModulesByProcess(bool includeUnloaded);
 
     IReadOnlyDictionary<string, int> CountHandlesByProcess(bool includeClosed);
@@ -174,6 +178,124 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
             counts => counts.Count);
     }
 
+    public IReadOnlyDictionary<string, ProcessSourceEventCounts> CountEventsForProcesses(
+        IReadOnlyCollection<ProcessRecord> processes,
+        CancellationToken cancellationToken = default)
+    {
+        using var execution = new SqliteWorkScope(cancellationToken, stage: "Counting process events");
+        ArgumentNullException.ThrowIfNull(processes);
+        var owners = processes
+            .Select(process => new ProcessCountOwner(
+                string.IsNullOrWhiteSpace(process.ProcessEntityId)
+                    ? process.ProcessKey?.Trim() ?? string.Empty
+                    : process.ProcessEntityId.Trim(),
+                process.ProcessEntityId?.Trim() ?? string.Empty,
+                process.ProcessKey?.Trim() ?? string.Empty,
+                process.CaseId?.Trim() ?? string.Empty,
+                process.EvidenceSessionId?.Trim() ?? string.Empty,
+                process.CaptureId?.Trim() ?? string.Empty,
+                process.HostId?.Trim() ?? string.Empty,
+                process.ExecutionRootId?.Trim() ?? string.Empty))
+            .Where(owner => owner.OwnerId.Length > 0)
+            .GroupBy(owner => owner.OwnerId, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+        if (owners.Length == 0)
+        {
+            return new Dictionary<string, ProcessSourceEventCounts>(StringComparer.Ordinal);
+        }
+
+        return _readContext.MeasureRead(
+            "CountEventsForProcesses",
+            () =>
+            {
+                var countsByOwner = new Dictionary<string, ProcessSourceEventCounts>(StringComparer.Ordinal);
+                foreach (var batch in owners.Chunk(200))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    using var connection = _readContext.OpenReadOnlyConnection();
+                    if (!TableExists(connection, "ProcessEvents"))
+                    {
+                        return countsByOwner;
+                    }
+
+                    using var command = connection.CreateCommand();
+                    var requestedRows = new List<string>(batch.Length);
+                    for (var index = 0; index < batch.Length; index++)
+                    {
+                        var ownerParameter = $"$Owner{index}";
+                        var entityParameter = $"$Entity{index}";
+                        var keyParameter = $"$Key{index}";
+                        var caseParameter = $"$Case{index}";
+                        var evidenceSessionParameter = $"$EvidenceSession{index}";
+                        var captureParameter = $"$Capture{index}";
+                        var hostParameter = $"$Host{index}";
+                        var executionRootParameter = $"$ExecutionRoot{index}";
+                        requestedRows.Add(
+                            $"({ownerParameter}, {entityParameter}, {keyParameter}, {caseParameter}, " +
+                            $"{evidenceSessionParameter}, {captureParameter}, {hostParameter}, {executionRootParameter})");
+                        command.Parameters.AddWithValue(ownerParameter, batch[index].OwnerId);
+                        command.Parameters.AddWithValue(entityParameter, batch[index].ProcessEntityId);
+                        command.Parameters.AddWithValue(keyParameter, batch[index].ProcessKey);
+                        command.Parameters.AddWithValue(caseParameter, batch[index].CaseId);
+                        command.Parameters.AddWithValue(evidenceSessionParameter, batch[index].EvidenceSessionId);
+                        command.Parameters.AddWithValue(captureParameter, batch[index].CaptureId);
+                        command.Parameters.AddWithValue(hostParameter, batch[index].HostId);
+                        command.Parameters.AddWithValue(executionRootParameter, batch[index].ExecutionRootId);
+                    }
+
+                    var canonicalProcessTable = GetCanonicalProcessTable(connection);
+                    var supportsUniqueScopedFallback = canonicalProcessTable.Length > 0 &&
+                                                       HasProcessCompatibilityScope(connection, "ProcessEvents") &&
+                                                       HasProcessCompatibilityScope(connection, canonicalProcessTable) &&
+                                                       ColumnExists(connection, canonicalProcessTable, "ProcessKey");
+                    var (exact, fallback) = ProcessEventAttachmentSql.BuildBranches(
+                        "e",
+                        "requested",
+                        canonicalProcessTable,
+                        ColumnExists(connection, "ProcessEvents", "ProcessEntityId"),
+                        supportsUniqueScopedFallback);
+                    command.CommandText = $"""
+                WITH Requested(
+                    OwnerId, ProcessEntityId, ProcessKey,
+                    CaseId, EvidenceSessionId, CaptureId, HostId, ExecutionRootId) AS (
+                    VALUES {string.Join(", ", requestedRows)}
+                ), Counts AS (
+                    SELECT requested.OwnerId, e.Source, COUNT(*) AS EventCount
+                    FROM Requested requested
+                    INNER JOIN ProcessEvents e ON ({exact})
+                    GROUP BY requested.OwnerId, e.Source
+                    UNION ALL
+                    SELECT requested.OwnerId, e.Source, COUNT(*) AS EventCount
+                    FROM Requested requested
+                    INNER JOIN ProcessEvents e ON ({fallback})
+                    GROUP BY requested.OwnerId, e.Source
+                )
+                SELECT OwnerId, Source, SUM(EventCount) FROM Counts GROUP BY OwnerId, Source;
+                """;
+
+                    using var registration = cancellationToken.Register(command.Cancel);
+                    using var reader = command.ExecuteReader();
+                    while (reader.Read())
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var ownerId = GetString(reader, 0);
+                        if (!countsByOwner.TryGetValue(ownerId, out var counts))
+                        {
+                            counts = new ProcessSourceEventCounts();
+                            countsByOwner[ownerId] = counts;
+                        }
+
+                        ApplyEventCount(counts, GetString(reader, 1), GetInt(reader, 2));
+                    }
+                }
+
+                return countsByOwner;
+            },
+            $"processes={owners.Length}; batch_size=200; exact entity first; unique scoped ProcessKey fallback",
+            counts => counts.Count);
+    }
+
     public IReadOnlyDictionary<string, int> CountModulesByProcess(bool includeUnloaded)
     {
         return _readContext.MeasureRead(
@@ -220,6 +342,13 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
             () =>
             {
                 using var connection = _readContext.OpenReadOnlyConnection();
+                var canonicalProcessTable = GetCanonicalProcessTable(connection);
+                if (canonicalProcessTable.Length == 0 ||
+                    !ColumnExists(connection, canonicalProcessTable, "ProcessKey"))
+                {
+                    return Array.Empty<TelemetryEventRecord>();
+                }
+
                 using var command = connection.CreateCommand();
                 var entity = SelectOptionalColumn(connection, "ProcessEvents", "e", "ProcessEntityId", "''");
                 var entityValue = ColumnExists(connection, "ProcessEvents", "ProcessEntityId")
@@ -227,16 +356,81 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
                     : "''";
                 var sourceRun = SelectOptionalColumn(connection, "ProcessEvents", "e", "SourceRunId", "''");
                 var ingestionJob = SelectOptionalColumn(connection, "ProcessEvents", "e", "IngestionJobId", "''");
-                var processPredicate = BuildProcessAttachmentPredicate(
+                var canonicalHasEntityId = ColumnExists(
                     connection,
-                    "ProcessEvents",
+                    canonicalProcessTable,
+                    "ProcessEntityId");
+                var targetPredicate = !string.IsNullOrWhiteSpace(processEntityId) && canonicalHasEntityId
+                    ? "p.ProcessEntityId = $ProcessEntityId"
+                    : !string.IsNullOrWhiteSpace(processKey)
+                        ? $"""
+                          p.ProcessKey = $ProcessKey
+                          AND (
+                              SELECT COUNT(*)
+                              FROM {canonicalProcessTable} targetCandidate
+                              WHERE targetCandidate.ProcessKey = $ProcessKey
+                          ) = 1
+                          """
+                        : "1 = 0";
+                var supportsUniqueScopedFallback =
+                    HasProcessCompatibilityScope(connection, "ProcessEvents") &&
+                    HasProcessCompatibilityScope(connection, canonicalProcessTable);
+                var processPredicate = ProcessEventAttachmentSql.Build(
                     "e",
-                    processEntityId,
-                    processKey);
+                    "requested",
+                    canonicalProcessTable,
+                    ColumnExists(connection, "ProcessEvents", "ProcessEntityId"),
+                    supportsUniqueScopedFallback);
                 var sourcePredicate = string.IsNullOrWhiteSpace(source)
                     ? string.Empty
                     : "AND e.Source = $Source";
+                var requestedEntity = SelectOptionalColumn(
+                    connection,
+                    canonicalProcessTable,
+                    "p",
+                    "ProcessEntityId",
+                    "''");
+                var requestedCase = SelectOptionalColumn(
+                    connection,
+                    canonicalProcessTable,
+                    "p",
+                    "CaseId",
+                    "''");
+                var requestedEvidenceSession = SelectOptionalColumn(
+                    connection,
+                    canonicalProcessTable,
+                    "p",
+                    "EvidenceSessionId",
+                    "''");
+                var requestedCapture = SelectOptionalColumn(
+                    connection,
+                    canonicalProcessTable,
+                    "p",
+                    "CaptureId",
+                    "''");
+                var requestedHost = SelectOptionalColumn(
+                    connection,
+                    canonicalProcessTable,
+                    "p",
+                    "HostId",
+                    "''");
+                var requestedExecutionRoot = SelectOptionalColumn(
+                    connection,
+                    canonicalProcessTable,
+                    "p",
+                    "ExecutionRootId",
+                    "''");
                 command.CommandText = $"""
+                    WITH Requested(
+                        ProcessEntityId, ProcessKey, CaseId, EvidenceSessionId,
+                        CaptureId, HostId, ExecutionRootId) AS (
+                        SELECT {requestedEntity}, p.ProcessKey, {requestedCase},
+                               {requestedEvidenceSession}, {requestedCapture}, {requestedHost},
+                               {requestedExecutionRoot}
+                        FROM {canonicalProcessTable} p
+                        WHERE {targetPredicate}
+                        LIMIT 1
+                    )
                     SELECT e.SequenceId, e.TimestampUtc, e.Source, e.ProcessKey, e.ProcessId, e.ProcessGuid,
                            e.ProcessStartTimeUtc, e.ProcessName, e.ParentProcessId, e.EventCode, e.Category,
                            e.Action, e.Target, e.Summary, e.Details, e.RiskFlags, e.IsInteresting, e.RepeatCount,
@@ -248,7 +442,8 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
                            CASE WHEN {entityValue} <> '' THEN 'Entity-first selected-process query.' ELSE 'Legacy ProcessKey compatibility query.' END AS CorrelationDiagnostics,
                            {sourceRun}, {ingestionJob}
                     FROM ProcessEvents e
-                    WHERE {processPredicate} {sourcePredicate}
+                    INNER JOIN Requested requested ON {processPredicate}
+                    WHERE 1 = 1 {sourcePredicate}
                     ORDER BY e.TimestampUtc DESC, e.SequenceId DESC
                     LIMIT $MaxCount;
                     """;
@@ -804,6 +999,20 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
                 : "1 = 0";
     }
 
+    private static bool HasProcessCompatibilityScope(SqliteConnection connection, string tableName)
+        => ColumnExists(connection, tableName, "CaseId") &&
+           ColumnExists(connection, tableName, "EvidenceSessionId") &&
+           ColumnExists(connection, tableName, "CaptureId") &&
+           ColumnExists(connection, tableName, "HostId") &&
+           ColumnExists(connection, tableName, "ExecutionRootId");
+
+    private static string GetCanonicalProcessTable(SqliteConnection connection)
+        => TableExists(connection, "ProcessEntities")
+            ? "ProcessEntities"
+            : TableExists(connection, "Processes")
+                ? "Processes"
+                : string.Empty;
+
     private static string SelectOptionalColumn(
         SqliteConnection connection,
         string tableName,
@@ -960,4 +1169,14 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
             ? value
             : fallback;
     }
+
+    private sealed record ProcessCountOwner(
+        string OwnerId,
+        string ProcessEntityId,
+        string ProcessKey,
+        string CaseId,
+        string EvidenceSessionId,
+        string CaptureId,
+        string HostId,
+        string ExecutionRootId);
 }

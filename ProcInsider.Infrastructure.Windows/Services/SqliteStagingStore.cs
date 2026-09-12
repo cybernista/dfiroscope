@@ -886,6 +886,16 @@ public sealed class SqliteStagingStore : IDisposable
     public void EnsureAnalysisIndexes()
         => EnsureAnalysisIndexes(progress: null, CancellationToken.None);
 
+    internal void EnsureListingIndexes(CancellationToken cancellationToken)
+    {
+        lock (_lock)
+        {
+            if (_openContext != CaptureOpenContext.ViewerLiveSnapshot)
+                throw new InvalidOperationException("Initial Listing indexes require a Viewer snapshot.");
+            _analysisIndexMaintenance.EnsureListingIndexes(cancellationToken);
+        }
+    }
+
     public void EnsureAnalysisIndexes(
         IProgress<SqliteAnalysisIndexBuildProgress>? progress,
         CancellationToken cancellationToken)

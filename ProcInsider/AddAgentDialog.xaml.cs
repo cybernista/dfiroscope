@@ -4,7 +4,6 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
-using ProcInsider.Models;
 using ProcInsider.Models.Features;
 using ProcInsider.Services.Features;
 using ProcInsider.ViewModels;
@@ -20,26 +19,18 @@ public enum AddAgentTargetKind
 public partial class AddAgentDialog : Window
 {
     public AddAgentDialog()
-        : this(CurrentEducationalReleaseProfile.RuntimeCatalog, monitoringConfiguration: null)
-    {
-    }
-
-    public AddAgentDialog(HostMonitoringConfigurationViewModel monitoringConfiguration)
-        : this(CurrentEducationalReleaseProfile.RuntimeCatalog, monitoringConfiguration)
+        : this(CurrentEducationalReleaseProfile.RuntimeCatalog)
     {
     }
 
     public AddAgentDialog(
         IFeatureCatalog catalog,
-        HostMonitoringConfigurationViewModel? monitoringConfiguration,
         IEnumerable<AgentCaptureOptionViewModel>? initialCaptureOptions = null,
         int selectedAgentMemoryMegabytes = 500,
         bool isExistingAgentSetup = false)
     {
         ArgumentNullException.ThrowIfNull(catalog);
 
-        IsHostMonitoringPublished = catalog.IsPublished(FeatureIds.SecurityMonitoringConfiguration);
-        MonitoringConfiguration = monitoringConfiguration ?? CreateEmptyMonitoringConfiguration();
         var publishedOptions = AgentCaptureOptionViewModel.CreateDefaultOptions(catalog)
             .Where(option => option.IsPublished)
             .ToArray();
@@ -59,10 +50,6 @@ public partial class AddAgentDialog : Window
 
     public ObservableCollection<AgentCaptureOptionViewModel> CaptureOptions { get; }
 
-    public HostMonitoringConfigurationViewModel MonitoringConfiguration { get; }
-
-    public bool IsHostMonitoringPublished { get; }
-
     public int SelectedAgentMemoryMegabytes
     {
         get
@@ -76,17 +63,6 @@ public partial class AddAgentDialog : Window
 
     public IReadOnlyList<AgentCaptureOptionViewModel> GetCaptureOptions()
         => CaptureOptions.Select(option => option.Clone()).ToList();
-
-    public HostMonitoringConfigurationViewModel GetMonitoringConfiguration()
-        => MonitoringConfiguration;
-
-    private static HostMonitoringConfigurationViewModel CreateEmptyMonitoringConfiguration() =>
-        new(
-            Enumerable.Empty<ConfigProfileDefinition>(),
-            Enumerable.Empty<ConfigProfileDefinition>(),
-            Enumerable.Empty<ConfigProfileDefinition>(),
-            Enumerable.Empty<ConfigProfileDefinition>(),
-            Enumerable.Empty<ConfigProfileDefinition>());
 
     private static void ApplyInitialCaptureSelections(
         IEnumerable<AgentCaptureOptionViewModel> publishedOptions,

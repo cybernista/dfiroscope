@@ -169,19 +169,30 @@ public partial class AgentsViewModel : ViewModelBase
     public void ApplyConfigurationCheck(AgentRegistryEntryViewModel agent, AgentConfigurationCheckResult result)
     {
         agent.ApplyConfigurationCheck(result);
-        StatusMessage = agent.LastConfigurationCheckSummary;
+        StatusMessage = result.TargetKind == AgentConfigurationTargetKind.HostMonitoring
+            ? agent.MonitoringStatusSummary
+            : agent.LastConfigurationCheckSummary;
     }
 
     public void ApplyHostMonitoringConfiguration(AgentRegistryEntryViewModel agent, AgentHostMonitoringConfiguration configuration)
     {
         agent.ApplyHostMonitoringConfiguration(configuration);
-        StatusMessage = agent.LastConfigurationCheckSummary;
+        StatusMessage = agent.MonitoringStatusSummary;
     }
 
     public void ApplyMonitoringDeployment(AgentRegistryEntryViewModel agent, AgentMonitoringDeploymentResult result)
     {
         agent.ApplyMonitoringDeployment(result);
-        StatusMessage = agent.LastConfigurationCheckSummary;
+        StatusMessage = agent.MonitoringStatusSummary;
+    }
+
+    public void ApplyMonitoringActionProgress(
+        AgentRegistryEntryViewModel agent,
+        string summary,
+        string detail)
+    {
+        agent.ApplyMonitoringActionProgress(summary, detail);
+        StatusMessage = summary;
     }
 
     public void ApplyCaptureConfiguration(AgentRegistryEntryViewModel agent, AgentCaptureConfiguration configuration)
@@ -292,7 +303,9 @@ public partial class AgentsViewModel : ViewModelBase
         string message)
     {
         agent.ApplyConfigurationCheckUnavailable(targetKind, message);
-        StatusMessage = agent.LastConfigurationCheckSummary;
+        StatusMessage = targetKind == AgentConfigurationTargetKind.HostMonitoring
+            ? $"{agent.MonitoringStatusSummary} {message}".Trim()
+            : $"{agent.LastConfigurationCheckSummary} {message}".Trim();
     }
 
     private void OnAgentsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)

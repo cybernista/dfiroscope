@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "dfiroscope-windows-security-audit-policy",
+      "kind": "WindowsSecurityAuditPolicy",
+      "displayName": "Windows Security Audit Policy",
+      "description": "Security audit subcategories including process, object access, WFP connection and removable-storage activity. File System and Registry coverage requires object SACLs.",
+      "warning": "Host-wide WFP connection and removable-storage auditing can generate high Security log volume. Removable Storage audits all access without object SACL filtering. Review log capacity before deployment.",
+      "filePath": "auditpol\\monitoring-audit-policy.json",
+      "isDefault": true
+    },
+    {
+      "id": "dfiroscope-windows-security-event-log",
+      "kind": "WindowsSecurityEventLogs",
+      "displayName": "Windows Security Event Log",
+      "description": "Enablement and retention settings for the Security channel only.",
+      "warning": "Increasing Security log retention consumes additional disk space.",
+      "filePath": "event-logs.json",
+      "isDefault": true
+    }
+  ]
+}

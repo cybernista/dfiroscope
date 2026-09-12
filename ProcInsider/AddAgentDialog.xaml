@@ -1,7 +1,6 @@
 <Window x:Class="ProcInsider.AddAgentDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:local="clr-namespace:ProcInsider"
         Title="Add Agent"
         SizeToContent="WidthAndHeight"
         MinWidth="680"
@@ -113,7 +112,7 @@
                 </Grid>
 
                 <StackPanel Margin="0,0,0,14">
-                    <TextBlock Text="Capture configuration"
+                    <TextBlock Text="Data sources to fetch or monitor"
                                FontWeight="SemiBold"
                                Margin="0,0,0,8"/>
                     <ItemsControl ItemsSource="{Binding CaptureOptions, RelativeSource={RelativeSource AncestorType=Window}}">
@@ -134,13 +133,8 @@
                     </ItemsControl>
                 </StackPanel>
 
-                <StackPanel Margin="0,0,0,14"
-                            Visibility="{Binding IsHostMonitoringPublished, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}">
-                    <TextBlock Text="Host monitoring configuration"
-                               FontWeight="SemiBold"
-                               Margin="0,0,0,8"/>
-                    <local:HostMonitoringConfigurationControl DataContext="{Binding MonitoringConfiguration, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                </StackPanel>
+                <TextBlock Text="These choices select what the Agent collects. They do not change Windows audit policy or logging settings. To change those settings, use Security Monitoring → Change config of my computer. Missing capture prerequisites are reported separately."
+                           TextWrapping="Wrap" MaxWidth="620" Margin="0,0,0,14"/>
             </StackPanel>
         </ScrollViewer>
 

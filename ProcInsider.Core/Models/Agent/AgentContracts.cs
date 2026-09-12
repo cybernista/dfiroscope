@@ -11,7 +11,7 @@ public static class AgentContracts
     /// Monotonically incremented integer version for the IPC message contract.
     /// Bump this whenever a breaking change is made to command or status message shapes.
     /// </summary>
-    public const int ContractVersion = 2;
+    public const int ContractVersion = 3;
 
     /// <summary>Version of the durable local pairing and challenge/response contract.</summary>
     public const int PairingContractVersion = 1;

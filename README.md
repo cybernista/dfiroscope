@@ -2,11 +2,14 @@
 
 DFIRoscope Live is a Windows investigation and cybersecurity learning application. This source archive contains the complete product tree used to build the corresponding official Viewer and local Agent binaries.
 
-The S1E1 official binaries publish exactly these feature groups:
+This is EDU2 (software version `0.1.0-edu.2`). The previous educational release is now called EDU1. Release names use the EDU sequence.
+
+The EDU2 official binaries publish exactly these feature groups:
 
 - `process-listing`
 - `selected-process-details`, which depends on `process-listing`
 - `agents-capture`
+- `windows-security-events`, whose live capture depends on `agents-capture`
 
 `PUBLIC-EDITION.json` is the machine-readable official publication scope. `SOURCE-PROVENANCE.json` binds every supplied file to the private origin commit, one committed disclosure-policy identity/digest, and one deterministic exported-tree digest. The disclosure digest identifies the approved collection scope without supplying any excluded-path inventory. See [BUILD.md](BUILD.md) for the clean build commands.
 

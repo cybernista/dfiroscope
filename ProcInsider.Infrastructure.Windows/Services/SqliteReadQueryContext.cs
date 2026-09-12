@@ -61,6 +61,10 @@ internal sealed class SqliteReadQueryContext
         Func<T, long>? rowCountSelector = null)
     {
         var stopwatch = Stopwatch.StartNew();
+        using var stage = SqliteWorkScope.Current == null ? null : SqliteWorkScope.Begin(operation);
+        if (stage?.HasProgressObserver == true)
+            SqliteDiagnosticsLogger.LogOperation(DatabasePath, "SnapshotRead", operation + ".Started",
+                TimeSpan.Zero, detail, force: true);
         try
         {
             var result = action();
@@ -71,8 +75,17 @@ internal sealed class SqliteReadQueryContext
                 operation,
                 stopwatch.Elapsed,
                 detail,
-                rowCountSelector?.Invoke(result));
+                rowCountSelector?.Invoke(result), force: stage?.HasProgressObserver == true);
+            if (rowCountSelector != null) stage?.Advance(rowCountSelector(result), rowCountSelector(result), "rows");
             return result;
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 9 &&
+            SqliteWorkScope.Current?.CancellationToken.IsCancellationRequested == true)
+        {
+            SqliteDiagnosticsLogger.LogOperation(DatabasePath, "SnapshotRead", operation + ".Canceled",
+                stopwatch.Elapsed, detail, force: true);
+            throw new OperationCanceledException("SQLite query canceled.", ex,
+                SqliteWorkScope.Current.CancellationToken);
         }
         catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
         {

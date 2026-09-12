@@ -40,6 +40,10 @@
     <None Update="Config\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="Config\WindowsSecurity\**\*.*">
+      <CopyToOutputDirectory Condition="'$(PublishWindowsSecurityEvents)' == 'true'">PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory Condition="'$(PublishWindowsSecurityEvents)' != 'true'">Never</CopyToOutputDirectory>
+    </None>
     <None Remove="Config\ApplicationCatalog\catalog.index.json" />
     <None Remove="Config\ApplicationCatalog\Profiles\**\*.json" />
     <None Remove="Config\ApplicationCatalog\catalog-quality.v1.json" />

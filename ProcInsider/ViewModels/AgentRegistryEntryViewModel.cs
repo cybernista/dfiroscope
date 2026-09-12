@@ -190,6 +190,15 @@ public partial class AgentRegistryEntryViewModel : ViewModelBase
     private string lastConfigurationCheckDetails = string.Empty;
 
     [ObservableProperty]
+    private string monitoringStatusSummary = "No monitoring check has run.";
+
+    [ObservableProperty]
+    private string monitoringStatusDetails = string.Empty;
+
+    [ObservableProperty]
+    private AgentMonitoringSectionViewModel[] monitoringStatusSections = [];
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasMonitoringOriginalState))]
     [NotifyPropertyChangedFor(nameof(MonitoringOriginalStateDisplay))]
     private DateTime? monitoringOriginalStateCapturedUtc;
@@ -557,6 +566,15 @@ public partial class AgentRegistryEntryViewModel : ViewModelBase
 
         if (result.TargetKind == AgentConfigurationTargetKind.HostMonitoring)
         {
+            MonitoringStatusSummary = LastConfigurationCheckSummary;
+            MonitoringStatusDetails = LastConfigurationCheckDetails;
+            MonitoringStatusSections = result.Findings
+                .GroupBy(finding => finding.Area)
+                .Select(group => new AgentMonitoringSectionViewModel(
+                    FormatEnum(group.Key),
+                    string.Join(Environment.NewLine + Environment.NewLine, group.Select(FormatMonitoringFinding)))
+                    { Findings = group.Select(AgentMonitoringFindingViewModel.Create).ToArray() })
+                .ToArray();
             ConfigurationVersion = FirstNonEmpty(result.ConfigurationVersion, ConfigurationVersion);
             ConfigurationHash = FirstNonEmpty(result.ConfigurationHash, ConfigurationHash);
             DeploymentState = result.OverallState == AgentConfigurationCheckState.Blocked
@@ -594,6 +612,9 @@ public partial class AgentRegistryEntryViewModel : ViewModelBase
             $"cmdLineLogging={configuration.SecurityAuditPolicy.EnableProcessCommandLineLogging}; " +
             $"PowerShell={configuration.PowerShellAuditing.ProfileId}; ETW={configuration.Etw.ProfileDisplayName}; " +
             $"scheduledDumps={(configuration.ScheduledDumps.Enabled ? "enabled" : "disabled")}.";
+        MonitoringStatusSummary = LastConfigurationCheckSummary;
+        MonitoringStatusDetails = LastConfigurationCheckDetails;
+        MonitoringStatusSections = [];
     }
 
     public void ApplyMonitoringDeployment(AgentMonitoringDeploymentResult result)
@@ -606,10 +627,13 @@ public partial class AgentRegistryEntryViewModel : ViewModelBase
         LastError = result.LastError;
         LastConfigurationCheckSummary = BuildDeploymentSummary(result);
         LastConfigurationCheckDetails = BuildDeploymentDetails(result);
+        MonitoringStatusSummary = LastConfigurationCheckSummary;
+        MonitoringStatusDetails = LastConfigurationCheckDetails;
+        MonitoringStatusSections = [];
 
         DeploymentState = result.Status switch
         {
-            AgentConfigurationOperationStatus.Failed => AgentDeploymentState.Failed,
+            not AgentConfigurationOperationStatus.Success => AgentDeploymentState.Failed,
             _ when result.Action == AgentMonitoringDeploymentAction.Deploy => AgentDeploymentState.Deployed,
             _ when result.Action == AgentMonitoringDeploymentAction.Reverse => AgentDeploymentState.Available,
             _ => DeploymentState
@@ -739,6 +763,9 @@ public partial class AgentRegistryEntryViewModel : ViewModelBase
         HealthSummary = message;
         LastConfigurationCheckSummary = "No configuration check has run for this workspace.";
         LastConfigurationCheckDetails = string.Empty;
+        MonitoringStatusSummary = "No monitoring check has run for this workspace.";
+        MonitoringStatusDetails = string.Empty;
+        MonitoringStatusSections = [];
         HostMonitoringConfiguration = null;
         MonitoringOriginalStateCapturedUtc = null;
         MonitoringOriginalStateSummary = "No original monitoring baseline loaded for this workspace.";
@@ -772,6 +799,9 @@ public partial class AgentRegistryEntryViewModel : ViewModelBase
 
         if (targetKind == AgentConfigurationTargetKind.HostMonitoring)
         {
+            MonitoringStatusSummary = LastConfigurationCheckSummary;
+            MonitoringStatusDetails = message;
+            MonitoringStatusSections = [];
             DeploymentState = AgentDeploymentState.Unavailable;
         }
         else if (targetKind == AgentConfigurationTargetKind.Capture)
@@ -780,6 +810,15 @@ public partial class AgentRegistryEntryViewModel : ViewModelBase
             CaptureStatusSummary = "Capture check unavailable.";
             CaptureStatusDetails = message;
         }
+    }
+
+    public void ApplyMonitoringActionProgress(string summary, string detail)
+    {
+        LastCheckUtc = DateTime.UtcNow;
+        LastError = string.Empty;
+        MonitoringStatusSummary = summary;
+        MonitoringStatusDetails = detail;
+        MonitoringStatusSections = [];
     }
 
     public void UpdateBenchmarkPreflight(bool captureIsActive, string benchmarkDirectory)
@@ -871,6 +910,20 @@ public partial class AgentRegistryEntryViewModel : ViewModelBase
         var errors = result.Findings.Count(finding => finding.Severity == AgentConfigurationFindingSeverity.Error);
         var warnings = result.Findings.Count(finding => finding.Severity == AgentConfigurationFindingSeverity.Warning);
         return $"{FormatTargetKind(result.TargetKind)} check: {FormatEnum(result.OverallState)} ({blocked} blocked, {errors} errors, {warnings} warnings).";
+    }
+
+    private static string FormatMonitoringFinding(AgentConfigurationFinding finding)
+    {
+        var message = finding.Severity == AgentConfigurationFindingSeverity.Info
+            ? finding.Message
+            : $"[{FormatEnum(finding.Severity)}] {finding.Message}";
+        return string.Join(Environment.NewLine, new[]
+        {
+            message,
+            finding.TechnicalDetail,
+            string.IsNullOrWhiteSpace(finding.SuggestedRemediation)
+                ? string.Empty : $"Suggested action: {finding.SuggestedRemediation}"
+        }.Where(value => !string.IsNullOrWhiteSpace(value)));
     }
 
     private static string BuildConfigurationCheckDetails(AgentConfigurationCheckResult result)

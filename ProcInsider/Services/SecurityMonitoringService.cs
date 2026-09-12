@@ -114,7 +114,8 @@ public sealed class SecurityMonitoringService
     private static void ValidatePolicyProfile(ConfigProfileDefinition profile)
     {
         var profileName = string.IsNullOrWhiteSpace(profile.DisplayName) ? profile.Id : profile.DisplayName;
-        if (profile.Kind != ConfigProfileKind.SecurityMonitoring)
+        if (profile.Kind is not
+                (ConfigProfileKind.SecurityMonitoring or ConfigProfileKind.WindowsSecurityAuditPolicy))
         {
             throw new InvalidOperationException($"Profile '{profileName}' is not a Security Monitoring profile.");
         }

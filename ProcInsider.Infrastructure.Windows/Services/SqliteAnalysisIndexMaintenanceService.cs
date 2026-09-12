@@ -40,6 +40,34 @@ internal sealed class SqliteAnalysisIndexMaintenanceService : ISqliteAnalysisInd
         _maintenanceMode = string.IsNullOrWhiteSpace(maintenanceMode) ? "Snapshot" : maintenanceMode;
     }
 
+    public void EnsureListingIndexes(CancellationToken cancellationToken)
+    {
+        // These are existing browsing indexes, needed BEFORE the first page and summary sort.
+        // Creating every analysis index/FTS/risk projection here would delay the initial view.
+        var candidates = new (string Name, string Table, string[] Columns)[]
+        {
+            ("IX_ProcessEvents_ProcessKey", "ProcessEvents", ["ProcessKey"]),
+            ("IX_ProcessEvents_ExplorerSourceProcess", "ProcessEvents", ["Source", "ProcessKey"]),
+            ("IX_ProcessStatistics_OwnerObserved", "ProcessStatistics", ["ProcessEntityId", "ProcessKey", "ObservedUtc"])
+        };
+        // Supported older captures retain optional-column readers. Index preparation must
+        // not demand additive columns which are absent from their evidence schema.
+        var statements = candidates
+            .Where(candidate => candidate.Columns.All(column => _context.ColumnExists(candidate.Table, column)))
+            .Select(candidate => SqlitePerformanceProfile.AnalysisIndexGroups
+                .SelectMany(group => group.Statements)
+                .Single(sql => sql.Contains($" {candidate.Name} ", StringComparison.Ordinal)))
+            .ToArray();
+        using var stage = new SqliteWorkScope(cancellationToken, stage: "Preparing Listing indexes",
+            total: statements.Length, unit: "indexes");
+        for (var i = 0; i < statements.Length; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _context.EnsureAnalysisIndexGroup(new("Listing browsing", [statements[i]]), cancellationToken);
+            stage.Advance(i + 1);
+        }
+    }
+
     public void EnsureAnalysisIndexes(
         IProgress<SqliteAnalysisIndexBuildProgress>? progress,
         CancellationToken cancellationToken)
@@ -1007,6 +1035,9 @@ internal sealed class SqliteAnalysisIndexMaintenanceContext
 
     internal SqliteCommand CreateCommand(string sql)
         => _owner.CreateAnalysisMaintenanceCommand(sql);
+
+    internal bool ColumnExists(string table, string column)
+        => _owner.AnalysisMaintenanceColumnExists(table, column);
 
     internal void ExecuteTransaction(Action action)
         => _owner.ExecuteAnalysisMaintenanceTransaction(action);

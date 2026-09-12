@@ -155,7 +155,8 @@ public partial class AgentCaptureOptionViewModel : ViewModelBase
     {
         AgentCaptureOptionKind.ProcessLiveEvents => FeatureIds.AgentsAndCapture,
         AgentCaptureOptionKind.ProcessMonitorCapture => FeatureIds.EventTelemetry,
-        AgentCaptureOptionKind.EtwEvents or AgentCaptureOptionKind.SecurityEvents or
+        AgentCaptureOptionKind.SecurityEvents => FeatureIds.WindowsSecurityEvents,
+        AgentCaptureOptionKind.EtwEvents or
         AgentCaptureOptionKind.PowerShellEvents or AgentCaptureOptionKind.WindowsOtherEvents or
         AgentCaptureOptionKind.SysmonEvents => FeatureIds.EventTelemetry,
         AgentCaptureOptionKind.ModuleEnrichment or AgentCaptureOptionKind.HandleEnrichment =>

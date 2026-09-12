@@ -287,9 +287,6 @@ public sealed class SqliteStagingQueryService
             var ownership = hasEntityId
                 ? "COALESCE(NULLIF(ProcessEntityId, ''), ProcessKey)"
                 : "ProcessKey";
-            var qualifiedOwnership = hasEntityId
-                ? "COALESCE(NULLIF(ps.ProcessEntityId, ''), ps.ProcessKey)"
-                : "ps.ProcessKey";
             var parameters = new List<string>(batch.Length);
             for (var index = 0; index < batch.Length; index++)
             {
@@ -300,10 +297,13 @@ public sealed class SqliteStagingQueryService
 
             command.CommandText = $"""
                 WITH Latest AS (
-                    SELECT {ownership} AS OwnershipId, MAX(ObservedUtc) AS ObservedUtc
+                    SELECT SampleId,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY {ownership}
+                               ORDER BY ObservedUtc DESC, SampleId DESC
+                           ) AS RowRank
                     FROM ProcessStatistics
                     WHERE {ownership} IN ({string.Join(", ", parameters)})
-                    GROUP BY {ownership}
                 )
                 SELECT ps.SampleId, ps.ProcessKey, ps.ProcessId, ps.ProcessGuid, ps.ProcessName, ps.Status, ps.ObservedUtc,
                        ps.TotalProcessorTimeTicks, ps.UserProcessorTimeTicks, ps.PrivilegedProcessorTimeTicks,
@@ -312,8 +312,8 @@ public sealed class SqliteStagingQueryService
                        {entity}, {sourceRun}, {ingestionJob}
                 FROM ProcessStatistics ps
                 INNER JOIN Latest latest
-                    ON latest.OwnershipId = {qualifiedOwnership}
-                   AND latest.ObservedUtc = ps.ObservedUtc
+                    ON latest.SampleId = ps.SampleId
+                   AND latest.RowRank = 1
                 ORDER BY ps.ProcessName COLLATE NOCASE, ps.ProcessId;
                 """;
 
@@ -549,6 +549,11 @@ public sealed class SqliteStagingQueryService
 
     public IReadOnlyDictionary<string, ProcessSourceEventCounts> CountEventsByProcessAndSource()
         => _selectedProcessEvidenceQueries.CountEventsByProcessAndSource();
+
+    public IReadOnlyDictionary<string, ProcessSourceEventCounts> CountEventsForProcesses(
+        IReadOnlyCollection<ProcessRecord> processes,
+        CancellationToken cancellationToken = default)
+        => _selectedProcessEvidenceQueries.CountEventsForProcesses(processes, cancellationToken);
 
     public IReadOnlyDictionary<string, int> CountModulesByProcess(bool includeUnloaded)
         => _selectedProcessEvidenceQueries.CountModulesByProcess(includeUnloaded);

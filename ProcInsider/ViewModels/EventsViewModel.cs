@@ -50,6 +50,18 @@ public partial class EventsViewModel : ViewModelBase
     [ObservableProperty]
     private int visibleEventCount;
 
+    [ObservableProperty]
+    private int loadedEventCount;
+
+    [ObservableProperty]
+    private string filterTime = string.Empty;
+
+    [ObservableProperty]
+    private string filterEventCode = string.Empty;
+
+    [ObservableProperty]
+    private string filterDescription = string.Empty;
+
     public EventsViewModel(
         TelemetryProjectionService projectionService,
         InspectorPaneViewModel inspectorPaneViewModel,
@@ -61,9 +73,46 @@ public partial class EventsViewModel : ViewModelBase
         _eventSource = eventSource;
         _beforeRefresh = beforeRefresh;
         EventsView = CollectionViewSource.GetDefaultView(Events);
+        EventsView.SortDescriptions.Add(new SortDescription(nameof(EventRowViewModel.TimestampUtc), ListSortDirection.Descending));
+        // Preserve the projection's deterministic order for equal timestamps.
+        EventsView.SortDescriptions.Add(new SortDescription(nameof(EventRowViewModel.SequenceId), ListSortDirection.Descending));
+        EventsView.Filter = MatchesFilters;
+        HeaderFilters = CreateHeaderFilters();
     }
 
     public bool IsEventSelected => SelectedEvent != null;
+
+    private bool MatchesFilters(object value) => value is EventRowViewModel row && MatchesFilters(row, null);
+
+    private bool MatchesFilters(EventRowViewModel row, string? excludedHeader) =>
+        ColumnTextFilter.Matches(row.TimeDisplay, FilterTime) &&
+        ColumnTextFilter.Matches(row.EventCodeDisplay, FilterEventCode) &&
+        ColumnTextFilter.Matches(row.Description, FilterDescription) &&
+        (HeaderFilters == null || HeaderFilters.All(pair => pair.Key == excludedHeader || MatchesHeader(row, pair.Key, pair.Value.Criteria)));
+
+    partial void OnFilterTimeChanged(string value) => ApplyFilters();
+    partial void OnFilterEventCodeChanged(string value) => ApplyFilters();
+    partial void OnFilterDescriptionChanged(string value) => ApplyFilters();
+
+    [RelayCommand]
+    private void ClearFilters()
+    {
+        foreach (var filter in HeaderFilters.Values) filter.Reset(false);
+        FilterTime = string.Empty;
+        FilterEventCode = string.Empty;
+        FilterDescription = string.Empty;
+        ApplyFilters();
+    }
+
+    private void ApplyFilters()
+    {
+        CloseHeaderFilters();
+        EventsView?.Refresh();
+        LoadedEventCount = Events.Count;
+        VisibleEventCount = Events.Count(row => MatchesFilters(row));
+        if (SelectedEvent != null && !MatchesFilters(SelectedEvent))
+            SelectedEvent = null;
+    }
 
     public string EventSourceDisplayName =>
         string.IsNullOrWhiteSpace(_eventSource) ? "All sources" : _eventSource;
@@ -104,18 +153,23 @@ public partial class EventsViewModel : ViewModelBase
     /// </summary>
     public void Clear()
     {
+        CloseHeaderFilters();
         SelectedProcessKey = string.Empty;
         SelectedProcessId = 0;
         SelectedProcessName = string.Empty;
         _selectedProcessEntityId = string.Empty;
         SelectedEvent = null;
         Events.Clear();
+        CancelDetailsFormatting();
         VisibleEventCount = 0;
+        LoadedEventCount = 0;
         StatusMessage = "Select a process to view projected events.";
     }
 
     private void RebuildVisibleEvents()
     {
+        CancelDetailsFormatting();
+        CloseHeaderFilters();
         var previouslySelectedSequenceId = SelectedEvent?.SequenceId;
         SelectedEvent = null;
         Events.Clear();
@@ -123,6 +177,7 @@ public partial class EventsViewModel : ViewModelBase
         if (string.IsNullOrEmpty(SelectedProcessKey))
         {
             VisibleEventCount = 0;
+            LoadedEventCount = 0;
             StatusMessage = "Select a process to view projected events.";
             _inspectorPaneViewModel.Clear();
             return;
@@ -131,17 +186,18 @@ public partial class EventsViewModel : ViewModelBase
         var snapshot = GetEventSnapshot();
         foreach (var processEvent in snapshot)
         {
-            Events.Add(new EventRowViewModel(processEvent));
+            Events.Add(new EventRowViewModel(processEvent, _eventSource));
         }
 
         if (Events.Count > 0 && previouslySelectedSequenceId.HasValue)
         {
-            SelectedEvent = Events.FirstOrDefault(e => e.SequenceId == previouslySelectedSequenceId.Value);
+            SelectedEvent = Events.FirstOrDefault(e => e.SequenceId == previouslySelectedSequenceId.Value && MatchesFilters(e));
         }
 
-        VisibleEventCount = Events.Count;
+        ApplyFilters();
+        BeginDetailsFormatting();
         StatusMessage =
-            $"Showing {VisibleEventCount} projected {EventSourceDisplayName} events for " +
+            $"Loaded {LoadedEventCount} projected {EventSourceDisplayName} events for " +
             $"{SelectedProcessName} (PID: {SelectedProcessId}).";
     }
 

@@ -6,13 +6,9 @@ namespace ProcInsider;
 public partial class AgentMonitoringStatusDialog : Window
 {
     public AgentMonitoringStatusDialog(
-        AgentRegistryEntryViewModel agent,
-        MainViewModel commands)
+        AgentRegistryEntryViewModel agent)
     {
-        Commands = commands;
         DataContext = agent;
         InitializeComponent();
     }
-
-    public MainViewModel Commands { get; }
 }

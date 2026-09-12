@@ -42,7 +42,8 @@ public static class PortablePackageLocationService
     public const string MarkerFileName = "DFIRoscope-Portable.json";
     public const string ViewerDirectoryName = "Viewer";
     public const string AgentDirectoryName = "Agent";
-    public const string CapturesDirectoryName = "Captures";
+    public const string CapturesDirectoryName = "Sessions";
+    public const string LegacyCapturesDirectoryName = "Captures";
     public const string ViewerExecutableName = "DFIRoscope.Live.exe";
     public const string AgentExecutableName = "DFIRoscope.Agent.exe";
 
@@ -89,7 +90,7 @@ public static class PortablePackageLocationService
         var capturesDirectory = Path.Combine(packageRoot, marker.CapturesDirectory);
         ValidateContainedDirectChild(packageRoot, viewerDirectory, ViewerDirectoryName);
         ValidateContainedDirectChild(packageRoot, agentDirectory, AgentDirectoryName);
-        ValidateContainedDirectChild(packageRoot, capturesDirectory, CapturesDirectoryName);
+        ValidateContainedDirectChild(packageRoot, capturesDirectory, marker.CapturesDirectory);
         ValidateExistingDirectory(viewerDirectory, "portable Viewer directory");
         ValidateExistingDirectory(agentDirectory, "portable Agent directory");
         ValidateExistingFile(Path.Combine(viewerDirectory, ViewerExecutableName), "portable Viewer primary executable");
@@ -130,6 +131,17 @@ public static class PortablePackageLocationService
             throw new PortablePackageLocationException(
                 "The portable package location changed while capture creation was being validated.");
         }
+    }
+
+    internal static string GetStandaloneSessionsDirectory(string applicationBaseDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationBaseDirectory);
+        var applicationDirectory = NormalizeDirectory(applicationBaseDirectory);
+        ValidateExistingDirectory(applicationDirectory, "standalone application directory");
+        var sessionsDirectory = Path.Combine(applicationDirectory, CapturesDirectoryName);
+        ValidateContainedDirectChild(applicationDirectory, sessionsDirectory, CapturesDirectoryName);
+        ValidateCaptureDirectoryState(sessionsDirectory);
+        return sessionsDirectory;
     }
 
     private static PortablePackageMarker ReadMarker(string markerPath)
@@ -194,7 +206,8 @@ public static class PortablePackageLocationService
                 !string.Equals(packageKind, PackageKind, StringComparison.Ordinal) ||
                 !string.Equals(viewerDirectory, ViewerDirectoryName, StringComparison.Ordinal) ||
                 !string.Equals(agentDirectory, AgentDirectoryName, StringComparison.Ordinal) ||
-                !string.Equals(capturesDirectory, CapturesDirectoryName, StringComparison.Ordinal))
+                !(string.Equals(capturesDirectory, CapturesDirectoryName, StringComparison.Ordinal) ||
+                  string.Equals(capturesDirectory, LegacyCapturesDirectoryName, StringComparison.Ordinal)))
             {
                 throw new PortablePackageLocationException(
                     "The portable package marker does not match the supported schema and fixed directory contract.");

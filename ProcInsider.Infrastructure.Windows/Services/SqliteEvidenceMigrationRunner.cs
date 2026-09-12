@@ -512,10 +512,12 @@ public sealed class SqliteEvidenceMigrationRunner
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(recoveryPath)!);
-        var partialPath = recoveryPath + ".partial";
-        if (File.Exists(partialPath))
+        // SQLite's Windows VFS can reject a long staging filename even when managed
+        // file APIs support the final recovery path. Reserve a short sibling without
+        // overwriting another file; keep the established final recovery name intact.
+        var partialPath = Path.Combine(Path.GetDirectoryName(recoveryPath)!, Path.GetRandomFileName());
+        using (new FileStream(partialPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
         {
-            throw new IOException($"Partial recovery copy already exists and will not be overwritten: {partialPath}");
         }
 
         try

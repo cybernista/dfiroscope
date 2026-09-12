@@ -11,6 +11,12 @@ public static partial class FeatureIds
     public static readonly FeatureId ApplicationComparison = new("application-comparison");
     public static readonly FeatureId ModulesAndHandles = new("modules-handles");
     public static readonly FeatureId EventTelemetry = new("event-telemetry");
+    public static readonly FeatureId RuntimeEvents = new("runtime-events");
+    public static readonly FeatureId EtwEvents = new("etw-events");
+    public static readonly FeatureId WindowsSecurityEvents = new("windows-security-events");
+    public static readonly FeatureId PowerShellEvents = new("powershell-events");
+    public static readonly FeatureId WindowsOtherEvents = new("windows-other-events");
+    public static readonly FeatureId SysmonEvents = new("sysmon-events");
     public static readonly FeatureId AgentsAndCapture = new("agents-capture");
     public static readonly FeatureId SearchAndSigma = new("search-sigma");
     public static readonly FeatureId DumpsAndPeAnalysis = new("dumps-pe-analysis");
@@ -36,6 +42,12 @@ public static partial class FeatureIds
             ApplicationComparison,
             ModulesAndHandles,
             EventTelemetry,
+            RuntimeEvents,
+            EtwEvents,
+            WindowsSecurityEvents,
+            PowerShellEvents,
+            WindowsOtherEvents,
+            SysmonEvents,
             AgentsAndCapture,
             SearchAndSigma,
             DumpsAndPeAnalysis,

@@ -533,46 +533,46 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
     private AgentIpcResponse CheckHostMonitoringConfiguration(AgentIpcRequest request)
     {
         var command = DeserializeCommand<CheckHostMonitoringConfigurationCommand>(request);
-        return AgentIpcResponse.Ok(request.RequestId) with
+        return _monitoringConfiguration.ExecuteSerialized(() => AgentIpcResponse.Ok(request.RequestId) with
         {
-            ConfigurationCheck = _configurationChecks.CheckHostMonitoringConfiguration(command)
-        };
+            ConfigurationCheck = _monitoringConfiguration.CheckHostMonitoringConfiguration(command, _getCaptureHealth())
+        });
     }
 
     private AgentIpcResponse GetHostMonitoringConfiguration(AgentIpcRequest request)
     {
         var command = DeserializeCommand<GetHostMonitoringConfigurationCommand>(request);
-        return AgentIpcResponse.Ok(request.RequestId) with
+        return _monitoringConfiguration.ExecuteSerialized(() => AgentIpcResponse.Ok(request.RequestId) with
         {
             HostMonitoringConfiguration = _monitoringConfiguration.GetHostMonitoringConfiguration(command)
-        };
+        });
     }
 
     private AgentIpcResponse SaveHostMonitoringConfiguration(AgentIpcRequest request)
     {
         var command = DeserializeCommand<SaveHostMonitoringConfigurationCommand>(request);
-        return AgentIpcResponse.Ok(request.RequestId) with
+        return _monitoringConfiguration.ExecuteSerialized(() => AgentIpcResponse.Ok(request.RequestId) with
         {
             HostMonitoringConfiguration = _monitoringConfiguration.SaveHostMonitoringConfiguration(command)
-        };
+        });
     }
 
     private AgentIpcResponse DeployHostMonitoringConfiguration(AgentIpcRequest request)
     {
         var command = DeserializeCommand<DeployHostMonitoringConfigurationCommand>(request);
-        return AgentIpcResponse.Ok(request.RequestId) with
+        return _monitoringConfiguration.ExecuteSerialized(() => AgentIpcResponse.Ok(request.RequestId) with
         {
             MonitoringDeployment = _monitoringConfiguration.DeployHostMonitoringConfiguration(command)
-        };
+        });
     }
 
     private AgentIpcResponse ReverseHostMonitoringDeployment(AgentIpcRequest request)
     {
         var command = DeserializeCommand<ReverseHostMonitoringDeploymentCommand>(request);
-        return AgentIpcResponse.Ok(request.RequestId) with
+        return _monitoringConfiguration.ExecuteSerialized(() => AgentIpcResponse.Ok(request.RequestId) with
         {
             MonitoringDeployment = _monitoringConfiguration.ReverseHostMonitoringDeployment(command)
-        };
+        });
     }
 
     private AgentIpcResponse CheckCaptureConfiguration(AgentIpcRequest request)

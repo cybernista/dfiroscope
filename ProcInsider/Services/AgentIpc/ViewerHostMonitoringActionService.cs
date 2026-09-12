@@ -16,7 +16,9 @@ public enum ViewerHostMonitoringActionKind
     CheckConfiguration = 2,
     SaveConfiguration = 3,
     DeployConfiguration = 4,
-    ReverseDeployment = 5
+    ReverseDeployment = 5,
+    SavePortableConfiguration = 6,
+    LoadPortableConfiguration = 7
 }
 
 public enum ViewerHostMonitoringActionOutcome
@@ -38,7 +40,8 @@ public sealed record ViewerHostMonitoringActionTarget(
     string SessionId,
     string SessionRoot,
     long WorkspaceGeneration,
-    bool RequireViewerConnection = false);
+    bool RequireViewerConnection = false,
+    AgentConfigurationAreaKind[]? ConfigurationAreas = null);
 
 public sealed record ViewerHostMonitoringActionResult
 {
@@ -104,12 +107,14 @@ public sealed class ViewerHostMonitoringActionService
     private const int MaximumScheduleLength = 512;
     private const int MaximumScheduleItems = 32;
     private const int MaximumScheduleSeconds = 86400;
+    private const int MaximumDiagnosticLength = 4000;
 
     private static readonly string[] SupportedConfigurationVersions =
     [
         "viewer-current-monitoring",
         "monitoring-default-v1",
-        "monitoring-v1"
+        "monitoring-v1",
+        "monitoring-snapshot-v1"
     ];
 
     private static readonly string[] SupportedEventLogs =
@@ -128,13 +133,114 @@ public sealed class ViewerHostMonitoringActionService
 
     private readonly IViewerHostMonitoringActionRuntime _runtime;
     private readonly ConfigProfileService _profiles;
+    private readonly Func<MonitoringConfigurationStore> _portableStore;
 
     public ViewerHostMonitoringActionService(
         IViewerHostMonitoringActionRuntime runtime,
-        ConfigProfileService? profiles = null)
+        ConfigProfileService? profiles = null,
+        Func<MonitoringConfigurationStore>? portableStore = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _profiles = profiles ?? new ConfigProfileService();
+        _portableStore = portableStore ?? (() => new MonitoringConfigurationStore());
+    }
+
+    /// <summary>Validate the published source scope and exact current transfer target.</summary>
+    public void RequireCurrentSettingsTarget(ViewerHostMonitoringActionTarget target)
+    {
+        var invalid = ValidateTarget(ViewerHostMonitoringActionKind.GetConfiguration, target);
+        if (invalid != null) throw new InvalidOperationException(invalid.Diagnostic);
+        if (!_runtime.IsCurrent(target)) throw new InvalidOperationException("The selected Agent/workspace changed; settings transfer canceled.");
+        if (!AgentHostMonitoringConfigurationAreas.IsWindowsSecurityOnly(ResolveAreas(target)))
+            throw new InvalidOperationException("Current-settings transfer requires the published Windows Security scope.");
+    }
+
+    public async Task<ViewerHostMonitoringActionResult> ExportCurrentSettingsAsync(ViewerHostMonitoringActionTarget target,
+        WindowsSecuritySettingsArea[] areas, CancellationToken cancellationToken = default)
+    {
+        RequireCurrentSettingsTarget(target);
+        if (areas.Length is < 1 or > 6 || areas.Distinct().Count() != areas.Length ||
+            areas.Any(a => a == WindowsSecuritySettingsArea.Unknown || !Enum.IsDefined(a)))
+            throw new InvalidOperationException("Choose supported settings areas to save.");
+        var result = await ExecuteCommandAsync(ViewerHostMonitoringActionKind.GetConfiguration, target,
+            new GetHostMonitoringConfigurationCommand { AgentId = target.AgentId, HostId = target.HostId,
+                ConfigurationAreas = ResolveAreas(target), ExportSettingsAreas = areas },
+            "read current Windows settings for export", cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded) return result;
+        var snapshot = result.Response?.HostMonitoringConfiguration?.SettingsSnapshot;
+        if (snapshot == null || snapshot.Areas.Except(areas).Any())
+            return Rejected(result.Action, "SettingsSnapshotMissing", "The Agent did not return the requested current-settings snapshot.");
+        try { snapshot.Validate(); }
+        catch (InvalidOperationException ex) { return Rejected(result.Action, "SettingsSnapshotInvalid", ex.Message); }
+        return result;
+    }
+
+    /// <summary>Legacy draft persistence retained for compatibility; WPF uses current-settings export.</summary>
+    public Task<ViewerHostMonitoringActionResult> SavePortableConfigurationAsync(
+        ViewerHostMonitoringActionTarget target, AgentHostMonitoringConfiguration configuration,
+        CancellationToken cancellationToken = default) =>
+        PortableConfigurationAsync(target, configuration, cancellationToken);
+
+    /// <summary>Read a form draft only. Applying it remains a separate confirmed operation.</summary>
+    public Task<ViewerHostMonitoringActionResult> LoadPortableConfigurationAsync(
+        ViewerHostMonitoringActionTarget target, CancellationToken cancellationToken = default) =>
+        PortableConfigurationAsync(target, null, cancellationToken);
+
+    private async Task<ViewerHostMonitoringActionResult> PortableConfigurationAsync(
+        ViewerHostMonitoringActionTarget target, AgentHostMonitoringConfiguration? configuration,
+        CancellationToken cancellationToken)
+    {
+        var action = configuration == null ? ViewerHostMonitoringActionKind.LoadPortableConfiguration :
+            ViewerHostMonitoringActionKind.SavePortableConfiguration;
+        var failure = configuration == null ? ValidateTarget(action, target) : ValidateConfiguration(action, target, configuration);
+        if (failure != null) return failure;
+        try
+        {
+            return await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!_runtime.IsCurrent(target)) return Superseded(action);
+                var slot = MonitoringConfigurationStore.ManualSlot(
+                    AgentHostMonitoringConfigurationAreas.IsWindowsSecurityOnly(ResolveAreas(target, configuration)));
+                var store = _portableStore();
+                var draft = configuration ?? store.ReadDraft<AgentHostMonitoringConfiguration>(slot)
+                    ?? throw new InvalidOperationException("No saved monitoring configuration exists in settings/SecurityConfig.");
+                // A reusable draft never imports deployment identity or an original-host baseline.
+                draft = draft with
+                {
+                    AgentId = target.AgentId, HostId = target.HostId,
+                    ConfigurationHash = string.Empty, Status = AgentConfigurationStatus.Draft,
+                    OriginalState = new AgentMonitoringOriginalStateSnapshot(), LastError = string.Empty,
+                    Deployment = new AgentMonitoringDeploymentMetadata(), ReverseDeployment = new AgentReverseDeploymentMetadata(),
+                    Sysmon = draft.Sysmon with { ConfigurationPath = string.Empty },
+                    SecurityAuditPolicy = draft.SecurityAuditPolicy with { AuditPolicyPath = string.Empty },
+                    Etw = draft.Etw with { ProfilePath = string.Empty },
+                    ScheduledDumps = draft.ScheduledDumps with
+                    {
+                        OutputDirectory = configuration == null && draft.ScheduledDumps.Enabled
+                            ? Path.Combine(target.SessionRoot, "Dumps") : string.Empty
+                    }
+                };
+                var invalid = ValidateConfiguration(action, target, draft);
+                if (invalid != null) return invalid;
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!_runtime.IsCurrent(target)) return Superseded(action);
+                if (configuration != null) store.WriteDraft(slot, draft);
+                if (!_runtime.IsCurrent(target)) return Superseded(action);
+                return new ViewerHostMonitoringActionResult
+                {
+                    Action = action, Outcome = ViewerHostMonitoringActionOutcome.Succeeded,
+                    Diagnostic = configuration == null ? "Monitoring configuration loaded into the form. Choose Apply to change Windows." :
+                        "Monitoring configuration saved in settings/SecurityConfig. Windows settings were not changed.",
+                    Response = new AgentIpcResponse { Success = true, HostMonitoringConfiguration = draft }
+                };
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return Canceled(action); }
+        catch (Exception ex)
+        {
+            return Rejected(action, "PortableMonitoringConfigurationUnavailable", FormatInternalFailure(ex));
+        }
     }
 
     public async Task<ViewerHostMonitoringActionResult> GetConfigurationAsync(
@@ -148,7 +254,8 @@ public sealed class ViewerHostMonitoringActionService
                 {
                     AgentId = target.AgentId,
                     HostId = target.HostId,
-                    ConfigurationVersion = "viewer-current-monitoring"
+                    ConfigurationVersion = "viewer-current-monitoring",
+                    ConfigurationAreas = ResolveAreas(target)
                 },
                 "get host monitoring configuration",
                 cancellationToken)
@@ -251,7 +358,9 @@ public sealed class ViewerHostMonitoringActionService
 
     public async Task<ViewerHostMonitoringActionResult> DeploySavedConfigurationAsync(
         ViewerHostMonitoringActionTarget target,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? expectedConfigurationHash = null,
+        WindowsSettingsFolderEntry? settingsBackup = null)
     {
         var saved = await GetConfigurationAsync(target, cancellationToken).ConfigureAwait(false);
         if (!saved.Succeeded || saved.Response?.HostMonitoringConfiguration == null)
@@ -260,6 +369,10 @@ public sealed class ViewerHostMonitoringActionService
         }
 
         var configuration = saved.Response.HostMonitoringConfiguration;
+        if (expectedConfigurationHash != null && !string.Equals(configuration.ConfigurationHash,
+                expectedConfigurationHash, StringComparison.Ordinal))
+            return Rejected(ViewerHostMonitoringActionKind.DeployConfiguration,
+                "HostMonitoringConfigurationChanged", "The saved Agent configuration changed before restoration. Review the selected backup again.");
         if (!HasExactSavedIdentity(configuration))
         {
             return Rejected(
@@ -277,7 +390,10 @@ public sealed class ViewerHostMonitoringActionService
                     HostId = target.HostId,
                     ConfigurationVersion = configuration.ConfigurationVersion,
                     ConfigurationHash = configuration.ConfigurationHash,
-                    RequireMatchingHash = true
+                    ConfigurationAreas = ResolveAreas(target, configuration),
+                    RequireMatchingHash = true,
+                    SettingsBackupFolder = settingsBackup?.FolderPath ?? string.Empty,
+                    SettingsBackupFingerprint = settingsBackup?.Fingerprint ?? string.Empty
                 },
                 "deploy host monitoring configuration",
                 cancellationToken)
@@ -331,7 +447,8 @@ public sealed class ViewerHostMonitoringActionService
                     AgentId = target.AgentId,
                     HostId = target.HostId,
                     ConfigurationVersion = configuration.ConfigurationVersion,
-                    ConfigurationHash = configuration.ConfigurationHash
+                    ConfigurationHash = configuration.ConfigurationHash,
+                    ConfigurationAreas = ResolveAreas(target, configuration)
                 },
                 "reverse host monitoring deployment",
                 cancellationToken)
@@ -360,6 +477,7 @@ public sealed class ViewerHostMonitoringActionService
                     HostId = target.HostId,
                     ConfigurationVersion = configuration.ConfigurationVersion,
                     ConfigurationHash = configurationHash,
+                    ConfigurationAreas = ResolveAreas(target, configuration),
                     DraftConfiguration = configuration
                 },
                 "check host monitoring configuration",
@@ -437,6 +555,7 @@ public sealed class ViewerHostMonitoringActionService
                     HostId = target.HostId,
                     ConfigurationVersion = configuration.ConfigurationVersion,
                     ConfigurationHash = configuration.ConfigurationHash,
+                    ConfigurationAreas = ResolveAreas(target, configuration),
                     Configuration = configuration
                 },
                 "save host monitoring configuration",
@@ -507,16 +626,39 @@ public sealed class ViewerHostMonitoringActionService
         {
             return Canceled(action);
         }
-        catch
+        catch (Exception ex)
         {
             return new ViewerHostMonitoringActionResult
             {
                 Action = action,
                 Outcome = ViewerHostMonitoringActionOutcome.InternalFailure,
                 ErrorCode = "InternalFailure",
-                Diagnostic = "The host-monitoring action failed internally."
+                Diagnostic = FormatInternalFailure(ex)
             };
         }
+    }
+
+    private static string FormatInternalFailure(Exception exception)
+    {
+        var detail = Regex.Replace(exception.Message ?? string.Empty, @"\s+", " ").Trim();
+        if (detail.Length > 768)
+        {
+            detail = detail[..768] + "...";
+        }
+
+        return string.IsNullOrWhiteSpace(detail)
+            ? $"The host-monitoring action failed internally ({exception.GetType().Name})."
+            : $"The host-monitoring action failed internally ({exception.GetType().Name}): {detail}";
+    }
+
+    private static AgentConfigurationAreaKind[] ResolveAreas(
+        ViewerHostMonitoringActionTarget target,
+        AgentHostMonitoringConfiguration? configuration = null)
+    {
+        var targetAreas = AgentHostMonitoringConfigurationAreas.Normalize(target.ConfigurationAreas);
+        return targetAreas.Length > 0
+            ? targetAreas
+            : AgentHostMonitoringConfigurationAreas.Normalize(configuration?.ConfigurationAreas);
     }
 
     private ViewerHostMonitoringActionResult? ValidateTarget(
@@ -524,18 +666,28 @@ public sealed class ViewerHostMonitoringActionService
         ViewerHostMonitoringActionTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
+        var requestedAreas = target.ConfigurationAreas ?? [];
+        var normalizedAreas = AgentHostMonitoringConfigurationAreas.Normalize(requestedAreas);
         if (!IsBoundedIdentifier(target.AgentId) ||
             !IsBoundedIdentifier(target.HostId) ||
             !IsBoundedIdentifier(target.SessionId) ||
             string.IsNullOrWhiteSpace(target.SessionRoot) ||
             target.SessionRoot.Length > MaximumPathLength ||
             !Path.IsPathFullyQualified(target.SessionRoot) ||
-            target.WorkspaceGeneration <= 0)
+            target.WorkspaceGeneration <= 0 ||
+            requestedAreas.Length != normalizedAreas.Length ||
+            normalizedAreas.Any(area =>
+                !Enum.IsDefined(area) ||
+                area == AgentConfigurationAreaKind.Unknown ||
+                !AgentHostMonitoringConfigurationAreas.IsSupportedArea(area)) ||
+            (normalizedAreas.Any(area =>
+                 AgentHostMonitoringConfigurationAreas.WindowsSecurity.Contains(area)) &&
+             !AgentHostMonitoringConfigurationAreas.IsWindowsSecurityOnly(normalizedAreas)))
         {
             return Rejected(
                 action,
                 "InvalidHostMonitoringTarget",
-                "An exact bounded agent, host, live-session root, session ID, and positive workspace generation are required.");
+                "An exact bounded agent, host, live-session root, session ID, positive workspace generation, and valid source-owned area set are required.");
         }
 
         return _runtime.IsCurrent(target) ? null : Superseded(action);
@@ -604,6 +756,39 @@ public sealed class ViewerHostMonitoringActionService
                 "The host-monitoring configuration hash must be empty or a lowercase/uppercase SHA-256 value.");
         }
 
+        var configurationAreas = AgentHostMonitoringConfigurationAreas.Normalize(configuration.ConfigurationAreas);
+        var targetAreas = ResolveAreas(target);
+        if ((configuration.ConfigurationAreas ?? []).Length != configurationAreas.Length ||
+            configurationAreas.Any(area =>
+                !Enum.IsDefined(area) ||
+                area == AgentConfigurationAreaKind.Unknown ||
+                !AgentHostMonitoringConfigurationAreas.IsSupportedArea(area)) ||
+            (targetAreas.Length > 0 && !targetAreas.SequenceEqual(configurationAreas)))
+        {
+            return Rejected(
+                action,
+                "HostMonitoringConfigurationScopeInvalid",
+                "The configuration must carry the exact explicit source-owned areas requested by the viewer target.");
+        }
+
+        if (AgentHostMonitoringConfigurationAreas.IsWindowsSecurityOnly(configurationAreas) &&
+            HasUnrelatedWindowsSecurityIntent(configuration))
+        {
+            return Rejected(
+                action,
+                "HostMonitoringConfigurationScopeInvalid",
+                "A Windows Security configuration cannot contain Sysmon, PowerShell, ETW, scheduled-dump, or non-Security event-log intent.");
+        }
+
+        if (!AgentHostMonitoringConfigurationAreas.IsWindowsSecurityOnly(configurationAreas) &&
+            HasWindowsSecurityIntent(configuration))
+        {
+            return Rejected(
+                action,
+                "HostMonitoringConfigurationScopeInvalid",
+                "Windows Security audit policy, command-line auditing, and the Security channel require the explicit Windows Security area set.");
+        }
+
         if (!ValidateEnums(configuration))
         {
             return Rejected(
@@ -624,9 +809,54 @@ public sealed class ViewerHostMonitoringActionService
             : Rejected(action, profileFailure.Value.Code, profileFailure.Value.Message);
     }
 
+    private static bool HasUnrelatedWindowsSecurityIntent(AgentHostMonitoringConfiguration configuration)
+    {
+        var sysmon = configuration.Sysmon;
+        var powerShell = configuration.PowerShellAuditing;
+        var etw = configuration.Etw;
+        var dumps = configuration.ScheduledDumps;
+        var channels = configuration.EventLogs.ChannelNames ?? [];
+        return sysmon.InstallOrUpdate || sysmon.VerifyService ||
+               !string.IsNullOrWhiteSpace(sysmon.ProfileId) ||
+               !string.IsNullOrWhiteSpace(sysmon.ProfileDisplayName) ||
+               !string.IsNullOrWhiteSpace(sysmon.ConfigurationPath) ||
+               powerShell.EnableScriptBlockLogging || powerShell.EnableModuleLogging ||
+               powerShell.EnableTranscription ||
+               !string.IsNullOrWhiteSpace(powerShell.ProfileId) ||
+               !string.IsNullOrWhiteSpace(powerShell.TranscriptDirectory) ||
+               etw.ConfigureSession || !string.IsNullOrWhiteSpace(etw.ProfileId) ||
+               !string.IsNullOrWhiteSpace(etw.ProfileDisplayName) ||
+               !string.IsNullOrWhiteSpace(etw.ProfilePath) ||
+               !string.IsNullOrWhiteSpace(etw.SessionName) ||
+               (etw.ProviderNames ?? []).Length > 0 ||
+               dumps.Enabled || dumps.IntervalSeconds != 0 ||
+               !string.IsNullOrWhiteSpace(dumps.OffsetsFromCaptureStart) ||
+               !string.IsNullOrWhiteSpace(dumps.TargetPolicy) ||
+               !string.IsNullOrWhiteSpace(dumps.OutputDirectory) ||
+               channels.Any(channel => !string.Equals(channel, "Security", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasWindowsSecurityIntent(AgentHostMonitoringConfiguration configuration) =>
+        configuration.SecurityAuditPolicy.ConfigureAuditPolicy ||
+        configuration.SecurityAuditPolicy.AuditUserDataFolders ||
+        configuration.SecurityAuditPolicy.AuditRegistryWrites ||
+        configuration.SecurityAuditPolicy.EnableProcessCommandLineLogging ||
+        !string.IsNullOrWhiteSpace(configuration.SecurityAuditPolicy.PolicyProfileId) ||
+        !string.IsNullOrWhiteSpace(configuration.SecurityAuditPolicy.PolicyProfileDisplayName) ||
+        !string.IsNullOrWhiteSpace(configuration.SecurityAuditPolicy.AuditPolicyPath) ||
+        (configuration.EventLogs.ChannelNames ?? []).Any(channel =>
+            string.Equals(channel, "Security", StringComparison.OrdinalIgnoreCase));
+
     private (string Code, string Message)? ValidateFields(
         AgentHostMonitoringConfiguration configuration)
     {
+        if ((configuration.SecurityAuditPolicy.AuditUserDataFolders ||
+             configuration.SecurityAuditPolicy.AuditRegistryWrites) &&
+            !configuration.SecurityAuditPolicy.ConfigureAuditPolicy)
+        {
+            return ("InvalidConfiguration", "Object auditing requires Configure audit policy.");
+        }
+
         var boundedValues = new[]
         {
             configuration.Sysmon.ProfileId,
@@ -700,18 +930,37 @@ public sealed class ViewerHostMonitoringActionService
         ViewerHostMonitoringActionTarget target,
         AgentHostMonitoringConfiguration configuration)
     {
+        if (configuration.SettingsSnapshot is { } snapshot)
+        {
+            try
+            {
+                snapshot.ValidateIntent(configuration);
+                if (!AgentHostMonitoringConfigurationAreas.IsWindowsSecurityOnly(configuration.ConfigurationAreas) ||
+                    configuration.ConfigurationVersion != "monitoring-snapshot-v1" ||
+                    JsonSerializer.SerializeToUtf8Bytes(snapshot).Length > WindowsSettingsFolderStore.MaximumBytes)
+                    throw new InvalidOperationException("Unsupported or oversized settings snapshot.");
+                return null;
+            }
+            catch (InvalidOperationException ex) { return ("SettingsSnapshotInvalid", ex.Message); }
+        }
+        var windowsSecurityOnly = AgentHostMonitoringConfigurationAreas.IsWindowsSecurityOnly(
+            configuration.ConfigurationAreas);
         if (!ValidateProfile(
                 ConfigProfileKind.Sysmon,
                 configuration.Sysmon.ProfileId,
                 configuration.Sysmon.ConfigurationPath,
                 configuration.Sysmon.InstallOrUpdate || configuration.Sysmon.VerifyService) ||
             !ValidateProfile(
-                ConfigProfileKind.SecurityMonitoring,
+                windowsSecurityOnly
+                    ? ConfigProfileKind.WindowsSecurityAuditPolicy
+                    : ConfigProfileKind.SecurityMonitoring,
                 configuration.SecurityAuditPolicy.PolicyProfileId,
                 configuration.SecurityAuditPolicy.AuditPolicyPath,
                 configuration.SecurityAuditPolicy.ConfigureAuditPolicy) ||
             !ValidateProfile(
-                ConfigProfileKind.EventLogs,
+                windowsSecurityOnly
+                    ? ConfigProfileKind.WindowsSecurityEventLogs
+                    : ConfigProfileKind.EventLogs,
                 configuration.EventLogs.ProfileId,
                 path: string.Empty,
                 configuration.EventLogs.ConfigureChannels || configuration.EventLogs.ConfigureRetention) ||
@@ -1016,8 +1265,12 @@ public sealed class ViewerHostMonitoringActionService
                 "The agent returned malformed or unsupported per-area deployment results.");
         }
 
-        if (areas.Any(area => area.Status == AgentConfigurationOperationStatus.Failed) !=
-            (deployment.Status == AgentConfigurationOperationStatus.Failed))
+        var hasFailedArea = areas.Any(area => area.Status == AgentConfigurationOperationStatus.Failed);
+        var hasBoundedFailureDiagnostic = !string.IsNullOrWhiteSpace(deployment.LastError) &&
+                                          deployment.LastError.Length <= MaximumDiagnosticLength;
+        if ((deployment.Status == AgentConfigurationOperationStatus.Failed &&
+             !hasFailedArea && !hasBoundedFailureDiagnostic) ||
+            (deployment.Status != AgentConfigurationOperationStatus.Failed && hasFailedArea))
         {
             return Rejected(
                 result.Action,
@@ -1033,7 +1286,7 @@ public sealed class ViewerHostMonitoringActionService
             {
                 Outcome = ViewerHostMonitoringActionOutcome.AgentRejected,
                 ErrorCode = "HostMonitoringDeploymentFailed",
-                Diagnostic = "The agent reported that the host-monitoring operation did not complete successfully."
+                Diagnostic = FormatAgentFailureDiagnostic(deployment.LastError)
             };
         }
 
@@ -1053,6 +1306,8 @@ public sealed class ViewerHostMonitoringActionService
 
     private static bool ValidateEnums(AgentHostMonitoringConfiguration configuration) =>
         Enum.IsDefined(configuration.Status) &&
+        (configuration.ConfigurationAreas ?? []).All(area =>
+            Enum.IsDefined(area) && area != AgentConfigurationAreaKind.Unknown) &&
         Enum.IsDefined(configuration.Sysmon.Status) &&
         Enum.IsDefined(configuration.SecurityAuditPolicy.Status) &&
         Enum.IsDefined(configuration.EventLogs.Status) &&
@@ -1164,6 +1419,19 @@ public sealed class ViewerHostMonitoringActionService
 
     private static string FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+
+    private static string FormatAgentFailureDiagnostic(string? diagnostic)
+    {
+        var exact = FirstNonEmpty(
+            diagnostic,
+            "The agent reported that the host-monitoring operation did not complete successfully.");
+        var singleLine = string.Join(
+            " ",
+            exact.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return singleLine.Length <= MaximumDiagnosticLength
+            ? singleLine
+            : singleLine[..MaximumDiagnosticLength];
+    }
 
     private sealed record ConfigurationFileLoadResult(
         AgentHostMonitoringConfiguration? Configuration,

@@ -263,7 +263,7 @@ public static class SessionPathService
     {
         var portableLocation = PortablePackageLocationService.TryResolve(applicationBaseDirectory);
         return portableLocation == null
-            ? CreateDefaultSessionCore(localAppDataDirectory)
+            ? CreateStandaloneSession(applicationBaseDirectory, localAppDataDirectory)
             : CreatePortablePackageSession(portableLocation, localAppDataDirectory);
     }
 
@@ -387,6 +387,10 @@ public static class SessionPathService
         };
     }
 
+    /// <summary>
+    /// Explicit legacy AppData compatibility entry point. Production startup uses
+    /// the parameterless overload, which creates executable-local Sessions.
+    /// </summary>
     public static InvestigationSessionPaths CreateDefaultSession(string localAppDataDirectory)
     {
         if (string.IsNullOrWhiteSpace(localAppDataDirectory))
@@ -395,6 +399,27 @@ public static class SessionPathService
         }
 
         return CreateDefaultSessionCore(localAppDataDirectory);
+    }
+
+    private static InvestigationSessionPaths CreateStandaloneSession(
+        string applicationBaseDirectory,
+        string? localAppDataDirectory)
+    {
+        var parent = PortablePackageLocationService.GetStandaloneSessionsDirectory(applicationBaseDirectory);
+        try
+        {
+            var paths = CreateSessionUnderParent(parent, parent,
+                $"{SessionPrefix}-{DateTime.UtcNow:yyyyMMdd-HHmmss}", DateTime.UtcNow,
+                usedFallbackRoot: false, fallbackReason: string.Empty, localAppDataDirectory);
+            _ = PortablePackageLocationService.GetStandaloneSessionsDirectory(applicationBaseDirectory);
+            return paths;
+        }
+        catch (Exception ex) when (IsPathSetupFailure(ex) || ex is ArgumentException)
+        {
+            throw new PortablePackageLocationException(
+                $"The executable-local Sessions directory is unavailable or unsafe. " +
+                $"No AppData or Temp fallback session was created: {parent}", ex);
+        }
     }
 
     private static InvestigationSessionPaths CreateDefaultSessionCore(string? localAppDataDirectory)
@@ -457,7 +482,7 @@ public static class SessionPathService
             if (!IsPathWithinRoot(portableLocation.CapturesDirectory, paths.SessionRoot))
             {
                 throw new PortablePackageLocationException(
-                    "The fresh portable capture resolved outside the package-owned Captures directory.");
+                    "The fresh portable capture resolved outside the marker-owned session directory.");
             }
 
             return paths;
@@ -854,6 +879,19 @@ public static class SessionPathService
                 CaptureArtifactKind.ArchivedSealedPackage,
             _ => CaptureArtifactKind.Unknown
         };
+
+    /// <summary>Shared presentation recipes, outside every capture and annotation database.</summary>
+    public static string GetWindowsSecurityDetailsDefinitionsPath(string? localAppDataDirectory = null) =>
+        Path.Combine(ResolveLocalAppDataDirectory(localAppDataDirectory), LocalDataRootFolderName,
+            "Settings", "windows-security-details.json");
+
+    /// <summary>Machine-monitoring backups belong to the portable package, independently of captures.</summary>
+    public static string GetMonitoringConfigurationDirectory(string? applicationBaseDirectory = null)
+    {
+        var applicationDirectory = Path.GetFullPath(applicationBaseDirectory ?? AppContext.BaseDirectory);
+        var portable = PortablePackageLocationService.TryResolve(applicationDirectory);
+        return Path.Combine(portable?.PackageRoot ?? applicationDirectory, "settings", "SecurityConfig");
+    }
 
     public static string GetDefaultDumpsDirectory() => CreateDefaultSession().DumpsDirectory;
 

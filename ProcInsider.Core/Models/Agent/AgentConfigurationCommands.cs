@@ -15,11 +15,20 @@ public abstract record AgentConfigurationCommand : AgentCommand
     public string ConfigurationVersion { get; init; } = string.Empty;
 
     public string ConfigurationHash { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Source-owned host-monitoring areas selected by this command. Empty retains the legacy
+    /// aggregate behavior for backwards compatibility.
+    /// </summary>
+    public AgentConfigurationAreaKind[] ConfigurationAreas { get; init; } = [];
 }
 
 /// <summary>Requests the selected agent's saved host monitoring configuration.</summary>
 public sealed record GetHostMonitoringConfigurationCommand : AgentConfigurationCommand
 {
+    /// <summary>Explicit read-only observation request; empty retains saved-draft reads.</summary>
+    public WindowsSecuritySettingsArea[] ExportSettingsAreas { get; init; } = [];
+
     public override AgentCommandKind Kind => AgentCommandKind.GetHostMonitoringConfiguration;
 }
 
@@ -45,6 +54,10 @@ public sealed record DeployHostMonitoringConfigurationCommand : AgentConfigurati
     public override AgentCommandKind Kind => AgentCommandKind.DeployHostMonitoringConfiguration;
 
     public bool RequireMatchingHash { get; init; } = true;
+
+    /// <summary>Optional existing Save result for preconfigured Apply only; Agent revalidates its contents.</summary>
+    public string SettingsBackupFolder { get; init; } = string.Empty;
+    public string SettingsBackupFingerprint { get; init; } = string.Empty;
 }
 
 /// <summary>Attempts safe reverse deployment of host monitoring settings.</summary>

@@ -5,7 +5,7 @@
       "id": "procinsider-event-log-baseline",
       "kind": "EventLogs",
       "displayName": "DFIRoscope Live Event Log Baseline",
-      "description": "Event channel enablement, size, retention, and auto-backup settings used by the bundled security monitoring policy.",
+      "description": "Compatibility event-channel settings for the event sources that remain in the legacy aggregate.",
       "warning": "Changing event log settings affects local retention and can increase disk usage.",
       "filePath": "..\\SecurityMonitoring\\config\\event-logs.json",
       "isDefault": true

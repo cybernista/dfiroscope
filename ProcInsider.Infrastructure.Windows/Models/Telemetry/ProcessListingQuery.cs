@@ -21,7 +21,18 @@ public enum ProcessListingSortColumn
     EndTime,
     Status,
     CpuUsage,
+    TotalProcessorTime,
+    ReadBytes,
+    WrittenBytes,
     MemoryUsage,
+    ModuleCount,
+    HandleCount,
+    RuntimeEventCount,
+    EtwEventCount,
+    SecurityEventCount,
+    PowerShellEventCount,
+    OtherWindowsEventCount,
+    SysmonEventCount,
     CompanyName,
     FileDescription,
     Sha256Hash,
@@ -54,6 +65,8 @@ public class ProcessListingSortDescriptor
 /// </summary>
 public class ProcessListingFilterSet
 {
+    public IReadOnlyDictionary<ProcessListingSortColumn, ProcInsider.Services.ColumnFilterCriteria> ColumnFilters { get; set; }
+        = new Dictionary<ProcessListingSortColumn, ProcInsider.Services.ColumnFilterCriteria>();
     public string? ProcessNameContains { get; set; }
     public string? ProcessIdContains { get; set; }
     public int? ProcessIdEquals { get; set; }

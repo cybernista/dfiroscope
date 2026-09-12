@@ -9,7 +9,9 @@ public enum ConfigProfileKind
     Sysmon,
     SecurityMonitoring,
     PowerShellAuditing,
-    EventLogs
+    EventLogs,
+    WindowsSecurityAuditPolicy,
+    WindowsSecurityEventLogs
 }
 
 public sealed class ConfigProfileManifest

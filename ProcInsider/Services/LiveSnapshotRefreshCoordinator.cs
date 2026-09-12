@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using ProcInsider.Models;
+using Microsoft.Data.Sqlite;
 
 namespace ProcInsider.Services;
 
@@ -289,6 +290,7 @@ public sealed class SqliteLiveSnapshotRefreshRuntime : ILiveSnapshotRefreshRunti
         var owner = OpenStore();
         try
         {
+            owner.EnsureListingIndexes(SqliteWorkScope.Current?.CancellationToken ?? CancellationToken.None);
             var queryService = new SqliteStagingQueryService(
                 snapshot.SnapshotPath,
                 request.AnnotationDatabasePath,
@@ -304,7 +306,11 @@ public sealed class SqliteLiveSnapshotRefreshRuntime : ILiveSnapshotRefreshRunti
                 queryService,
                 listingService,
                 owner,
-                OpenStore,
+                () =>
+                {
+                    using var recovery = SqliteWorkScope.Suppress();
+                    return OpenStore();
+                },
                 existingOwner =>
                 {
                     if (existingOwner is not SqliteStagingStore store)
@@ -340,6 +346,7 @@ public sealed class SqliteLiveSnapshotRefreshRuntime : ILiveSnapshotRefreshRunti
         CancellationToken cancellationToken)
         => Task.Run(() =>
         {
+            using var scope = new SqliteWorkScope(cancellationToken, stage: "Preparing snapshot analysis");
             using var store = SqliteAnalysisIndexMaintenanceStoreFactory.Create(
                 databasePath,
                 evidenceSessionId);
@@ -550,6 +557,7 @@ public sealed class LiveSnapshotRefreshCoordinator : IDisposable, IAsyncDisposab
         {
             await _refreshGate.WaitAsync(linkedCts.Token);
             gateEntered = true;
+            using var workScope = new SqliteWorkScope(linkedCts.Token, stage: "Preparing snapshot candidate");
             linkedCts.Token.ThrowIfCancellationRequested();
             EnsureCurrentGeneration(generation, linkedCts.Token);
 
@@ -564,7 +572,7 @@ public sealed class LiveSnapshotRefreshCoordinator : IDisposable, IAsyncDisposab
                 request,
                 candidatePath,
                 progress,
-                linkedCts.Token);
+                linkedCts.Token).ConfigureAwait(false);
             EnsureCurrentGeneration(generation, linkedCts.Token);
 
             ReportRefresh(
@@ -574,7 +582,8 @@ public sealed class LiveSnapshotRefreshCoordinator : IDisposable, IAsyncDisposab
                 "Validating the viewer snapshot candidate...",
                 progress,
                 isIndeterminate: true);
-            using (var validationBinding = _runtime.OpenBinding(request, candidate))
+            using (var validationBinding = await Task.Run(
+                () => _runtime.OpenBinding(request, candidate), linkedCts.Token).ConfigureAwait(false))
             {
                 // Opening the complete binding proves both maintenance and read/query paths before promotion.
                 if (preparePresentation != null)
@@ -708,7 +717,8 @@ public sealed class LiveSnapshotRefreshCoordinator : IDisposable, IAsyncDisposab
                 throw;
             }
         }
-        catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
+        catch (Exception ex) when (linkedCts.IsCancellationRequested &&
+            (ex is OperationCanceledException || ex is SqliteException { SqliteErrorCode: 9 }))
         {
             var superseded = generation != Volatile.Read(ref _refreshGeneration);
             return new LiveSnapshotRefreshResult(
@@ -1018,7 +1028,8 @@ public sealed class LiveSnapshotRefreshCoordinator : IDisposable, IAsyncDisposab
                 });
             }
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        catch (Exception ex) when (cts.IsCancellationRequested &&
+            (ex is OperationCanceledException || ex is SqliteException { SqliteErrorCode: 9 }))
         {
             // The analysis generation was superseded or the workspace was released.
         }

@@ -428,7 +428,8 @@ public sealed class AgentHealthDialogViewModel : ViewModelBase
         featureId = source switch
         {
             "Runtime" => FeatureIds.AgentsAndCapture,
-            "ETW" or "Security" or "PowerShell" or "WindowsOther" or "Sysmon" =>
+            "Security" => FeatureIds.WindowsSecurityEvents,
+            "ETW" or "PowerShell" or "WindowsOther" or "Sysmon" =>
                 FeatureIds.EventTelemetry,
             _ => default
         };

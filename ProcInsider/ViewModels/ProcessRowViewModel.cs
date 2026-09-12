@@ -94,8 +94,11 @@ public partial class ProcessRowViewModel : ViewModelBase
 
     public string StartTimeDisplay => _processInfo.StartTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "<not available>";
     public string EndTimeDisplay => _processInfo.EndTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "";
+    public DateTime? StartTime => _processInfo.StartTime;
+    public DateTime? EndTime => _processInfo.EndTime;
 
     public string StatusDisplay => _processInfo.Status.ToString();
+    public ProcessStatus Status => _processInfo.Status;
     public bool IsExited => _processInfo.Status == ProcessStatus.Exited;
 
     public ProcessRiskProjectionReadState RiskReadState => _riskProjection.ReadState;
@@ -158,6 +161,7 @@ public partial class ProcessRowViewModel : ViewModelBase
 
     public string CpuUsage => _processInfo.CpuUsageFormatted;
     public string MemoryUsage => _processInfo.MemoryUsageFormatted;
+    public long MemoryUsageBytes => _processInfo.MemoryUsageBytes;
     public long? TotalProcessorTimeTicks => _statistics?.TotalProcessorTimeTicks;
     public long? ReadBytes => _statistics?.ReadBytes;
     public long? WrittenBytes => _statistics?.WrittenBytes;

@@ -3,23 +3,37 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ProcInsider.Models;
 using ProcInsider.Models.Agent;
+using ProcInsider.Models.Features;
+using ProcInsider.Services.Features;
 
 namespace ProcInsider.ViewModels;
 
 public partial class HostMonitoringConfigurationViewModel : ViewModelBase
 {
+    public const string ComputerConfigurationWarning =
+        "These settings affect Windows on this computer, not just this capture. " +
+        "Audit and logging changes may increase CPU and disk use, grow event logs, change how long events are retained, " +
+        "and record sensitive data such as command-line arguments. They can affect other applications and conflict with managed security settings. " +
+        "Change only settings you are authorized to manage. Review your organization's policy and recovery plan first. " +
+        "Restoration is limited to recorded original settings; external changes or inherited object-audit entries may need manual recovery.";
+
     public HostMonitoringConfigurationViewModel(
         IEnumerable<ConfigProfileDefinition> etwProfiles,
         IEnumerable<ConfigProfileDefinition> sysmonProfiles,
         IEnumerable<ConfigProfileDefinition> securityMonitoringProfiles,
         IEnumerable<ConfigProfileDefinition> powerShellAuditingProfiles,
-        IEnumerable<ConfigProfileDefinition> eventLogProfiles)
+        IEnumerable<ConfigProfileDefinition> eventLogProfiles,
+        IFeatureCatalog? catalog = null)
     {
         AddProfiles(EtwProfiles, etwProfiles);
         AddProfiles(SysmonProfiles, sysmonProfiles);
         AddProfiles(SecurityMonitoringProfiles, securityMonitoringProfiles);
         AddProfiles(PowerShellAuditingProfiles, powerShellAuditingProfiles);
         AddProfiles(EventLogProfiles, eventLogProfiles);
+        if (catalog != null)
+        {
+            ApplyFeaturePublication(catalog);
+        }
     }
 
     public ObservableCollection<ConfigProfileDefinition> EtwProfiles { get; } = new();
@@ -41,6 +55,22 @@ public partial class HostMonitoringConfigurationViewModel : ViewModelBase
     public bool HasPowerShellAuditingProfiles => PowerShellAuditingProfiles.Count > 0;
 
     public bool HasEventLogProfiles => EventLogProfiles.Count > 0;
+
+    public bool IsLegacyConfigurationPublished { get; private set; } = true;
+
+    public bool IsWindowsSecurityConfigurationPublished { get; private set; } = true;
+
+    public bool HasPublishedConfiguration =>
+        IsLegacyConfigurationPublished || IsWindowsSecurityConfigurationPublished;
+
+    public void ApplyFeaturePublication(IFeatureCatalog catalog)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        IsWindowsSecurityConfigurationPublished = catalog.IsPublished(FeatureIds.WindowsSecurityEvents);
+        IsLegacyConfigurationPublished =
+            catalog.IsPublished(FeatureIds.SecurityMonitoringConfiguration) &&
+            !IsWindowsSecurityConfigurationPublished;
+    }
 
     [ObservableProperty]
     private ConfigProfileDefinition? selectedEtwProfile;
@@ -65,6 +95,12 @@ public partial class HostMonitoringConfigurationViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool configureAuditPolicy;
+
+    [ObservableProperty]
+    private bool auditUserDataFolders;
+
+    [ObservableProperty]
+    private bool auditRegistryWrites;
 
     [ObservableProperty]
     private bool enableProcessCommandLineLogging;
@@ -116,23 +152,33 @@ public partial class HostMonitoringConfigurationViewModel : ViewModelBase
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
+        if (IsWindowsSecurityConfigurationPublished)
+        {
+            SelectedSecurityMonitoringProfile = SelectProfile(
+                SecurityMonitoringProfiles,
+                configuration.SecurityAuditPolicy.PolicyProfileId);
+            SelectedEventLogProfile = SelectProfile(EventLogProfiles, configuration.EventLogs.ProfileId);
+            ConfigureAuditPolicy = configuration.SecurityAuditPolicy.ConfigureAuditPolicy;
+            AuditUserDataFolders = configuration.SecurityAuditPolicy.AuditUserDataFolders;
+            AuditRegistryWrites = configuration.SecurityAuditPolicy.AuditRegistryWrites;
+            EnableProcessCommandLineLogging = configuration.SecurityAuditPolicy.EnableProcessCommandLineLogging;
+            ConfigureEventLogChannels = configuration.EventLogs.ConfigureChannels;
+            ConfigureEventLogRetention = configuration.EventLogs.ConfigureRetention;
+            if (!IsLegacyConfigurationPublished)
+            {
+                return;
+            }
+        }
+
         SelectedSysmonProfile = SelectProfile(SysmonProfiles, configuration.Sysmon.ProfileId);
-        SelectedSecurityMonitoringProfile = SelectProfile(
-            SecurityMonitoringProfiles,
-            configuration.SecurityAuditPolicy.PolicyProfileId);
         SelectedPowerShellAuditingProfile = SelectProfile(
             PowerShellAuditingProfiles,
             configuration.PowerShellAuditing.ProfileId);
-        SelectedEventLogProfile = SelectProfile(EventLogProfiles, configuration.EventLogs.ProfileId);
         SelectedEtwProfile = SelectProfile(
             EtwProfiles,
             configuration.Etw.ProfileId ?? fallbackEtwProfile?.Id);
         InstallOrUpdateSysmon = configuration.Sysmon.InstallOrUpdate;
         VerifySysmonService = configuration.Sysmon.VerifyService;
-        ConfigureAuditPolicy = configuration.SecurityAuditPolicy.ConfigureAuditPolicy;
-        EnableProcessCommandLineLogging = configuration.SecurityAuditPolicy.EnableProcessCommandLineLogging;
-        ConfigureEventLogChannels = configuration.EventLogs.ConfigureChannels;
-        ConfigureEventLogRetention = configuration.EventLogs.ConfigureRetention;
         EnablePowerShellScriptBlockLogging = configuration.PowerShellAuditing.EnableScriptBlockLogging;
         EnablePowerShellModuleLogging = configuration.PowerShellAuditing.EnableModuleLogging;
         EnablePowerShellTranscription = configuration.PowerShellAuditing.EnableTranscription;

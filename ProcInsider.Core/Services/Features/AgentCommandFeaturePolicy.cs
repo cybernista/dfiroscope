@@ -72,7 +72,8 @@ public static class AgentCommandFeaturePolicy
         StartLiveCapture = 2,
         LiveCaptureSource = 3,
         Enrichment = 4,
-        CaptureConfiguration = 5
+        CaptureConfiguration = 5,
+        HostMonitoringConfiguration = 6
     }
 
     private sealed record FeatureRule(
@@ -265,7 +266,8 @@ public static class AgentCommandFeaturePolicy
                     ResolverKind.StartLiveCapture or
                     ResolverKind.LiveCaptureSource or
                     ResolverKind.Enrichment or
-                    ResolverKind.CaptureConfiguration,
+                    ResolverKind.CaptureConfiguration or
+                    ResolverKind.HostMonitoringConfiguration,
                 PublishedFeatureIds = Array.AsReadOnly(publishedFeatures),
                 OperationalAvailability = rule.OperationalAvailability,
                 AvailabilityReason = rule.AvailabilityReason
@@ -335,12 +337,16 @@ public static class AgentCommandFeaturePolicy
                 {
                     var command = Deserialize<StartLiveCaptureCommand>(payload, commandKind);
                     if (command.CollectEtwEvents ||
-                        command.CollectSecurityEvents ||
                         command.CollectPowerShellEvents ||
                         command.CollectOtherWindowsEvents ||
                         command.CollectSysmonEvents)
                     {
                         features.Add(FeatureIds.EventTelemetry);
+                    }
+
+                    if (command.CollectSecurityEvents)
+                    {
+                        features.Add(FeatureIds.WindowsSecurityEvents);
                     }
 
                     break;
@@ -350,7 +356,11 @@ public static class AgentCommandFeaturePolicy
                     var source = commandKind == AgentCommandKind.StartLiveCaptureSource
                         ? Deserialize<StartLiveCaptureSourceCommand>(payload, commandKind).Source
                         : Deserialize<StopLiveCaptureSourceCommand>(payload, commandKind).Source;
-                    if (IsEventTelemetrySource(source))
+                    if (string.Equals(source, "Security", StringComparison.OrdinalIgnoreCase))
+                    {
+                        features.Add(FeatureIds.WindowsSecurityEvents);
+                    }
+                    else if (IsLegacyEventTelemetrySource(source))
                     {
                         features.Add(FeatureIds.EventTelemetry);
                     }
@@ -412,6 +422,55 @@ public static class AgentCommandFeaturePolicy
 
                     break;
                 }
+                case ResolverKind.HostMonitoringConfiguration:
+                {
+                    var requestedAreas = ResolveHostMonitoringAreas(commandKind, payload);
+                    if (requestedAreas.Distinct().Count() != requestedAreas.Length ||
+                        requestedAreas.Any(area =>
+                            !Enum.IsDefined(area) ||
+                            area == AgentConfigurationAreaKind.Unknown ||
+                            !AgentHostMonitoringConfigurationAreas.IsSupportedArea(area)))
+                    {
+                        return Failure(
+                            AgentFeaturePolicyErrorCodes.InvalidFeaturePolicyPayload,
+                            $"Agent command '{commandKind}' contains an unknown or unsupported host-monitoring area.",
+                            features);
+                    }
+
+                    var areas = AgentHostMonitoringConfigurationAreas.Normalize(requestedAreas);
+                    var includesLegacy = areas.Length == 0 || areas.Any(area =>
+                        AgentHostMonitoringConfigurationAreas.Legacy.Contains(area));
+                    var includesWindowsSecurity = areas.Any(area =>
+                        AgentHostMonitoringConfigurationAreas.WindowsSecurity.Contains(area));
+                    if (includesLegacy && includesWindowsSecurity)
+                    {
+                        return Failure(
+                            AgentFeaturePolicyErrorCodes.InvalidFeatureSelection,
+                            $"Agent command '{commandKind}' must target Windows Security or the legacy host-monitoring aggregate, not both.",
+                            features);
+                    }
+
+                    if (includesWindowsSecurity &&
+                        !AgentHostMonitoringConfigurationAreas.IsWindowsSecurityOnly(areas))
+                    {
+                        return Failure(
+                            AgentFeaturePolicyErrorCodes.InvalidFeatureSelection,
+                            $"Agent command '{commandKind}' must carry the complete Windows Security host-monitoring area set.",
+                            features);
+                    }
+
+                    if (includesLegacy)
+                    {
+                        features.Add(FeatureIds.SecurityMonitoringConfiguration);
+                    }
+
+                    if (includesWindowsSecurity)
+                    {
+                        features.Add(FeatureIds.WindowsSecurityEvents);
+                    }
+
+                    break;
+                }
                 default:
                     return Failure(
                         AgentFeaturePolicyErrorCodes.UnknownCommandFeatureMapping,
@@ -453,12 +512,16 @@ public static class AgentCommandFeaturePolicy
             {
                 var command = Deserialize<StartLiveCaptureCommand>(parameters, jobKind);
                 if (command.CollectEtwEvents ||
-                    command.CollectSecurityEvents ||
                     command.CollectPowerShellEvents ||
                     command.CollectOtherWindowsEvents ||
                     command.CollectSysmonEvents)
                 {
                     features.Add(FeatureIds.EventTelemetry);
+                }
+
+                if (command.CollectSecurityEvents)
+                {
+                    features.Add(FeatureIds.WindowsSecurityEvents);
                 }
             }
             else if (rule.Resolver == ResolverKind.Enrichment)
@@ -519,12 +582,16 @@ public static class AgentCommandFeaturePolicy
 
         var features = new List<FeatureId> { FeatureIds.AgentsAndCapture };
         if (configuration.SourceToggles.Etw ||
-            configuration.SourceToggles.Security ||
             configuration.SourceToggles.PowerShell ||
             configuration.SourceToggles.WindowsOther ||
             configuration.SourceToggles.Sysmon)
         {
             features.Add(FeatureIds.EventTelemetry);
+        }
+
+        if (configuration.SourceToggles.Security)
+        {
+            features.Add(FeatureIds.WindowsSecurityEvents);
         }
 
         if (configuration.NetworkCapture.Enabled ||
@@ -562,9 +629,44 @@ public static class AgentCommandFeaturePolicy
                 $"Feature classification for '{discriminator}' received an empty payload.");
     }
 
-    private static bool IsEventTelemetrySource(string? source) =>
+    private static AgentConfigurationAreaKind[] ResolveHostMonitoringAreas(
+        AgentCommandKind commandKind,
+        JsonElement? payload)
+    {
+        var commandAreas = commandKind switch
+        {
+            AgentCommandKind.GetHostMonitoringConfiguration =>
+                Deserialize<GetHostMonitoringConfigurationCommand>(payload, commandKind).ConfigurationAreas,
+            AgentCommandKind.SaveHostMonitoringConfiguration =>
+                Deserialize<SaveHostMonitoringConfigurationCommand>(payload, commandKind).ConfigurationAreas,
+            AgentCommandKind.CheckHostMonitoringConfiguration =>
+                Deserialize<CheckHostMonitoringConfigurationCommand>(payload, commandKind).ConfigurationAreas,
+            AgentCommandKind.DeployHostMonitoringConfiguration =>
+                Deserialize<DeployHostMonitoringConfigurationCommand>(payload, commandKind).ConfigurationAreas,
+            AgentCommandKind.ReverseHostMonitoringDeployment =>
+                Deserialize<ReverseHostMonitoringDeploymentCommand>(payload, commandKind).ConfigurationAreas,
+            _ => []
+        };
+
+        if (commandAreas is { Length: > 0 })
+        {
+            return commandAreas;
+        }
+
+        return commandKind switch
+        {
+            AgentCommandKind.SaveHostMonitoringConfiguration =>
+                Deserialize<SaveHostMonitoringConfigurationCommand>(payload, commandKind)
+                    .Configuration.ConfigurationAreas ?? [],
+            AgentCommandKind.CheckHostMonitoringConfiguration =>
+                Deserialize<CheckHostMonitoringConfigurationCommand>(payload, commandKind)
+                    .DraftConfiguration?.ConfigurationAreas ?? [],
+            _ => []
+        };
+    }
+
+    private static bool IsLegacyEventTelemetrySource(string? source) =>
         string.Equals(source, "ETW", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(source, "Security", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(source, "PowerShell", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(source, "WindowsOther", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(source, "Sysmon", StringComparison.OrdinalIgnoreCase);
@@ -586,7 +688,7 @@ public static class AgentCommandFeaturePolicy
         var agents = FeatureIds.AgentsAndCapture;
         var rules = new Dictionary<AgentCommandKind, FeatureRule>
         {
-            [AgentCommandKind.StartLiveCapture] = Dynamic(ResolverKind.StartLiveCapture, [agents], [FeatureIds.EventTelemetry]),
+            [AgentCommandKind.StartLiveCapture] = Dynamic(ResolverKind.StartLiveCapture, [agents], [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents]),
             [AgentCommandKind.StopLiveCapture] = Static(agents),
             [AgentCommandKind.QueueBackfill] = Static(agents, FeatureIds.EventTelemetry) with
             {
@@ -611,20 +713,20 @@ public static class AgentCommandFeaturePolicy
             [AgentCommandKind.QueueMemoryImageImport] = Static(agents, FeatureIds.SystemMemoryAndVolatility),
             [AgentCommandKind.QueueMemoryAcquisition] = Static(agents, FeatureIds.SystemMemoryAndVolatility),
             [AgentCommandKind.QueueVolatilityAnalysis] = Static(agents, FeatureIds.SystemMemoryAndVolatility),
-            [AgentCommandKind.GetHostMonitoringConfiguration] = Static(agents, FeatureIds.SecurityMonitoringConfiguration),
-            [AgentCommandKind.SaveHostMonitoringConfiguration] = Static(agents, FeatureIds.SecurityMonitoringConfiguration),
-            [AgentCommandKind.CheckHostMonitoringConfiguration] = Static(agents, FeatureIds.SecurityMonitoringConfiguration),
-            [AgentCommandKind.DeployHostMonitoringConfiguration] = Static(agents, FeatureIds.SecurityMonitoringConfiguration),
-            [AgentCommandKind.ReverseHostMonitoringDeployment] = Static(agents, FeatureIds.SecurityMonitoringConfiguration),
+            [AgentCommandKind.GetHostMonitoringConfiguration] = Dynamic(ResolverKind.HostMonitoringConfiguration, [agents], [FeatureIds.SecurityMonitoringConfiguration, FeatureIds.WindowsSecurityEvents], requiresSelectedFeature: true),
+            [AgentCommandKind.SaveHostMonitoringConfiguration] = Dynamic(ResolverKind.HostMonitoringConfiguration, [agents], [FeatureIds.SecurityMonitoringConfiguration, FeatureIds.WindowsSecurityEvents], requiresSelectedFeature: true),
+            [AgentCommandKind.CheckHostMonitoringConfiguration] = Dynamic(ResolverKind.HostMonitoringConfiguration, [agents], [FeatureIds.SecurityMonitoringConfiguration, FeatureIds.WindowsSecurityEvents], requiresSelectedFeature: true),
+            [AgentCommandKind.DeployHostMonitoringConfiguration] = Dynamic(ResolverKind.HostMonitoringConfiguration, [agents], [FeatureIds.SecurityMonitoringConfiguration, FeatureIds.WindowsSecurityEvents], requiresSelectedFeature: true),
+            [AgentCommandKind.ReverseHostMonitoringDeployment] = Dynamic(ResolverKind.HostMonitoringConfiguration, [agents], [FeatureIds.SecurityMonitoringConfiguration, FeatureIds.WindowsSecurityEvents], requiresSelectedFeature: true),
             [AgentCommandKind.GetCaptureConfiguration] = Static(agents),
             [AgentCommandKind.SaveCaptureConfiguration] = Dynamic(
                 ResolverKind.CaptureConfiguration,
                 [agents],
-                [FeatureIds.EventTelemetry, FeatureIds.ModulesAndHandles, FeatureIds.DumpsAndPeAnalysis, FeatureIds.NetworkAndZeek]),
+                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents, FeatureIds.ModulesAndHandles, FeatureIds.DumpsAndPeAnalysis, FeatureIds.NetworkAndZeek]),
             [AgentCommandKind.CheckCaptureConfiguration] = Dynamic(
                 ResolverKind.CaptureConfiguration,
                 [agents],
-                [FeatureIds.EventTelemetry, FeatureIds.ModulesAndHandles, FeatureIds.DumpsAndPeAnalysis, FeatureIds.NetworkAndZeek]),
+                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents, FeatureIds.ModulesAndHandles, FeatureIds.DumpsAndPeAnalysis, FeatureIds.NetworkAndZeek]),
             [AgentCommandKind.StartConfiguredCapture] = Static(agents),
             [AgentCommandKind.StopConfiguredCapture] = Static(agents),
             [AgentCommandKind.StartProcessMonitorCapture] = Static(agents, FeatureIds.EventTelemetry),
@@ -635,11 +737,11 @@ public static class AgentCommandFeaturePolicy
             [AgentCommandKind.StopLiveCaptureSource] = Dynamic(
                 ResolverKind.LiveCaptureSource,
                 [agents],
-                [FeatureIds.EventTelemetry]),
+                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents]),
             [AgentCommandKind.StartLiveCaptureSource] = Dynamic(
                 ResolverKind.LiveCaptureSource,
                 [agents],
-                [FeatureIds.EventTelemetry])
+                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents])
         };
 
         EnsureCoverage(
@@ -655,7 +757,7 @@ public static class AgentCommandFeaturePolicy
         var agents = FeatureIds.AgentsAndCapture;
         var rules = new Dictionary<JobKind, FeatureRule>
         {
-            [JobKind.LiveCapture] = Dynamic(ResolverKind.StartLiveCapture, [agents], [FeatureIds.EventTelemetry]),
+            [JobKind.LiveCapture] = Dynamic(ResolverKind.StartLiveCapture, [agents], [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents]),
             [JobKind.Backfill] = Static(agents, FeatureIds.EventTelemetry),
             [JobKind.Import] = Static(agents),
             [JobKind.ModuleEnrichment] = Dynamic(

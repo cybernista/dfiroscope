@@ -10,12 +10,20 @@ public class EventRowViewModel : ViewModelBase
 {
     private readonly ProcessEventInfo _eventInfo;
 
-    public EventRowViewModel(ProcessEventInfo eventInfo)
+    public EventRowViewModel(ProcessEventInfo eventInfo, string? eventSource = null)
     {
         _eventInfo = eventInfo;
+        Description = string.Equals(eventSource, "Security", System.StringComparison.OrdinalIgnoreCase)
+            ? WindowsSecurityEventDescriptions.GetDescription(eventInfo.EventCode)
+            : string.Empty;
     }
 
     public long SequenceId => _eventInfo.SequenceId;
+    public System.DateTime TimestampUtc => _eventInfo.TimestampUtc;
+    public int? EventCode => _eventInfo.EventCode;
+    public string Description { get; }
+    private string _detailsSummary = "No details definition";
+    public string DetailsSummary { get => _detailsSummary; internal set => SetProperty(ref _detailsSummary, value); }
     public string TimeDisplay => _eventInfo.GetDisplayTime();
     public string EventCodeDisplay => _eventInfo.EventCode?.ToString() ?? string.Empty;
     public string ProcessGuid => _eventInfo.ProcessGuid;

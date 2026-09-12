@@ -7,10 +7,12 @@ public partial class HostMonitoringConfigurationDialog : Window
 {
     public HostMonitoringConfigurationDialog(
         HostMonitoringConfigurationViewModel monitoringConfiguration,
-        string primaryButtonContent)
+        string primaryButtonContent,
+        bool requiresComputerChangeAcknowledgement)
     {
         MonitoringConfiguration = monitoringConfiguration;
         PrimaryButtonContent = primaryButtonContent;
+        RequiresComputerChangeAcknowledgement = requiresComputerChangeAcknowledgement;
         InitializeComponent();
     }
 
@@ -18,8 +20,14 @@ public partial class HostMonitoringConfigurationDialog : Window
 
     public string PrimaryButtonContent { get; }
 
+    public bool RequiresComputerChangeAcknowledgement { get; }
+
     private void AcceptButton_Click(object sender, RoutedEventArgs e)
     {
+        if (RequiresComputerChangeAcknowledgement && ComputerChangeAcknowledgement.IsChecked != true)
+        {
+            return;
+        }
         DialogResult = true;
     }
 }

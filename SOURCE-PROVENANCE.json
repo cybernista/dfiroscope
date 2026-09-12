@@ -5,20 +5,21 @@
   "buildSolution": "DFIRoscope.Public.slnx",
   "exportPolicyId": "dfiroscope-public-product-source-v1",
   "disclosurePolicyId": "dfiroscope-public-product-source-inventory-v1",
-  "disclosurePolicySha256": "12e5992426812a867766e2d9e933330e3346964e0c08cb44d90d1103b209a684",
+  "disclosurePolicySha256": "79e579f2eb0997ca748ccc09018493d6692d58c59976d72cf9f2874172e342af",
   "disclosureLegacyPathBaselineId": "edu-2026.08-s1e1-production-path-baseline",
-  "sourceCommit": "352109a071dc1d2c265dab3f392b518b6b901547",
-  "sourceTree": "6b44257244742facdb111e3d8888e79840fb09bc",
-  "exportedTreeSha256": "31ba9a2f12241d3716b92dcb6ba0968567394c2d6985397c39d9d69c0791f6c6",
-  "editionId": "edu-2026.08-s1e1",
+  "sourceCommit": "4621ede24619b7c3be5dc3397a617f339390519e",
+  "sourceTree": "e141eb31cd3b0f854e7d304c92e410196e4de0a3",
+  "exportedTreeSha256": "1c2e8b8db9e371263dd0d19bd34f056e5120dac1ced2876f991f4d53949a4017",
+  "editionId": "edu2",
   "publishedGroups": [
     "agents-capture",
     "process-listing",
-    "selected-process-details"
+    "selected-process-details",
+    "windows-security-events"
   ],
   "publicEditionFile": "PUBLIC-EDITION.json",
-  "publicEditionSha256": "e5d628501a17a14f153936f0dd4a37e546e100b84154ec98a20258d6069410d0",
-  "fileCount": 618,
+  "publicEditionSha256": "e9af36fda7b8f0b6ac80ae60be340c318e46eb5243a04108122342b1721ca91b",
+  "fileCount": 673,
   "files": [
     {
       "path": ".gitignore",
@@ -47,8 +48,8 @@
     },
     {
       "path": "Directory.Build.props",
-      "length": 1001,
-      "sha256": "af5c7f845f4c7204288120f83e4eb202bfd0b5761938fb80b0cc3ea21b33f157"
+      "length": 1311,
+      "sha256": "4175b6c5a9f55b36e0b1d0ae41a022a49473b9f30fce7f74dff1e94a19b5c0f5"
     },
     {
       "path": "Directory.Packages.props",
@@ -167,8 +168,8 @@
     },
     {
       "path": "ProcInsider.Agent/AgentConfigurationCheckService.cs",
-      "length": 55015,
-      "sha256": "1eb7626f3a652a6c2cb4c8acb56f2bd1d7c4c83491b0a43bf5c4b544c1638a66"
+      "length": 70619,
+      "sha256": "954423d8a4855682f68320eee8e14b591d934dd719af42591251c9cae60843c8"
     },
     {
       "path": "ProcInsider.Agent/AgentConfiguredCapturePauseCoordinator.cs",
@@ -184,6 +185,11 @@
       "path": "ProcInsider.Agent/AgentHost.cs",
       "length": 57280,
       "sha256": "d29337acfd1774b4f15f19061ae1d59945bac12cadab32ca0671f26ead6737aa"
+    },
+    {
+      "path": "ProcInsider.Agent/AgentHostMonitoringOperationGate.cs",
+      "length": 527,
+      "sha256": "b2bfb72d4b7ea6f6e3cf52821080aac759d7091477d50252cec4c2ac2f4cc8be"
     },
     {
       "path": "ProcInsider.Agent/AgentHostRuntimeSnapshotFactory.cs",
@@ -317,13 +323,13 @@
     },
     {
       "path": "ProcInsider.Agent/AgentMonitoringConfigurationService.cs",
-      "length": 72316,
-      "sha256": "4d5a5c54c8e82ebc7b225bce2233b4d5514efd269c8598883bbdea3dbf44f8db"
+      "length": 135440,
+      "sha256": "051921840d25b67416c7d45afc4468ad40f14190cda4131b87050e98ec316046"
     },
     {
       "path": "ProcInsider.Agent/AgentNamedPipeServer.cs",
-      "length": 122110,
-      "sha256": "fa168a54d6b57cb796ef3742f6ce50d9bb399ace03eb52ed76fe17d3062a0154"
+      "length": 122385,
+      "sha256": "1de6360d3ec59bc4fe2895758069c8927ba727ee17b15952e86f299a3af0f5e5"
     },
     {
       "path": "ProcInsider.Agent/AgentNetworkCaptureJobHandler.cs",
@@ -331,9 +337,19 @@
       "sha256": "2db0bbf5ab55579e83ad6c210894f0ec10f2aae258b873a817096274b9e1fb5a"
     },
     {
+      "path": "ProcInsider.Agent/AgentObjectAccessAuditingService.cs",
+      "length": 48532,
+      "sha256": "4701b8493b6dac6dfdd9be2b67d1e46a9f7ca411f2f19217f96ff2a0a3cc517d"
+    },
+    {
       "path": "ProcInsider.Agent/AgentOptions.cs",
       "length": 30895,
       "sha256": "4aed285e142e3fa48a92828e89816df286cc86294be47d39d7cfe976c448fa71"
+    },
+    {
+      "path": "ProcInsider.Agent/AgentPreApplySettingsBackup.cs",
+      "length": 2578,
+      "sha256": "0df32ac14ba1fc5e3b91ce92ac8ec4797a67a35efd987422f3b87e45d0197819"
     },
     {
       "path": "ProcInsider.Agent/AgentProcessDumpJobHandler.cs",
@@ -361,9 +377,29 @@
       "sha256": "979516db928c57eec03f1b3e124f741d80e2388a9038787e00bd3cee4e14521c"
     },
     {
+      "path": "ProcInsider.Agent/AgentRegistryAuditRecovery.cs",
+      "length": 5916,
+      "sha256": "2b170c57b4c6e2c6fab8d6d445aee23966ec4c9264a4b2f2325374bcd1846be9"
+    },
+    {
       "path": "ProcInsider.Agent/AgentRuntimeDiagnosticsSampler.cs",
       "length": 29011,
       "sha256": "997990fc3fb20f5522495215de04ef2bb90ca34d8a26092f4407dc52a5123186"
+    },
+    {
+      "path": "ProcInsider.Agent/AgentSavedSettingsApply.cs",
+      "length": 10672,
+      "sha256": "6a02ab63ca9e4003ee68df12c8e7e76c6c5a68d124ebe4c6d9d81ee0cb5e7374"
+    },
+    {
+      "path": "ProcInsider.Agent/AgentSecurityAuditPolicyProfileResolver.cs",
+      "length": 8346,
+      "sha256": "327ae64fd7ded0a50ad2d7e153b1a367d784e37a057b11b414dbe025e8cfb03a"
+    },
+    {
+      "path": "ProcInsider.Agent/AgentSecurityAuditPolicyStateReader.cs",
+      "length": 5527,
+      "sha256": "00b47d0e9dc89e6e56f45d6b3b1d3e9955ad55e9e1ecaf5fd9315ef6e5515c35"
     },
     {
       "path": "ProcInsider.Agent/AgentServiceStartupPolicy.cs",
@@ -389,6 +425,11 @@
       "path": "ProcInsider.Agent/AgentWindowsServiceHost.cs",
       "length": 18287,
       "sha256": "01e895cd839c35e5b2f559f046104aa6a2a26748d27019944ef0b1e749d5ff44"
+    },
+    {
+      "path": "ProcInsider.Agent/AgentWindowsSettingsSnapshots.cs",
+      "length": 14535,
+      "sha256": "4248e36084ffafb2306459e391abc65cbd59ebeeadb62b28507632b6f38127c0"
     },
     {
       "path": "ProcInsider.Agent/AgentWorkerOptions.cs",
@@ -447,8 +488,8 @@
     },
     {
       "path": "ProcInsider.Agent/ProcInsider.Agent.csproj",
-      "length": 2783,
-      "sha256": "8ed3db88f9dd808e54980cbe1441460027ffa5f6a816182f88485ce234055cbf"
+      "length": 3092,
+      "sha256": "2141e05422fe41a9373391dfce56aa35479b7122197b865df139196bc2eec953"
     },
     {
       "path": "ProcInsider.Agent/Program.cs",
@@ -461,9 +502,29 @@
       "sha256": "5527a5495ff988eff4194c60b0b80ab3835d069eab4391e6747707e11c132252"
     },
     {
+      "path": "ProcInsider.Agent/RegistryAuditIdentityHistory.cs",
+      "length": 5588,
+      "sha256": "9c745a448d292e0a3d313edfa64fdaaebe781086478f540551fb9653a168b21b"
+    },
+    {
       "path": "ProcInsider.Agent/StubAgentJobHandler.cs",
       "length": 1508,
       "sha256": "c90997ebfff8758d190516fdb1de83acdde5ddc5c57a9861d86e99f889f44eb1"
+    },
+    {
+      "path": "ProcInsider.Agent/WindowsObjectAuditRuntime.cs",
+      "length": 29649,
+      "sha256": "0303880cf33592abb7025b618b395d71283e199e91d20b2e43f5186a161ad4e2"
+    },
+    {
+      "path": "ProcInsider.Agent/WindowsObjectAuditTargets.cs",
+      "length": 12732,
+      "sha256": "5c3e8ef2db7b55c65311e19a03ded015eecfce7020e83e103423631e46d466dc"
+    },
+    {
+      "path": "ProcInsider.Agent/WindowsSystemAuditPolicyReader.cs",
+      "length": 2847,
+      "sha256": "01355e9854d86337b1e481a648d77ee7d01f51aca28753886e381b9ed326453d"
     },
     {
       "path": "ProcInsider.Core/Models/Agent/AgentCommand.cs",
@@ -482,18 +543,18 @@
     },
     {
       "path": "ProcInsider.Core/Models/Agent/AgentConfigurationCommands.cs",
-      "length": 4091,
-      "sha256": "eac500280b0fd32fc04c83871353f0a422c95c237c29981e16aaa2eb5f785ed4"
+      "length": 4820,
+      "sha256": "919a4862f66c3d0cec671825014e35aa083afcee62acea9d3b7b75a6056566e3"
     },
     {
       "path": "ProcInsider.Core/Models/Agent/AgentConfigurationContracts.cs",
-      "length": 17665,
-      "sha256": "c148b09691d69d364f34d97a10e092081aa70bf2fa778ab09b419f6d9aa0a0d3"
+      "length": 22079,
+      "sha256": "f02c9b89e0ae8c0dfe72daf7a4b58b2716bb12bd17d1c53985cdd0da79daad31"
     },
     {
       "path": "ProcInsider.Core/Models/Agent/AgentContracts.cs",
       "length": 2263,
-      "sha256": "96e518686210433766698a65ca1fe5787dd68b161c079025c9e6d2877d0c9b83"
+      "sha256": "d0abeeed91c613cdd1cc182e2b39faca68b364ba0f11dddef54206e304b37f3c"
     },
     {
       "path": "ProcInsider.Core/Models/Agent/AgentControlSnapshot.cs",
@@ -569,6 +630,11 @@
       "path": "ProcInsider.Core/Models/Agent/JobStatus.cs",
       "length": 3048,
       "sha256": "84467d1f25fb136ec6df8c292af5299f66a4fd4c62e4c7357fd6d6eee682f993"
+    },
+    {
+      "path": "ProcInsider.Core/Models/Agent/WindowsSecuritySettingsSnapshot.cs",
+      "length": 7976,
+      "sha256": "499ca4f8596f135ef8c9aa5fb5fc31663e6177fe8e93001db1a7c4ac38453880"
     },
     {
       "path": "ProcInsider.Core/Models/Analysis/AnalysisFindingContracts.cs",
@@ -687,8 +753,8 @@
     },
     {
       "path": "ProcInsider.Core/Models/Features/FeatureIds.cs",
-      "length": 2962,
-      "sha256": "3f8082a51600262d66f6d3be9318d251088d21aeb80358abbaa6c5c6178f24f4"
+      "length": 3627,
+      "sha256": "dcd87630048e0a5af61162f3acd782896444b282dfa05a3d5d4b0f72c979dccf"
     },
     {
       "path": "ProcInsider.Core/Models/Features/FeatureReleaseState.cs",
@@ -921,9 +987,19 @@
       "sha256": "5a9399113edabada70c2ce60209668fef4a3705cce26b8efcfa2d2ce79a6805e"
     },
     {
+      "path": "ProcInsider.Core/Services/ColumnFilterCriteria.cs",
+      "length": 2119,
+      "sha256": "49fb19fed53243c374938ef6a151cd4dd13c79d3c36a79d4f1e12fb4ab4c5a15"
+    },
+    {
+      "path": "ProcInsider.Core/Services/ColumnTextFilter.cs",
+      "length": 604,
+      "sha256": "45aa50b83aa643dde5d9ded4fd888d466d957c2dda1bae6559a5bc82f06f7a90"
+    },
+    {
       "path": "ProcInsider.Core/Services/Features/AgentCommandFeaturePolicy.cs",
-      "length": 33545,
-      "sha256": "4d382da8f13d60b0a2e79773760dc1bbe20dc1d77f1a64c3585f572dd391bbb3"
+      "length": 39245,
+      "sha256": "d23028220f3725d596b30db4fc5e59f389e21bb5052ab2dfe02fa75627048acd"
     },
     {
       "path": "ProcInsider.Core/Services/Features/CompiledFeatureCatalogResolver.cs",
@@ -932,8 +1008,8 @@
     },
     {
       "path": "ProcInsider.Core/Services/Features/CurrentEducationalReleaseProfile.cs",
-      "length": 3969,
-      "sha256": "c0242ab64e855b0fff79b9defd5793ef859fe2334a9ad96d501a22e285e074ce"
+      "length": 4741,
+      "sha256": "75151de0393b13caadf031435d6855b3452ea83091c73f85ef9e50c905b1f180"
     },
     {
       "path": "ProcInsider.Core/Services/Features/CurrentInfrastructureModeProfile.cs",
@@ -944,6 +1020,11 @@
       "path": "ProcInsider.Core/Services/Features/EducationalReleaseProfileValidator.cs",
       "length": 21309,
       "sha256": "3bade162458607331415dff3912268afb7dc4b915f011cbd2e99e729fdec3d16"
+    },
+    {
+      "path": "ProcInsider.Core/Services/Features/EventSourceFamilyOwnershipCatalog.cs",
+      "length": 29529,
+      "sha256": "b0e9fa3dab27fc21cbf5475debd9e27fbe8fc61b687486a9188d956485c38e5a"
     },
     {
       "path": "ProcInsider.Core/Services/Features/FeatureCatalog.cs",
@@ -982,8 +1063,8 @@
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Models/ConfigProfileDefinition.cs",
-      "length": 1037,
-      "sha256": "0393029d0ca8e4c495e316244e21967ed8d613e0f2e66b42415c4f8d76fddfb5"
+      "length": 1101,
+      "sha256": "b5cb06d9e9072a916d2137c7bf9c9eb72d4bb48953923e59d1202393961c54b0"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Models/EtwProviderConfiguration.cs",
@@ -1027,8 +1108,8 @@
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Models/Telemetry/ProcessListingQuery.cs",
-      "length": 4984,
-      "sha256": "0f54c2ffe28490810575597bb287a67da61a9bd13aff4d4831c2ac8699134327"
+      "length": 5455,
+      "sha256": "cb48a2f8469039044ac03b97a4e0d91ad6b7e49b5185df9d9212bff4ef8de040"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Models/Telemetry/ProcessRiskProjectionQueryModels.cs",
@@ -1067,8 +1148,8 @@
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/AgentIpc/AgentNamedPipeClient.cs",
-      "length": 26280,
-      "sha256": "871d22cb8556a79372af174bbb01d66086bde9b5b891c9422d690d4b607094d7"
+      "length": 27438,
+      "sha256": "2ac4e91d326cd8b04d99e72333e157f4264c0d3f1d8bd4d43fc6d112d7367018"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/AgentIpc/AgentPairingService.cs",
@@ -1087,8 +1168,8 @@
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/ConfigProfileService.cs",
-      "length": 3984,
-      "sha256": "f4fccc7d489c65d24bdb31ce741d019512db1eb0c07a75e563794e5143d8ebc3"
+      "length": 4144,
+      "sha256": "5b3e64e54f73b4442198bc41391c58433e8e8aa62456599a5182ab207a408140"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/ConfigurableEtwService.cs",
@@ -1237,8 +1318,8 @@
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/ISqliteAnalysisIndexMaintenanceService.cs",
-      "length": 1409,
-      "sha256": "603dcc79c15293ebd6db164dc3b55ec21ad6f5311f170dd5db917fb66d9858fd"
+      "length": 1627,
+      "sha256": "f99c82d105b8279fad732c4682785a326fe50f5ec81d3f52cb1ae669d1890fc5"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/KnownFiles/NistNsrlHttpClient.cs",
@@ -1311,6 +1392,11 @@
       "sha256": "8fe1cdc8b79abb14bd2e0bdcb485c02d60b93c6d77afe742bd167426d3954a69"
     },
     {
+      "path": "ProcInsider.Infrastructure.Windows/Services/MonitoringConfigurationStore.cs",
+      "length": 7144,
+      "sha256": "0a06b2ff8c6c03ab2c703dfbba7ef2467e2190935cd9e8ca3b7ba6eec2b0fd31"
+    },
+    {
       "path": "ProcInsider.Infrastructure.Windows/Services/NetworkCaptureService.cs",
       "length": 28120,
       "sha256": "fa0b7c15d320a0cbc2773b46ddbe9cdaa7466a81c644043a5fabdac7c96087b1"
@@ -1337,8 +1423,8 @@
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/PortablePackageLocationService.cs",
-      "length": 14188,
-      "sha256": "285b90634379ee1c64e24d7c6b61ba4b65c220c35019e459e634568d510b2a68"
+      "length": 15021,
+      "sha256": "4315c72de81f4dd76368b290f09e2aaf086f9594116a9709f0d578bd4f6d1847"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/PowerShellAuditingService.cs",
@@ -1356,6 +1442,11 @@
       "sha256": "4c2d9af6e946d4cc71548c5e10deb695105adf697aa1850bc4b4bb39aa194741"
     },
     {
+      "path": "ProcInsider.Infrastructure.Windows/Services/ProcessEventAttachmentSql.cs",
+      "length": 6172,
+      "sha256": "e33c1c71b7e34ceb6e2d4151636d33580456d5834f09618f2bb0623c631c8d63"
+    },
+    {
       "path": "ProcInsider.Infrastructure.Windows/Services/ProcessEventStore.cs",
       "length": 8486,
       "sha256": "e7f163ecd743c75547a85731e842ded2f7873f54ce3750e15b05f5ac74695f9a"
@@ -1366,9 +1457,14 @@
       "sha256": "e28d9f8b4e612027f5c81e13429c15f60e69f96850684f951c5db0e0b5d4c139"
     },
     {
+      "path": "ProcInsider.Infrastructure.Windows/Services/ProcessListingColumnFilters.cs",
+      "length": 8549,
+      "sha256": "59eed3a366926eea2ff8cad8e37d16e128a9c9eadbd227eac54f9793014f5e5a"
+    },
+    {
       "path": "ProcInsider.Infrastructure.Windows/Services/ProcessListingQueryService.cs",
-      "length": 71483,
-      "sha256": "11b4e18eca9312c26b3dd0be3c549f13adfb7fdc079190932512f25095766d4b"
+      "length": 82860,
+      "sha256": "ccf0a316aeb3f2a3f2d15f945f18cde994870eca39ea455254514060e8701b65"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/ProcessMonitorService.cs",
@@ -1422,13 +1518,13 @@
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SelectedProcessEvidenceQueryService.cs",
-      "length": 41527,
-      "sha256": "c9119e5a0dffc481f6938dcabdc29e14507b0d982b3570a53a2744b96976f750"
+      "length": 52984,
+      "sha256": "df1739b7986a718a5bc871a7d930c6ddd9edaab268a8e98c35c7525a10de3225"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SessionPathService.cs",
-      "length": 65793,
-      "sha256": "bbd5825fb8b33b8eb6ebe5065f32784c3203c1456d7f4b77780e1d23ffb0482e"
+      "length": 67964,
+      "sha256": "68616c704b3ffac4617d92509795b5a194cb52560e615617ee58fee295dd9dd8"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SigmaAnalysisEvaluator.cs",
@@ -1457,8 +1553,8 @@
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SqliteAnalysisIndexMaintenanceService.cs",
-      "length": 47908,
-      "sha256": "df3d0fa595f309702e9e15f061eba588d1230c76fd30f005165ac58ff3e4da99"
+      "length": 49750,
+      "sha256": "35b6512bf8a15688f701f7cc0f4f8f65958fc27b3368da744e70cb8428b72e85"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SqliteDiagnosticsLogger.cs",
@@ -1472,8 +1568,8 @@
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SqliteEvidenceMigrationRunner.cs",
-      "length": 23002,
-      "sha256": "24e4e8871dce8cd8a6f9f98f59f0620b653cbb8d5b4bffbdc6a5bc1ced557950"
+      "length": 23253,
+      "sha256": "4fcc7d649bd9cb88914fbedf3f56982762e579204fb191beffbbca3ef66a6600"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SqliteEvidenceWriteModels.cs",
@@ -1482,8 +1578,8 @@
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SqlitePerformanceProfile.cs",
-      "length": 33749,
-      "sha256": "29cec23883ee1a84441ab447641dfdf603ca41110aa7944001be211038d9f16f"
+      "length": 33938,
+      "sha256": "a1b8e722b7856a553c1589b75d1730173fddfa478c4ffdeaa5812fcb161ec9cd"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SqliteProcessRiskProjectionMaintenanceService.cs",
@@ -1492,23 +1588,28 @@
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SqliteReadQueryContext.cs",
-      "length": 3358,
-      "sha256": "df67248b28e12ef28014901d502bf08fc6700509474d7f3765d85cc2958d62c7"
+      "length": 4313,
+      "sha256": "ff3103086851da74e4ac6f4976138de0d8d24e3bad7ee66f4887db8f7307d18e"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SqliteSnapshotService.cs",
-      "length": 12116,
-      "sha256": "274bd516a55ca8f3285d59116f894f28b65f26080b1d0e35e25bc7dbe36ca273"
+      "length": 14416,
+      "sha256": "6ce5fd9e19ff3094f65b80c26ef40e1ac4001d4d98eeedb13ba326a2a2018f20"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SqliteStagingQueryService.cs",
-      "length": 94004,
-      "sha256": "199b04018626b04bc2e33d8e9be0455ebbc03ee39d636b6387d805e7638003d1"
+      "length": 94242,
+      "sha256": "562b8db2a9e290c74b8ce8c14a60e13515de34165905a2c4c10b90c89d312e1c"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SqliteStagingStore.cs",
-      "length": 325570,
-      "sha256": "4daaf820a5873190b7f494913e365d24c892e0ab6626be7ac9800a4a5fbb37fc"
+      "length": 325967,
+      "sha256": "7f16170bcb7da55523f0a65f419898400ee25ae8b0adf0dd4d7e2cf658a29e02"
+    },
+    {
+      "path": "ProcInsider.Infrastructure.Windows/Services/SqliteWorkScope.cs",
+      "length": 4466,
+      "sha256": "ba0d8a75129789b4af460a69794f37eb839ee8002b736ad79e9b932a07472e98"
     },
     {
       "path": "ProcInsider.Infrastructure.Windows/Services/SqliteWriteTransactionContext.cs",
@@ -1546,6 +1647,11 @@
       "sha256": "9c7ed0b514d45453facd43fad74cd129c49fb0a8160a620c4ac84320bd23685d"
     },
     {
+      "path": "ProcInsider.Infrastructure.Windows/Services/WindowsSettingsFolderStore.cs",
+      "length": 12018,
+      "sha256": "6d11878366914e10689453beec284d31b1b364c66dc15a862d12f76657c77248"
+    },
+    {
       "path": "ProcInsider.Infrastructure.Windows/Services/YaraAnalysisPersistenceService.cs",
       "length": 20705,
       "sha256": "99bdccd4ffb7bb24800364c95d3efae75859a86c8cc8abc472196e5b53f34511"
@@ -1572,13 +1678,13 @@
     },
     {
       "path": "ProcInsider/AddAgentDialog.xaml",
-      "length": 7734,
-      "sha256": "68a40ab3c18c4f5f60c69ab1f982c8c14ca585a3333beff5fcc1b442d96b0fc4"
+      "length": 7456,
+      "sha256": "0809975b39222ddb8483633b77026c1dfdce1e2e707fb40f8edaa06f270e7478"
     },
     {
       "path": "ProcInsider/AddAgentDialog.xaml.cs",
-      "length": 5620,
-      "sha256": "6419691bf9e50099b40830dc349095c50663159ce81981514640c5691ff03da7"
+      "length": 4434,
+      "sha256": "b75986f5310318ccbb1c7909255b937d9fd22f80ac71df80dc50a8883331ece2"
     },
     {
       "path": "ProcInsider/AgentHealthDialog.xaml",
@@ -1592,13 +1698,13 @@
     },
     {
       "path": "ProcInsider/AgentMonitoringStatusDialog.xaml",
-      "length": 6884,
-      "sha256": "b3ceb4bb03f213523c78e9689656fc082bd5748073ba65abdf56c897a9e1fbb9"
+      "length": 6049,
+      "sha256": "605d9eacaa624725a511c90cf524f26fc41151e4ef1c899ac6a3728bb443b4c5"
     },
     {
       "path": "ProcInsider/AgentMonitoringStatusDialog.xaml.cs",
-      "length": 417,
-      "sha256": "edfcaa55518886efe8f52e4e0c568b821f3a46d0ee862b691e87db71d33cfeb1"
+      "length": 308,
+      "sha256": "cd18c4fca7aa7d05c6d01688eab0af364bdcc4d07c1b76df5630765d802a2c7d"
     },
     {
       "path": "ProcInsider/AgentShutdownConfirmationDialog.xaml",
@@ -1636,6 +1742,16 @@
       "sha256": "0a9e46745ece43e99261620775dbd1592c736fe793479b2ddbc045d0409d4845"
     },
     {
+      "path": "ProcInsider/AuditApplyResultDialog.xaml",
+      "length": 3194,
+      "sha256": "e3e15eb3c5a860d42c132497996e7d241bd9325b421a3243368fed25f1481992"
+    },
+    {
+      "path": "ProcInsider/AuditApplyResultDialog.xaml.cs",
+      "length": 288,
+      "sha256": "cc9c0f9922a6289341f093887db9b72fb4f7cefd3faf4d475d23446133d24ad8"
+    },
+    {
       "path": "ProcInsider/CaptureConfigurationDialog.xaml",
       "length": 2337,
       "sha256": "48924dea62eb289bce0947428255f8bf6351c6d7d56019d62c7695d93cfebf21"
@@ -1648,17 +1764,17 @@
     {
       "path": "ProcInsider/Cli/CliCommandDispositionCatalog.cs",
       "length": 18000,
-      "sha256": "08aff0662a289a420cee827b2522109ab56a2cb388c40d74f6f648e52e170b5b"
+      "sha256": "034a505016ba91bea9b8586461d4023ddde996ec2d90fe73ec0f6302cef9fe53"
     },
     {
       "path": "ProcInsider/Cli/CliCommandHandlers.cs",
-      "length": 121658,
-      "sha256": "608211189103daa0ee9e19b6e3a40cd9c73ca0cc82c7fe5430686a15c41e80f3"
+      "length": 125515,
+      "sha256": "dee985430816ca1cf58afd2798a75220331cde3b1115e2bc1d9fc35763e54efd"
     },
     {
       "path": "ProcInsider/Cli/CliCommandRegistry.cs",
-      "length": 21985,
-      "sha256": "fd6f91463404d288df47bec12aff00084dd616235707f6d92b55677c243e781e"
+      "length": 21910,
+      "sha256": "6f1cabb52875f6978f3fe76181cd2d683f9982ca4217dd2082fb8e4d269e608f"
     },
     {
       "path": "ProcInsider/Cli/CliContracts.cs",
@@ -1737,8 +1853,8 @@
     },
     {
       "path": "ProcInsider/Config/EventLogs/profiles.json",
-      "length": 538,
-      "sha256": "297632b81abf94a0f1b3e290ecbeaee4ea66c33c796b9767e67866f431003e76"
+      "length": 518,
+      "sha256": "29c70ee925c21e7810deff9ea80878d3350ef9da6d857159650affaa42b49017"
     },
     {
       "path": "ProcInsider/Config/PowerShellAuditing/profiles.json",
@@ -1751,24 +1867,19 @@
       "sha256": "fa749adefed3315402f8502adf761e1255236f8b47ae9cc7678c39b47caf0925"
     },
     {
-      "path": "ProcInsider/Config/SecurityMonitoring/auditpol/monitoring-audit-policy.json",
-      "length": 2648,
-      "sha256": "eea51610e1645f481b2af9e5b86866e9e395b5a93963bb99d0fea032d995462b"
-    },
-    {
       "path": "ProcInsider/Config/SecurityMonitoring/config/event-logs.json",
-      "length": 1983,
-      "sha256": "89710fb0b37bc2952882870811791eb63943d87c7c4b11b8fd4e3f7d60feafbc"
+      "length": 1897,
+      "sha256": "952340e05f4781f077b002e0ebff08875ecddd35b7b0c615a84d7717a546569a"
     },
     {
       "path": "ProcInsider/Config/SecurityMonitoring/profiles.json",
-      "length": 667,
-      "sha256": "17544f30900df992a26058975357c3c40e02b810169abb18da9e856661f55708"
+      "length": 47,
+      "sha256": "c38f12b54dc1ebcc05c36d9dcf23b746e6927fa63963fce443a7b69f05a746cc"
     },
     {
       "path": "ProcInsider/Config/SecurityMonitoring/README.md",
-      "length": 1346,
-      "sha256": "496ad7c2324b039a3183e037091a0908a84c4d03ac9cf2de04a8323b2f864c4f"
+      "length": 1404,
+      "sha256": "07dde2d304f32f6da4ba8a475781cfba0fdee3b7fd635141636202c427abe361"
     },
     {
       "path": "ProcInsider/Config/Sysmon/Procinsider.Sysmon.Medium.xml",
@@ -1784,6 +1895,26 @@
       "path": "ProcInsider/Config/Sysmon/profiles.json",
       "length": 989,
       "sha256": "5926752754dd9f72c57de2e109d508c6c05718b4a644087bf48892d6c7b765be"
+    },
+    {
+      "path": "ProcInsider/Config/WindowsSecurity/auditpol/monitoring-audit-policy.json",
+      "length": 4949,
+      "sha256": "0c99acaa269f96111e16e6e5f2dd290935e6369820b848817fdbb7f523e3e3de"
+    },
+    {
+      "path": "ProcInsider/Config/WindowsSecurity/event-logs.json",
+      "length": 91,
+      "sha256": "4972ab595dcbe284c47a861c0303f811ee034456a7b305cc893f8e8d85441b4d"
+    },
+    {
+      "path": "ProcInsider/Config/WindowsSecurity/profiles.json",
+      "length": 1126,
+      "sha256": "2ed63d88382ef381f35f8f786fcaae6be657da2c89389e1ccadfe4f53a2d1392"
+    },
+    {
+      "path": "ProcInsider/Config/WindowsSecurity/README.md",
+      "length": 12942,
+      "sha256": "2395fa77779404483d1cdb9b0c543221fd82106a5ff932d9887db9a248072d62"
     },
     {
       "path": "ProcInsider/Converters/BoolToVisibilityConverter.cs",
@@ -1857,8 +1988,8 @@
     },
     {
       "path": "ProcInsider/Features/BaselineComparison/README.md",
-      "length": 7814,
-      "sha256": "b5e2e520a6ca8e802c1e58639e22284bd1532a754ac8467108287b853f73dc32"
+      "length": 8067,
+      "sha256": "79fc894bf682ae18159ea1d2e1853f8ee13774c0922a6c2c53a821562b058960"
     },
     {
       "path": "ProcInsider/Features/BaselineComparison/SnapshotComparisonCompletionService.cs",
@@ -1947,8 +2078,8 @@
     },
     {
       "path": "ProcInsider/Features/Search/README.md",
-      "length": 6196,
-      "sha256": "8f44e1a80d3bf68f8ddb871ab255bc7eec2a5918cbbd99d0804b16ba95b133d2"
+      "length": 6449,
+      "sha256": "ef70f2a98fd01e7bada79e08d705fbee41eac6783dfa21efdbc736a440fe61c2"
     },
     {
       "path": "ProcInsider/Features/Search/SearchFeatureModule.cs",
@@ -1966,9 +2097,44 @@
       "sha256": "86a5ef3989166fdd4d99b9902205b7f5fd3c70bd49cf20721e96124aa9981ee1"
     },
     {
+      "path": "ProcInsider/Features/WindowsSecurityDetails/SecurityDetailsDefaults.cs",
+      "length": 5267,
+      "sha256": "611e559af9db72bd4f01d1d6c109a56ffa440809bcae4250b10e1d6688bf003e"
+    },
+    {
+      "path": "ProcInsider/Features/WindowsSecurityDetails/SecurityDetailsEditorViewModel.cs",
+      "length": 7873,
+      "sha256": "abe820b6998a9793d3a4aff71c2c900ac84ccdd7d562713fd670d778eb75c2e7"
+    },
+    {
+      "path": "ProcInsider/Features/WindowsSecurityDetails/SecurityDetailsEditorWindow.xaml",
+      "length": 4281,
+      "sha256": "cba2e7ac592d4db7d8da82b654a13f44b9a8cda092dafd6971bad14f9351a726"
+    },
+    {
+      "path": "ProcInsider/Features/WindowsSecurityDetails/SecurityDetailsEditorWindow.xaml.cs",
+      "length": 413,
+      "sha256": "5ca05a364716efc515efed4dd349429fccd2caaaf61ce9d2d6f55dad26ce9e77"
+    },
+    {
+      "path": "ProcInsider/Features/WindowsSecurityDetails/SecurityDetailsStore.cs",
+      "length": 6533,
+      "sha256": "5a0b89decccc6badddc8e6dbd7f8fe460d3fe848bb49c8b4c480f5d630217afa"
+    },
+    {
+      "path": "ProcInsider/Features/WindowsSecurityDetails/SecurityDetailsTemplate.cs",
+      "length": 6802,
+      "sha256": "af054d0841923c88a73b7d4c2fdee49f859843196893e7f3d9d7146d21a0ebe3"
+    },
+    {
+      "path": "ProcInsider/Features/WindowsSecurityDetails/SecurityDetailsWorkflow.cs",
+      "length": 2205,
+      "sha256": "b73330356d79e63e59726abf64b11e5735647c64da38a08582c623e3923385ba"
+    },
+    {
       "path": "ProcInsider/HostMonitoringConfigurationControl.xaml",
-      "length": 8625,
-      "sha256": "4d1932f763c70f1e9f508cd59c5543319f97d6dc33870e6d16c40a17135b33ab"
+      "length": 10420,
+      "sha256": "81c0b8884af6a8509da5a095fe900c571b3eb182959877123159df947fe805b3"
     },
     {
       "path": "ProcInsider/HostMonitoringConfigurationControl.xaml.cs",
@@ -1977,13 +2143,13 @@
     },
     {
       "path": "ProcInsider/HostMonitoringConfigurationDialog.xaml",
-      "length": 1858,
-      "sha256": "8c0e61ad0ae2ab00a6644d10e94c996bed2bd903e0304b0f1d1284fb2c6a7fb9"
+      "length": 3963,
+      "sha256": "61ec9a195951c2361fa0f6eb4e232600135c15f73f032ab99a2c96664639a181"
     },
     {
       "path": "ProcInsider/HostMonitoringConfigurationDialog.xaml.cs",
-      "length": 721,
-      "sha256": "0da4717b8b138892e5b8fcf9a314866cc80c2e023ef3c8de7948b7f3a29e3e2f"
+      "length": 1074,
+      "sha256": "4e4692cd554855c9b52473174a4e61e1fb618cc25f5ac8d5ddfb17fb3458f839"
     },
     {
       "path": "ProcInsider/IMPLEMENTATION.md",
@@ -1992,13 +2158,13 @@
     },
     {
       "path": "ProcInsider/MainWindow.xaml",
-      "length": 88877,
-      "sha256": "fb067c0d3adcb3d015247abb88d1a787ee9d7595d695c432208d08dd23bf166e"
+      "length": 92158,
+      "sha256": "658ddb8bef9664293736eaf5e49cc58a9f0ef60d418a0721d3143ee99244f48e"
     },
     {
       "path": "ProcInsider/MainWindow.xaml.cs",
-      "length": 10538,
-      "sha256": "c889f8751962356e2d5eeabd032ca2b2c7ef5d2f8f15a9fefa26df8d387de6e4"
+      "length": 11480,
+      "sha256": "f5ea265dac4129a4a5f18da471e88d43dd72f76321a61585afe4aa1afe747162"
     },
     {
       "path": "ProcInsider/Models/Ai/AiChatMessage.cs",
@@ -2122,8 +2288,8 @@
     },
     {
       "path": "ProcInsider/ProcInsider.csproj",
-      "length": 2616,
-      "sha256": "b1c0d1fc6ad739f18748314bb7bd1611848d9d040a297c43def67cd8ce00b31c"
+      "length": 2921,
+      "sha256": "cf34c934a66b8a42cb7f175eafb376ac7a0151880aa769e36b15899f24a16ecb"
     },
     {
       "path": "ProcInsider/Program.cs",
@@ -2187,8 +2353,8 @@
     },
     {
       "path": "ProcInsider/Services/AgentIpc/LocalAgentSetupCoordinator.cs",
-      "length": 7905,
-      "sha256": "30c965bfea1b3aad3cc2e36168def24da14c23de68e3111c8499c7d4a2346607"
+      "length": 6331,
+      "sha256": "d009f36220d83fcabe88cc504a5a0f46f854ad6dc6aba9d83e2d0ff54b7d9484"
     },
     {
       "path": "ProcInsider/Services/AgentIpc/LocalAuthenticatedAgentContextAdapter.cs",
@@ -2207,8 +2373,8 @@
     },
     {
       "path": "ProcInsider/Services/AgentIpc/ViewerAgentCommandExecutor.cs",
-      "length": 78894,
-      "sha256": "461ff70defecb471d6aef77760b86677db816159737f0bc0dc2ed1c704a3f054"
+      "length": 78974,
+      "sha256": "4c6aac9a80d0dbb050a5dbe9997b97a9c4f59d42760fb96517a837783221e93f"
     },
     {
       "path": "ProcInsider/Services/AgentIpc/ViewerAgentEvidenceActionService.cs",
@@ -2227,13 +2393,23 @@
     },
     {
       "path": "ProcInsider/Services/AgentIpc/ViewerHostMonitoringActionService.cs",
-      "length": 47637,
-      "sha256": "1f8e70f1a711f00e51faf382a1cd03941d5626e03cd9cfc8a338fe88f6a7f637"
+      "length": 64376,
+      "sha256": "33544ddc2b4bd69486d4f8d5b18342ebec87f796c89c2e40d2344b3b98668468"
     },
     {
       "path": "ProcInsider/Services/AgentIpc/ViewerMemoryActionService.cs",
       "length": 25351,
       "sha256": "42340380391b5ce5614a4d040d49822cd5599bd41aac9f35528971cbaeca986b"
+    },
+    {
+      "path": "ProcInsider/Services/AgentIpc/ViewerPreconfiguredAuditApplyWorkflow.cs",
+      "length": 5753,
+      "sha256": "a24ff0fab1a5163ed668dc0fe951a0d311785d20164c846cc918a4bf88515d55"
+    },
+    {
+      "path": "ProcInsider/Services/AgentIpc/ViewerWindowsSettingsTransferWorkflow.cs",
+      "length": 7779,
+      "sha256": "26ad3003b838fda21c7aaf35ab3a2f067b75317e92f8fab6823bf28fba7659c0"
     },
     {
       "path": "ProcInsider/Services/Ai/AiEvidencePackBuilder.cs",
@@ -2357,8 +2533,8 @@
     },
     {
       "path": "ProcInsider/Services/Features/FeatureNavigationPolicy.cs",
-      "length": 2818,
-      "sha256": "5ae70aed273c905ff17fe01f5542c884bee662ac2bface9a9ea3f06c38c3d1d2"
+      "length": 2895,
+      "sha256": "a80eb18ad1245a5fe011d5967d1012898766129f57ae28c76e58bc7c079b0034"
     },
     {
       "path": "ProcInsider/Services/Features/FeatureTabSet.cs",
@@ -2377,8 +2553,8 @@
     },
     {
       "path": "ProcInsider/Services/Features/ViewerFeatureModules.cs",
-      "length": 14238,
-      "sha256": "b1ed05078f28c7fb418bdc0b7b91fd48912f54caa4bba87a0dd16446a873fa54"
+      "length": 18167,
+      "sha256": "35bbe0b12d6960de54b698ac3a7054e3bfbf9280889cda6ac9b503b89ec3c762"
     },
     {
       "path": "ProcInsider/Services/Features/ViewerFeatureRegistry.cs",
@@ -2427,23 +2603,28 @@
     },
     {
       "path": "ProcInsider/Services/LiveSnapshotRefreshCoordinator.cs",
-      "length": 40981,
-      "sha256": "8634d03b9b8a67424741054cab433c4d86045be85679448b292352c5757a0318"
+      "length": 41759,
+      "sha256": "e9582da3c4f85d466ab28b5e7af16f1049d08c8cb46e820c9edc899ec45e7c8c"
     },
     {
       "path": "ProcInsider/Services/ProcessFilterService.cs",
-      "length": 12928,
-      "sha256": "b788d322bea010887345ffc88058ad07c04733157d1882fe1e7a7a5ceae8fa54"
+      "length": 12909,
+      "sha256": "698ec377621d62772953b296f886d4228aaf7f9f47b0564777ffc30c939b4367"
+    },
+    {
+      "path": "ProcInsider/Services/ProcessListingAnchorResolver.cs",
+      "length": 3386,
+      "sha256": "7f390430ba543245b8f9fa2a79be488af3488de8c8e5d830fec98d47ec0822b5"
     },
     {
       "path": "ProcInsider/Services/ProcessListingService.cs",
-      "length": 11798,
-      "sha256": "4b338c41a8ff885d3897b5cebd49fe378ae6f8121a5cb396974c891f17737432"
+      "length": 12680,
+      "sha256": "82350a648ce88b1fba4946dd48ee3b02e01bec7041845a282405cded85fa9238"
     },
     {
       "path": "ProcInsider/Services/SecurityMonitoringService.cs",
-      "length": 4536,
-      "sha256": "058c90bad1c8758c45aa170abd8a8e076b1b3bbe821b00f0f311a91298c96eea"
+      "length": 4607,
+      "sha256": "a1f35e75478916776afd4e94033ca58deef67fb11acf8a281e2e2bf6be0e82c3"
     },
     {
       "path": "ProcInsider/Services/SelectedProcessFanOutCoordinator.cs",
@@ -2491,6 +2672,16 @@
       "sha256": "3cd4cb6e02bf165ea624cf4db7544b3d22cc4f6037a9ca1dccbb89fb5b6e0329"
     },
     {
+      "path": "ProcInsider/Services/ViewerRefreshOperation.cs",
+      "length": 1511,
+      "sha256": "f062fe90dc4764f7bd6dd83d2606f26c2e6122e9c0c77915347a4ca9bc702524"
+    },
+    {
+      "path": "ProcInsider/Services/ViewerRefreshProgressPresentation.cs",
+      "length": 1750,
+      "sha256": "f14e6695940ae2b3fc9c2f20ccf5ac5d8f87cb204219ce9690e20995ce8fd7c2"
+    },
+    {
       "path": "ProcInsider/Services/ViewerSnapshotFollowCoordinator.cs",
       "length": 49491,
       "sha256": "3aaca60f5f62de4e6e7222c2927c79da2474bfaa9a825d0b4b35425057c31885"
@@ -2507,8 +2698,8 @@
     },
     {
       "path": "ProcInsider/Services/ViewerWorkspaceLifecycleCoordinator.cs",
-      "length": 23699,
-      "sha256": "f744d72f8e82c53bbb85a6a16244a5feb93a357118e9372ed970a0cc631d2333"
+      "length": 24282,
+      "sha256": "d153ea67f8cbdf1499025bece0de828403d5d8556625e079f2a5020f7f7bcc82"
     },
     {
       "path": "ProcInsider/Services/VirtualizedProcessCollection.cs",
@@ -2552,23 +2743,28 @@
     },
     {
       "path": "ProcInsider/ViewModels/AgentCaptureOptionViewModel.cs",
-      "length": 11673,
-      "sha256": "7ad0bbad20bd836783ca86d752064b641c334221b768c639b090effcee8043e6"
+      "length": 11716,
+      "sha256": "7bbf86d278a3d5fb920ac8fb29049f047022c8d86ad262369aed16f10783372f"
     },
     {
       "path": "ProcInsider/ViewModels/AgentHealthDialogViewModel.cs",
-      "length": 35960,
-      "sha256": "08670fe35a455cb84b10fc3be211b83e56d760b5473929f11df293caa2dbd0ba"
+      "length": 36007,
+      "sha256": "6c591bc1ea199c01886237185152aa72d547194369414dbb052275a94585102f"
+    },
+    {
+      "path": "ProcInsider/ViewModels/AgentMonitoringSectionViewModel.cs",
+      "length": 2923,
+      "sha256": "7134cf045aa7d90c4a83afa8296903a89521ccf0fd1218145beb050f83aeab1d"
     },
     {
       "path": "ProcInsider/ViewModels/AgentRegistryEntryViewModel.cs",
-      "length": 53400,
-      "sha256": "297a8007a1b71ebf5cf4b31aefa8d04058af150204c01834ca50e6a3fd471903"
+      "length": 55919,
+      "sha256": "46a0f6d832b504101e8bacab3c4d60c116cdd00f92abac2f12a46d0afabda959"
     },
     {
       "path": "ProcInsider/ViewModels/AgentsViewModel.cs",
-      "length": 10606,
-      "sha256": "c80d206b38c467f45c263e44e655c85c8ac11eb1cff8c68ef49c9177c4727eb0"
+      "length": 11135,
+      "sha256": "60fe37fc95c56b2e8f335a7c764f862e4b677a891904a293f1d9b278e990f26a"
     },
     {
       "path": "ProcInsider/ViewModels/AiChatViewModel.cs",
@@ -2601,14 +2797,34 @@
       "sha256": "1e296c1d766938e69ce7fdc6ab5a682322b3a57c689d3ebc1435e6b801b53e46"
     },
     {
+      "path": "ProcInsider/ViewModels/AuditApplyResultViewModel.cs",
+      "length": 3910,
+      "sha256": "bd6d015ffbc65bbb8b9441fa5ba03dee17120e582b2c497227096d9c5992a2ec"
+    },
+    {
+      "path": "ProcInsider/ViewModels/ColumnFilterViewModel.cs",
+      "length": 10089,
+      "sha256": "4946e16a2daa961d1ded7998158be26e975a8e6f2f9fabd404c1b3fb5a41fc60"
+    },
+    {
       "path": "ProcInsider/ViewModels/EventRowViewModel.cs",
-      "length": 3215,
-      "sha256": "363f22b943950ada51cf44f713674f924ca3b6a0bfc5f5f6e1ba12bef2bb1abd"
+      "length": 3804,
+      "sha256": "519903d4257877dba937f497372631e4167f8735d01164ad16e2cc074ef8a94f"
+    },
+    {
+      "path": "ProcInsider/ViewModels/EventsViewModel.ColumnFilters.cs",
+      "length": 2078,
+      "sha256": "62f6825bbd4f6b66aa05a6c39a9e4219cee148341eb42414962e388ec1db98f9"
     },
     {
       "path": "ProcInsider/ViewModels/EventsViewModel.cs",
-      "length": 5695,
-      "sha256": "493a173da78a4ac6a852fd497b187fc5a5bd4bf8601487a9b74baeb000b66f67"
+      "length": 8085,
+      "sha256": "5dc9c65ca5f3b7d0b18f940f52ba2dab9944edfe9fefbf4b4282de031d8cfa6f"
+    },
+    {
+      "path": "ProcInsider/ViewModels/EventsViewModel.SecurityDetails.cs",
+      "length": 3139,
+      "sha256": "94795dbd81c5439c62e6e1004697c772de7ce922c29743fd129f655737de8cde"
     },
     {
       "path": "ProcInsider/ViewModels/ExplorerAiSection.cs",
@@ -2632,8 +2848,8 @@
     },
     {
       "path": "ProcInsider/ViewModels/FeaturePublicationViewModel.cs",
-      "length": 2027,
-      "sha256": "236078127a4ae420d388ccb717913b29523c408ac8273e09aac4ecf9506ec4bf"
+      "length": 2299,
+      "sha256": "0cc5dc3517605020c2caa15e45956cea0b4ca57f43cfd2f4db13e899646d49c0"
     },
     {
       "path": "ProcInsider/ViewModels/FeatureTabDescriptor.cs",
@@ -2662,8 +2878,8 @@
     },
     {
       "path": "ProcInsider/ViewModels/HostMonitoringConfigurationViewModel.cs",
-      "length": 6785,
-      "sha256": "812568b44a93214cae3879a869bfd3796cb3546011cb52fffb855e9e381ec712"
+      "length": 8938,
+      "sha256": "255256b6a6c780e391e5fc25fbe7abeceda3c09fae00e0756b30b24b48b6e94e"
     },
     {
       "path": "ProcInsider/ViewModels/InspectorPaneViewModel.cs",
@@ -2676,9 +2892,14 @@
       "sha256": "66b5f6063fe685b97d005e56233c78cdc99779eade87dfa2249adc8a296b259e"
     },
     {
+      "path": "ProcInsider/ViewModels/MainViewModel.ColumnFilters.cs",
+      "length": 7101,
+      "sha256": "181212aa0b1d5aad6a5f4ea20f987adde824d9152d2064e4d5813b2a9136ff7f"
+    },
+    {
       "path": "ProcInsider/ViewModels/MainViewModel.cs",
-      "length": 608421,
-      "sha256": "e9f7007f0eec60cf488e72fa0be135634f46d52102fa7419dd117abdad8eec51"
+      "length": 630763,
+      "sha256": "de0db8c4c7de5a045667bb670531737b3777a2f04911de61eb66814bf00f65b8"
     },
     {
       "path": "ProcInsider/ViewModels/MemoryDumpRowViewModel.cs",
@@ -2777,8 +2998,8 @@
     },
     {
       "path": "ProcInsider/ViewModels/ProcessRowViewModel.cs",
-      "length": 13194,
-      "sha256": "76311e5cb437064d8ecc82abdf0f15481f8f4064f20ca8f1e5cebb3f4dc1d1fa"
+      "length": 13433,
+      "sha256": "e60f631641344ec2aca185bb5174571944a40f40ffc346c39168440c4619387e"
     },
     {
       "path": "ProcInsider/ViewModels/ProcessStatisticsRowViewModel.cs",
@@ -2826,6 +3047,16 @@
       "sha256": "f8be02949b27f92c54cade9ef1f4ad5c22e7e0de24d1cf50c6852461a1261295"
     },
     {
+      "path": "ProcInsider/ViewModels/WindowsSecurityEventDescriptions.cs",
+      "length": 31249,
+      "sha256": "1faf686b17c871195591c634f5806cea7c38bc96e452f5b2b6bd9e744dafa835"
+    },
+    {
+      "path": "ProcInsider/ViewModels/WindowsSettingsTransferViewModel.cs",
+      "length": 5924,
+      "sha256": "9680586270932bb07a6583343aad4d0790a70fd3ce71b4a247426c5d0c0fc9cd"
+    },
+    {
       "path": "ProcInsider/ViewModels/ZeekNetworkArtifactRowViewModel.cs",
       "length": 13568,
       "sha256": "57247e7a0c1a86327f0dc72f09f90f3688f7807a9f737e1dd3ba7f8918027da6"
@@ -2842,13 +3073,23 @@
     },
     {
       "path": "ProcInsider/Views/Features/Agents/ExplorerAgentsView.xaml",
-      "length": 22888,
-      "sha256": "5ebca585c842b16493fba1707aac5fa67aa2058d648189c202aab8b96c13b6c9"
+      "length": 23270,
+      "sha256": "637c7d5862512ed81a89f1f06e7681630c22e64eff7cce5d837b2e30d7f7cb0e"
     },
     {
       "path": "ProcInsider/Views/Features/Agents/ExplorerAgentsView.xaml.cs",
       "length": 704,
       "sha256": "cabfb6d7018c0c08e7ec35c02f88007278c22e6375264d9a0ffd321ca6a3f5fc"
+    },
+    {
+      "path": "ProcInsider/Views/Features/Agents/MonitoringStatusDetailsView.xaml",
+      "length": 8567,
+      "sha256": "6c327eeeb1c1ce6ebd3dfc12211c42b70eb5078fa1d6c9573cc2f6fc0768d7a1"
+    },
+    {
+      "path": "ProcInsider/Views/Features/Agents/MonitoringStatusDetailsView.xaml.cs",
+      "length": 220,
+      "sha256": "3dffee3d99211b7165efcfcdf5a32b550392cc6113b7b90e94c2d1541ee5a294"
     },
     {
       "path": "ProcInsider/Views/Features/Ai/AiChatView.xaml",
@@ -2971,6 +3212,16 @@
       "sha256": "37aa84d6f3e04b498b106ab99da941cb50da0347bf4570a287e916793d1f81fd"
     },
     {
+      "path": "ProcInsider/Views/Features/Events/DataWindowsSecurityEventsView.xaml",
+      "length": 2949,
+      "sha256": "110f13c775fcb2883483506356a3a6b571f9a808bdc50a1816ef2e7062b27df9"
+    },
+    {
+      "path": "ProcInsider/Views/Features/Events/DataWindowsSecurityEventsView.xaml.cs",
+      "length": 1232,
+      "sha256": "0d6aef17d29cec95ffc75433f2193d89be08175fe96b952adb3d1718b58966cb"
+    },
+    {
       "path": "ProcInsider/Views/Features/Filesystem/DataFilesystemArtifactsView.xaml",
       "length": 6163,
       "sha256": "64ef1722eaef502623ac1e765cad448f7542894aa7dc5a0e1e1c166517b5f6ca"
@@ -3081,14 +3332,39 @@
       "sha256": "1e813d4550cd5f3e6753ae28ead98f1916147c9acb829b90611e098809bb800f"
     },
     {
+      "path": "ProcInsider/Views/Shared/ColumnHeaderFilterControl.xaml",
+      "length": 4531,
+      "sha256": "f94ade0d3c336ad3821144d054618bfc88c198a158e496f7c80db5e25759bfae"
+    },
+    {
+      "path": "ProcInsider/Views/Shared/ColumnHeaderFilterControl.xaml.cs",
+      "length": 2004,
+      "sha256": "7208445bad31f5a6b62ace2ace1f5d95e76f4d01ac3b864349663720d8e12436"
+    },
+    {
+      "path": "ProcInsider/Views/Shared/ColumnHeaderResources.xaml",
+      "length": 4554,
+      "sha256": "200d956c2409a92e19504b38bbabb06ed2eb37198d4d7349b5b4542b60ed459d"
+    },
+    {
+      "path": "ProcInsider/WindowsSettingsTransferDialog.xaml",
+      "length": 4405,
+      "sha256": "545aaab5959eedd2779efc98b9a1cad42b146c3bafc769d13e725147e61c172b"
+    },
+    {
+      "path": "ProcInsider/WindowsSettingsTransferDialog.xaml.cs",
+      "length": 1827,
+      "sha256": "9d856ab2cdde4305958df85472b97c92b1d9bcef343d3ef3f93e1eeb608d6409"
+    },
+    {
       "path": "PUBLIC-EDITION.json",
-      "length": 200,
-      "sha256": "e5d628501a17a14f153936f0dd4a37e546e100b84154ec98a20258d6069410d0"
+      "length": 220,
+      "sha256": "e9af36fda7b8f0b6ac80ae60be340c318e46eb5243a04108122342b1721ca91b"
     },
     {
       "path": "README.md",
-      "length": 2096,
-      "sha256": "b99ecf3f0bacd383f4863e4553cc2f1c8c58afa46d1b3c765763766cb53b13db"
+      "length": 2312,
+      "sha256": "265ed306fdc2a4f8cf6d02ebc0719de0173d91171ea6f4d3046f670f74d07eab"
     },
     {
       "path": "Shared/DirectoryCompatibilityMigration.cs",

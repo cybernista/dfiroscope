@@ -7,7 +7,7 @@ public static class FeatureNavigationPolicy
 {
     public static FeatureId? GetFeatureForExplorerScope(ExplorerScope scope) => scope.Kind switch
     {
-        ExplorerScopeKind.FilesystemRoot or ExplorerScopeKind.FilesystemEvidenceRoots or
+        ExplorerScopeKind.ArtifactRoot or ExplorerScopeKind.FilesystemRoot or ExplorerScopeKind.FilesystemEvidenceRoots or
         ExplorerScopeKind.FilesystemArtifacts or ExplorerScopeKind.FilesystemFolder => FeatureIds.FilesystemArtifacts,
         ExplorerScopeKind.NetworkRoot or ExplorerScopeKind.NetworkCaptures or
         ExplorerScopeKind.NetworkCapture or ExplorerScopeKind.ZeekArtifacts => FeatureIds.NetworkAndZeek,
@@ -16,7 +16,8 @@ public static class FeatureNavigationPolicy
         ExplorerScopeKind.AmbiguousEvidence or ExplorerScopeKind.CorrelationEvidenceGroup => FeatureIds.SearchAndSigma,
         ExplorerScopeKind.MemoryDumps or ExplorerScopeKind.PeAnalyses => FeatureIds.DumpsAndPeAnalysis,
         ExplorerScopeKind.Modules or ExplorerScopeKind.Handles => FeatureIds.ModulesAndHandles,
-        ExplorerScopeKind.RuntimeEvents or ExplorerScopeKind.EtwEvents or ExplorerScopeKind.SecurityEvents or
+        ExplorerScopeKind.SecurityEvents => FeatureIds.WindowsSecurityEvents,
+        ExplorerScopeKind.RuntimeEvents or ExplorerScopeKind.EtwEvents or
         ExplorerScopeKind.PowerShellEvents or ExplorerScopeKind.WindowsOtherEvents or ExplorerScopeKind.SysmonEvents or
         ExplorerScopeKind.SystemActivityRoot or ExplorerScopeKind.ActivityAuthentication or
         ExplorerScopeKind.ActivitySuccessfulLogons or ExplorerScopeKind.ActivityFailedLogons or

@@ -8,7 +8,7 @@ namespace ProcInsider.Services.Features;
 /// </summary>
 public static class CurrentEducationalReleaseProfile
 {
-    public const string ReleaseId = "edu-2026.08-core-process-agent-infra-g1-readyhidden-r2";
+    public const string ReleaseId = "edu-2026.08-core-process-agent-infra-g1-readyhidden-r4";
 
     public static IFeatureCatalog Catalog { get; } = BuildCatalog();
 
@@ -42,6 +42,12 @@ public static class CurrentEducationalReleaseProfile
             ReadyHidden(FeatureIds.ApplicationComparison, FeatureIds.SelectedProcessDetails),
             ReadyHidden(FeatureIds.ModulesAndHandles, FeatureIds.SelectedProcessDetails),
             ReadyHidden(FeatureIds.EventTelemetry, FeatureIds.ProcessListing),
+            InDevelopment(FeatureIds.RuntimeEvents, FeatureIds.ProcessListing),
+            InDevelopment(FeatureIds.EtwEvents, FeatureIds.ProcessListing),
+            Published(FeatureIds.WindowsSecurityEvents, FeatureIds.ProcessListing),
+            InDevelopment(FeatureIds.PowerShellEvents, FeatureIds.ProcessListing),
+            InDevelopment(FeatureIds.WindowsOtherEvents, FeatureIds.ProcessListing),
+            InDevelopment(FeatureIds.SysmonEvents, FeatureIds.ProcessListing),
             Published(FeatureIds.AgentsAndCapture),
             ReadyHidden(FeatureIds.CommandLine),
             ReadyHidden(FeatureIds.SearchAndSigma, FeatureIds.ProcessListing, FeatureIds.EventTelemetry),
@@ -62,9 +68,11 @@ public static class CurrentEducationalReleaseProfile
             ReadyHidden(FeatureIds.InfrastructureAdministration, FeatureIds.InfrastructureMode)
         };
 
-        return new FeatureCatalog(
+        var catalog = new FeatureCatalog(
             ReleaseId,
             CompiledFeatureInventoryComposition.CompleteFeatureDefinitions(definitions));
+        EventSourceFamilyOwnershipCatalog.ValidateAgainstCatalog(catalog);
+        return catalog;
     }
 
     private static FeatureDefinition Published(FeatureId id, params FeatureId[] dependencies) =>
@@ -72,4 +80,7 @@ public static class CurrentEducationalReleaseProfile
 
     private static FeatureDefinition ReadyHidden(FeatureId id, params FeatureId[] dependencies) =>
         new(id, FeatureReleaseState.ReadyHidden, dependencies);
+
+    private static FeatureDefinition InDevelopment(FeatureId id, params FeatureId[] dependencies) =>
+        new(id, FeatureReleaseState.InDevelopment, dependencies);
 }

@@ -1,0 +1,52 @@
+<Window x:Class="ProcInsider.Features.WindowsSecurityDetails.SecurityDetailsEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Windows Security — Details definitions" Width="1000" Height="720" MinWidth="720" MinHeight="520"
+        WindowStartupLocation="CenterOwner" Closing="OnClosing">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+            <RowDefinition Height="180"/><RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock TextWrapping="Wrap" Margin="0,0,0,12"
+                   Text="Definitions apply to all captures for your account. Use $WorkstationName$ for a named XML field, $7 for position 7, and $$ for a dollar sign. Save each edited row. Imported event IDs replace matching definitions; omitted IDs stay unchanged."/>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10" IsEnabled="{Binding CanEdit}">
+            <TextBlock Text="Event ID" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBox Width="80" Text="{Binding NewEventId, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="New event ID"/>
+            <Button Content="Add definition" Command="{Binding AddCommand}" Padding="10,5" Margin="8,0"/>
+            <Button Content="Import..." Command="{Binding ImportCommand}" Padding="10,5" Margin="8,0"/>
+            <Button Content="Export saved..." Command="{Binding ExportCommand}" Padding="10,5" Margin="8,0"/>
+        </StackPanel>
+        <DataGrid Grid.Row="2" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" IsEnabled="{Binding CanEdit}"
+                  AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
+                  SelectionMode="Single" EnableRowVirtualization="True" HeadersVisibility="Column" Margin="0,0,0,10">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Event ID" Binding="{Binding EventId}" IsReadOnly="True" Width="80"/>
+                <DataGridTemplateColumn Header="Definition" Width="*">
+                    <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                        <StackPanel Margin="4">
+                            <TextBox Text="{Binding Template, UpdateSourceTrigger=PropertyChanged}" TextWrapping="Wrap"
+                                     MaxLength="4096" AutomationProperties.Name="Event details definition"/>
+                            <TextBlock Text="{Binding Error}" TextWrapping="Wrap" Foreground="DarkRed"/>
+                        </StackPanel>
+                    </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Actions" Width="150">
+                    <DataGridTemplateColumn.CellTemplate><DataTemplate><StackPanel Orientation="Horizontal" Margin="4">
+                        <Button Content="Save" Command="{Binding SaveCommand}" Padding="10,5" Margin="0,0,5,0"/>
+                        <Button Content="Revert" Command="{Binding RevertCommand}" Padding="10,5"/>
+                    </StackPanel></DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+        <Grid Grid.Row="3"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <GroupBox Header="Preview from loaded process events" Margin="0,0,8,8">
+                <TextBox Text="{Binding Preview, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+            </GroupBox>
+            <GroupBox Grid.Column="1" Header="Available fields — select and copy a reference" Margin="0,0,0,8">
+                <TextBox Text="{Binding FieldGuide, Mode=OneWay}" IsReadOnly="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+            </GroupBox>
+        </Grid>
+        <TextBlock Grid.Row="4" Text="{Binding Status}" TextWrapping="Wrap"/>
+    </Grid>
+</Window>

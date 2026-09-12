@@ -46,9 +46,14 @@
   <ItemGroup>
     <Content
       Include="..\ProcInsider\Config\**\*.*"
-      Exclude="..\ProcInsider\Config\ApplicationCatalog\catalog.index.json;..\ProcInsider\Config\ApplicationCatalog\Profiles\**\*.json;..\ProcInsider\Config\ApplicationCatalog\catalog-quality.v1.json;..\ProcInsider\Config\ApplicationCatalog\README.md"
+      Exclude="..\ProcInsider\Config\ApplicationCatalog\catalog.index.json;..\ProcInsider\Config\ApplicationCatalog\Profiles\**\*.json;..\ProcInsider\Config\ApplicationCatalog\catalog-quality.v1.json;..\ProcInsider\Config\ApplicationCatalog\README.md;..\ProcInsider\Config\WindowsSecurity\**\*.*"
       LinkBase="Config"
       CopyToOutputDirectory="PreserveNewest" />
+    <Content
+      Include="..\ProcInsider\Config\WindowsSecurity\**\*.*"
+      Link="Config\WindowsSecurity\%(RecursiveDir)%(Filename)%(Extension)"
+      CopyToOutputDirectory="PreserveNewest"
+      Condition="'$(PublishWindowsSecurityEvents)' == 'true'" />
   </ItemGroup>
 
   <Import Project="..\build\ExecutableCompatibilityAliases.targets" />

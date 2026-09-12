@@ -22,6 +22,8 @@ public sealed class FeaturePublicationViewModel
     public bool ApplicationComparison => IsPublished(FeatureIds.ApplicationComparison);
     public bool ModulesAndHandles => IsPublished(FeatureIds.ModulesAndHandles);
     public bool EventTelemetry => IsPublished(FeatureIds.EventTelemetry);
+    public bool WindowsSecurityEvents => IsPublished(FeatureIds.WindowsSecurityEvents);
+    public bool EventViewerMenu => EventTelemetry || WindowsSecurityEvents;
     public bool AgentsAndCapture => IsPublished(FeatureIds.AgentsAndCapture);
     public bool SearchAndSigma => IsPublished(FeatureIds.SearchAndSigma);
     public bool DumpsAndPeAnalysis => IsPublished(FeatureIds.DumpsAndPeAnalysis);
@@ -32,6 +34,7 @@ public sealed class FeaturePublicationViewModel
     public bool AiAssistance => IsPublished(FeatureIds.AiAssistance);
     public bool KnownFileReferenceData => IsPublished(FeatureIds.KnownFileReferenceData);
     public bool SecurityMonitoringConfiguration => IsPublished(FeatureIds.SecurityMonitoringConfiguration);
+    public bool HostMonitoringConfiguration => SecurityMonitoringConfiguration || WindowsSecurityEvents;
 
     public bool ArtifactEnrichmentMenu => ModulesAndHandles || DumpsAndPeAnalysis || FilesystemArtifacts;
 

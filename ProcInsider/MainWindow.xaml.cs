@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Threading;
 using ProcInsider.Models;
@@ -173,27 +174,47 @@ public partial class MainWindow : Window
         // Get column name for sorting
         var columnName = e.Column.SortMemberPath;
 
-        ListSortDirection? direction;
-        if (string.Equals(columnName, "Tree", System.StringComparison.OrdinalIgnoreCase))
-        {
-            _viewModel.ResetTreeSort();
-            direction = null;
-        }
-        else
-        {
-            _viewModel.SortVisibleProcessRows(columnName);
-            direction = _viewModel.GetSortDirection(columnName);
-        }
+        _viewModel.SortVisibleProcessRows(columnName);
+        ApplyProcessSortIndicators(
+            ProcessDataGrid,
+            e.Column,
+            _viewModel.GetSortDirection(columnName));
+    }
 
-        e.Column.SortDirection = direction;
+    private void ProcessDataGrid_TargetUpdated(object sender, DataTransferEventArgs e)
+    {
+        if (e.Property == ItemsControl.ItemsSourceProperty)
+            RestoreProcessSortIndicators();
+    }
 
-        // Clear sort direction on other columns
-        foreach (var column in ProcessDataGrid.Columns)
+    private void ProcessDataGrid_Loaded(object sender, RoutedEventArgs e) => RestoreProcessSortIndicators();
+
+    private void RestoreProcessSortIndicators()
+    {
+        if (_viewModel != null)
+            SynchronizeProcessSortIndicators(ProcessDataGrid, _viewModel.GetSortDirection);
+    }
+
+    internal static void SynchronizeProcessSortIndicators(
+        DataGrid grid, Func<string, ListSortDirection?> getDirection)
+    {
+        // WPF clears column directions when ItemsSource changes. Restore only the
+        // presentation state; the Listing query/tree owner still orders the rows.
+        foreach (var column in grid.Columns)
+            column.SortDirection = getDirection(column.SortMemberPath);
+    }
+
+    internal static void ApplyProcessSortIndicators(
+        DataGrid grid,
+        DataGridColumn activeColumn,
+        ListSortDirection? direction)
+    {
+        ArgumentNullException.ThrowIfNull(grid);
+        ArgumentNullException.ThrowIfNull(activeColumn);
+
+        foreach (var column in grid.Columns)
         {
-            if (column != e.Column)
-            {
-                column.SortDirection = null;
-            }
+            column.SortDirection = ReferenceEquals(column, activeColumn) ? direction : null;
         }
     }
 

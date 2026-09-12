@@ -196,9 +196,18 @@ public static class SqlitePerformanceProfile
             Mode = mode,
             Pooling = false
         }.ToString());
-        connection.Open();
-        Apply(connection, profile, mode);
-        return connection;
+        try
+        {
+            connection.Open();
+            Apply(connection, profile, mode);
+            SqliteWorkScope.Install(connection);
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
     }
 
     public static void Apply(SqliteConnection connection, SqlitePerformanceProfileName profile, SqliteOpenMode mode)

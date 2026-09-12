@@ -8,6 +8,8 @@ internal interface ISqliteAnalysisIndexMaintenanceService
 
     void Enable(string databaseRole, string maintenanceMode);
 
+    void EnsureListingIndexes(CancellationToken cancellationToken);
+
     void EnsureAnalysisIndexes(
         IProgress<SqliteAnalysisIndexBuildProgress>? progress,
         CancellationToken cancellationToken);
@@ -31,6 +33,9 @@ internal sealed class UnavailableSqliteAnalysisIndexMaintenanceService : ISqlite
     public void Enable(string databaseRole, string maintenanceMode)
     {
     }
+
+    public void EnsureListingIndexes(CancellationToken cancellationToken) =>
+        throw new InvalidOperationException(MissingOwnerMessage);
 
     public void EnsureAnalysisIndexes(
         IProgress<SqliteAnalysisIndexBuildProgress>? progress,

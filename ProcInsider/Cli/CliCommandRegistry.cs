@@ -283,7 +283,7 @@ internal static class CliCommandRegistry
                 "agent monitoring configuration show",
                 "DFIRoscope.Live.exe agent monitoring configuration show --session <absolute-session-root-or-session.json> [--output text|json]",
                 "Read the saved host-monitoring draft and baseline metadata without changing either.",
-                FeatureIds.SecurityMonitoringConfiguration,
+                FeatureIds.AgentsAndCapture,
                 RequiresSession: true,
                 AgentCommand: AgentCommandKind.GetHostMonitoringConfiguration),
             new(
@@ -291,7 +291,7 @@ internal static class CliCommandRegistry
                 "agent monitoring configuration check",
                 "DFIRoscope.Live.exe agent monitoring configuration check --session <absolute-session-root-or-session.json> [--file <absolute-json>] [--output text|json]",
                 "Check the saved or supplied typed host-monitoring draft without saving or deploying it.",
-                FeatureIds.SecurityMonitoringConfiguration,
+                FeatureIds.AgentsAndCapture,
                 RequiresSession: true,
                 AgentCommand: AgentCommandKind.CheckHostMonitoringConfiguration),
             new(
@@ -299,7 +299,7 @@ internal static class CliCommandRegistry
                 "agent monitoring configuration save",
                 "DFIRoscope.Live.exe agent monitoring configuration save --session <absolute-session-root-or-session.json> --file <absolute-json> [--output text|json]",
                 "Save one typed host-monitoring draft without checking, deploying, or starting capture.",
-                FeatureIds.SecurityMonitoringConfiguration,
+                FeatureIds.AgentsAndCapture,
                 RequiresSession: true,
                 AgentCommand: AgentCommandKind.SaveHostMonitoringConfiguration),
             new(
@@ -307,7 +307,7 @@ internal static class CliCommandRegistry
                 "agent monitoring deploy",
                 "DFIRoscope.Live.exe agent monitoring deploy --session <absolute-session-root-or-session.json> --yes [--output text|json]",
                 "Deploy the saved exact host-monitoring draft without starting capture.",
-                FeatureIds.SecurityMonitoringConfiguration,
+                FeatureIds.AgentsAndCapture,
                 RequiresSession: true,
                 AgentCommand: AgentCommandKind.DeployHostMonitoringConfiguration),
             new(
@@ -315,7 +315,7 @@ internal static class CliCommandRegistry
                 "agent monitoring reverse",
                 "DFIRoscope.Live.exe agent monitoring reverse --session <absolute-session-root-or-session.json> --yes [--output text|json]",
                 "Restore only the recorded exact original-state baseline without stopping capture.",
-                FeatureIds.SecurityMonitoringConfiguration,
+                FeatureIds.AgentsAndCapture,
                 RequiresSession: true,
                 AgentCommand: AgentCommandKind.ReverseHostMonitoringDeployment),
             new(

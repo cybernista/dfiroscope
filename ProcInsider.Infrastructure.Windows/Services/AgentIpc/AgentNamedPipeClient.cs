@@ -25,6 +25,7 @@ public sealed class AgentNamedPipeClient
 
     private readonly IReadOnlyList<string> _pipeNames;
     private readonly TimeSpan _timeout;
+    private readonly bool _useDefaultTimeout;
     private readonly string _viewerReleaseId;
     private readonly AgentPairingClientSession _pairingSession;
     private int _preferredPipeIndex;
@@ -50,6 +51,7 @@ public sealed class AgentNamedPipeClient
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         _timeout = timeout ?? DefaultTimeout;
+        _useDefaultTimeout = timeout == null;
         _viewerReleaseId = string.IsNullOrWhiteSpace(viewerReleaseId)
             ? CurrentEducationalReleaseProfile.ReleaseId
             : viewerReleaseId;
@@ -423,15 +425,25 @@ public sealed class AgentNamedPipeClient
             pairingStatus);
     }
 
+    internal TimeSpan GetResponseTimeout(AgentIpcRequest request) =>
+        _useDefaultTimeout && request.Kind == AgentIpcRequestKind.SubmitCommand &&
+        request.CommandKind is AgentCommandKind.CheckHostMonitoringConfiguration or
+            AgentCommandKind.GetHostMonitoringConfiguration or AgentCommandKind.SaveHostMonitoringConfiguration or
+            AgentCommandKind.DeployHostMonitoringConfiguration or AgentCommandKind.ReverseHostMonitoringDeployment
+            ? TimeSpan.FromMinutes(2)
+            : _timeout;
+
     private async Task<PipeSendAttempt> SendRawToPipeAsync(
         string pipeName,
         AgentIpcRequest request,
         CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var responseTimeout = GetResponseTimeout(request);
         timeout.CancelAfter(_timeout);
         var connected = false;
         var requestSent = false;
+        var extendedResponseWaitStarted = false;
 
         try
         {
@@ -453,6 +465,13 @@ public sealed class AgentNamedPipeClient
             await writer.WriteLineAsync(requestJson.AsMemory(), timeout.Token).ConfigureAwait(false);
             await writer.FlushAsync(timeout.Token).ConfigureAwait(false);
 
+            // A submitted monitoring operation includes bounded Windows inspection and
+            // durable backups. Keep connection/challenge waits short, but retain its reply.
+            if (responseTimeout != _timeout)
+            {
+                timeout.CancelAfter(responseTimeout);
+                extendedResponseWaitStarted = true;
+            }
             var responseJson = await reader.ReadLineAsync(timeout.Token).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(responseJson))
             {
@@ -493,7 +512,7 @@ public sealed class AgentNamedPipeClient
                 AgentIpcResponse.Failure(
                     request.RequestId,
                     "Timeout",
-                    $"The local agent pipe '{pipeName}' did not answer {FormatRequest(request)} within {_timeout.TotalSeconds:0.#} seconds."),
+                    $"The local agent pipe '{pipeName}' did not answer {FormatRequest(request)} within {(extendedResponseWaitStarted ? responseTimeout : _timeout).TotalSeconds:0.#} seconds."),
                 CanTryFallback: !connected,
                 Connected: connected,
                 RequestSent: requestSent,

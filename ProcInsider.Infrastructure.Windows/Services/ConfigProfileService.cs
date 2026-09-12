@@ -20,7 +20,9 @@ public sealed class ConfigProfileService
             [ConfigProfileKind.Sysmon] = "Sysmon",
             [ConfigProfileKind.SecurityMonitoring] = "SecurityMonitoring",
             [ConfigProfileKind.PowerShellAuditing] = "PowerShellAuditing",
-            [ConfigProfileKind.EventLogs] = "EventLogs"
+            [ConfigProfileKind.EventLogs] = "EventLogs",
+            [ConfigProfileKind.WindowsSecurityAuditPolicy] = "WindowsSecurity",
+            [ConfigProfileKind.WindowsSecurityEventLogs] = "WindowsSecurity"
         };
 
     private readonly JsonSerializerOptions _jsonOptions = new()

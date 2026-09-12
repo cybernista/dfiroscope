@@ -1136,7 +1136,8 @@ public sealed class ViewerAgentCommandExecutor
             return WithVerifiedPreflight(RejectCommandOutcomeUnknown(
                 command.CommandId,
                 health,
-                "The protected command transmission completed without an authenticated authoritative agent response.",
+                "The protected command transmission completed without an authenticated authoritative agent response. " +
+                $"Transport: {response.ErrorCode}. {response.ErrorMessage}",
                 authenticatedEndpoint: authenticatedEndpoint,
                 pairingGeneration: pairingGeneration,
                 verifiedPairingStatus: verifiedPairingStatus));

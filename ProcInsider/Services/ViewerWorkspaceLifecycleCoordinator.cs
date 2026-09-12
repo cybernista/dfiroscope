@@ -166,6 +166,15 @@ public sealed class ViewerWorkspaceLifecycleRuntime : IViewerWorkspaceLifecycleR
             captureManifestPath,
             CaptureOpenContext.ViewerArchivedReadOnly,
             SqliteStagingStore.AssessExistingDatabase);
+        if (!packageInfo.HasLiveDatabase &&
+            packageInfo.CompatibilityAssessment.State == CaptureCompatibilityState.CompatibleCurrent)
+        {
+            throw new FileNotFoundException(
+                "This session has no recorded evidence database yet. Starting the Viewer creates a session folder, " +
+                "but capture must be started through an Agent to record evidence. Choose a session containing " +
+                "procinsider-live.sqlite3. The current capture will remain open.",
+                packageInfo.LiveDatabasePath);
+        }
         var sessionPaths = SessionPathService.OpenExistingCapturePackage(
             captureManifestPath,
             CaptureOpenContext.ViewerArchivedReadOnly,

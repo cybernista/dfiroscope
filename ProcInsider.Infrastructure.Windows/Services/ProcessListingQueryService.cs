@@ -17,6 +17,8 @@ namespace ProcInsider.Services;
 /// </summary>
 public interface IProcessListingQueryService
 {
+    Task<ColumnFilterValuePage> GetColumnValuesAsync(ProcessListingFilterSet filters,
+        ProcessListingSortColumn column, string? search, int limit = 256, CancellationToken cancellationToken = default);
     int CountProcesses(
         ProcessListingFilterSet filters,
         CancellationToken cancellationToken = default);
@@ -58,7 +60,7 @@ public interface IProcessListingQueryService
 /// Focused SQLite owner for process listing/count/page/navigation/exact-lookup reads.
 /// The validated <see cref="SqliteStagingQueryService"/> remains the compatibility facade.
 /// </summary>
-internal sealed class ProcessListingQueryService : IProcessListingQueryService
+internal sealed partial class ProcessListingQueryService : IProcessListingQueryService
 {
     private static readonly ConditionalWeakTable<ProcessRecord, ListingCursorMetadata> ListingCursorMetadataByRecord = new();
     private readonly SqliteReadQueryContext _readContext;
@@ -68,14 +70,33 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
         _readContext = readContext;
     }
 
+    private SqliteConnection OpenListingConnection()
+    {
+        var connection = _readContext.OpenReadOnlyConnection();
+        try
+        {
+            connection.CreateFunction<string?, string?, bool>(
+                "dfiroscope_column_match", ColumnTextFilter.Matches, isDeterministic: true);
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
+
     public int CountProcesses(
         ProcessListingFilterSet filters,
         CancellationToken cancellationToken = default)
     {
+        using var execution = new SqliteWorkScope(cancellationToken, stage: "Counting matching processes");
+        return _readContext.MeasureRead("CountProcesses", () =>
+        {
         cancellationToken.ThrowIfCancellationRequested();
-        using var connection = _readContext.OpenReadOnlyConnection();
+        using var connection = OpenListingConnection();
         using var command = connection.CreateCommand();
-        var whereClause = BuildFilterClause(filters, command.Parameters);
+        var whereClause = BuildFilterClause(filters, command.Parameters, connection);
         var processSource = BuildProcessSourceExpression(filters, connection);
         command.CommandText = string.IsNullOrEmpty(whereClause)
             ? $"SELECT COUNT(*) FROM {processSource};"
@@ -84,24 +105,26 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
         var result = Convert.ToInt32(command.ExecuteScalar());
         cancellationToken.ThrowIfCancellationRequested();
         return result;
+        });
     }
 
     public ProcessListingPage GetProcessPage(
         ProcessListingQuery query,
         CancellationToken cancellationToken = default)
     {
+        using var execution = new SqliteWorkScope(cancellationToken, stage: "Loading process page");
         return _readContext.MeasureRead(
             "GetProcessPage",
             () =>
             {
         cancellationToken.ThrowIfCancellationRequested();
-        using var connection = _readContext.OpenReadOnlyConnection();
+        using var connection = OpenListingConnection();
 
         var totalCount = -1;
         if (query.IncludeTotalCount)
         {
             using var countCommand = connection.CreateCommand();
-            var countWhereClause = BuildFilterClause(query.Filters, countCommand.Parameters);
+            var countWhereClause = BuildFilterClause(query.Filters, countCommand.Parameters, connection);
             var countProcessSource = BuildProcessSourceExpression(query.Filters, connection);
             countCommand.CommandText = string.IsNullOrEmpty(countWhereClause)
                 ? $"SELECT COUNT(*) FROM {countProcessSource};"
@@ -114,14 +137,22 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
         // PAGE pass — reuse the same where clause with new parameter bindings
         var rows = new List<ProcessRecord>();
         using var pageCommand = connection.CreateCommand();
-        var whereClause = BuildFilterClause(query.Filters, pageCommand.Parameters);
+        var whereClause = BuildFilterClause(query.Filters, pageCommand.Parameters, connection);
         var pageProcessSource = BuildProcessSourceExpression(query.Filters, connection);
         var riskSortAvailable = ConfigureProcessRiskSort(connection, query.Sort);
-        if (riskSortAvailable)
+        if (riskSortAvailable && !(query.Filters.ColumnFilters.TryGetValue(ProcessListingSortColumn.ProcessRisk, out var riskFilter) && riskFilter.IsActive))
         {
             pageProcessSource = BuildProcessRiskSortSource(pageProcessSource);
         }
-        var orderByClause = BuildOrderByClause(query.Sort, riskSortAvailable);
+        var summarySortExpression = BuildSummarySortExpression(connection, query.Sort.Column);
+        if (summarySortExpression != null)
+        {
+            pageProcessSource = BuildProcessSummarySortSource(pageProcessSource, summarySortExpression);
+        }
+        var orderByClause = BuildOrderByClause(
+            query.Sort,
+            riskSortAvailable,
+            summarySortExpression != null);
         var requestedPageSize = Math.Clamp(query.PageSize, 1, 10000);
         var cursor = DecodeAndValidateCursor(query.Cursor, query.Sort);
         var useCursor = SupportsCursorPaging(query.Sort) &&
@@ -205,7 +236,7 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
     /// </summary>
     public ProcessKeyLookupResult GetProcessByKey(string processKey)
     {
-        using var connection = _readContext.OpenReadOnlyConnection();
+        using var connection = OpenListingConnection();
         using var command = connection.CreateCommand();
         var processSource = GetProcessSource(connection);
         command.CommandText = """
@@ -240,7 +271,7 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
             return new ProcessEntityLookupResult { IsFound = false };
         }
 
-        using var connection = _readContext.OpenReadOnlyConnection();
+        using var connection = OpenListingConnection();
         if (!TableExists(connection, "ProcessEntities"))
         {
             return new ProcessEntityLookupResult { IsFound = false };
@@ -282,22 +313,31 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
         ProcessListingQuery query,
         CancellationToken cancellationToken = default)
     {
+        using var execution = new SqliteWorkScope(cancellationToken, stage: "Locating process in sorted results");
         return _readContext.MeasureRead(
             "GetProcessRowIndex",
             () =>
             {
         cancellationToken.ThrowIfCancellationRequested();
-        using var connection = _readContext.OpenReadOnlyConnection();
+        using var connection = OpenListingConnection();
         using var command = connection.CreateCommand();
-        var whereClause = BuildFilterClause(query.Filters, command.Parameters);
+        var whereClause = BuildFilterClause(query.Filters, command.Parameters, connection);
         var whereFragment = string.IsNullOrEmpty(whereClause) ? string.Empty : $"WHERE {whereClause}";
         var processSource = BuildProcessSourceExpression(query.Filters, connection);
         var riskSortAvailable = ConfigureProcessRiskSort(connection, query.Sort);
-        if (riskSortAvailable)
+        if (riskSortAvailable && !(query.Filters.ColumnFilters.TryGetValue(ProcessListingSortColumn.ProcessRisk, out var riskFilter) && riskFilter.IsActive))
         {
             processSource = BuildProcessRiskSortSource(processSource);
         }
-        var orderByClause = BuildOrderByClause(query.Sort, riskSortAvailable);
+        var summarySortExpression = BuildSummarySortExpression(connection, query.Sort.Column);
+        if (summarySortExpression != null)
+        {
+            processSource = BuildProcessSummarySortSource(processSource, summarySortExpression);
+        }
+        var orderByClause = BuildOrderByClause(
+            query.Sort,
+            riskSortAvailable,
+            summarySortExpression != null);
         command.Parameters.AddWithValue("$TargetKey", processKey);
         command.CommandText = $"""
             WITH ranked AS (
@@ -332,9 +372,13 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
             "GetRepresentativeProcessListingQueryPlans",
             () =>
             {
-                using var connection = _readContext.OpenReadOnlyConnection();
+                using var connection = OpenListingConnection();
                 var plans = new List<SqliteQueryPlanRecord>();
                 var processTable = GetProcessTable(connection);
+                using var filterCommand = connection.CreateCommand();
+                var filteredPagePredicate = BuildFilterClause(
+                    new ProcessListingFilterSet { ProcessNameContains = "svchost" },
+                    filterCommand.Parameters, connection);
 
                 AddQueryPlan(
                     plans,
@@ -365,14 +409,15 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
                     $"""
                     SELECT ProcessKey
                     FROM {processTable}
-                    WHERE ProcessName LIKE $ProcessName
+                    WHERE {filteredPagePredicate}
                     ORDER BY ProcessName COLLATE NOCASE ASC,
                              COALESCE(NULLIF(ProcessEntityId, ''), ProcessKey) COLLATE BINARY ASC
                     LIMIT $PageSize OFFSET $Offset;
                     """,
                     command =>
                     {
-                        command.Parameters.AddWithValue("$ProcessName", "%svchost%");
+                        foreach (SqliteParameter parameter in filterCommand.Parameters)
+                            command.Parameters.AddWithValue(parameter.ParameterName, parameter.Value!);
                         command.Parameters.AddWithValue("$PageSize", 100);
                         command.Parameters.AddWithValue("$Offset", 0);
                     });
@@ -429,20 +474,54 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
                         command.Parameters.AddWithValue("$Offset", 0);
                     });
 
+                foreach (var (operation, sortColumn) in new[]
+                         {
+                             ("process latest-statistics sort page", ProcessListingSortColumn.ReadBytes),
+                             ("process scoped-event-count sort page", ProcessListingSortColumn.SecurityEventCount)
+                         })
+                {
+                    var sort = new ProcessListingSortDescriptor
+                    {
+                        Column = sortColumn,
+                        Direction = ProcessListingSortDirection.Descending
+                    };
+                    var summaryExpression = BuildSummarySortExpression(connection, sortColumn)
+                        ?? throw new InvalidOperationException($"Missing representative sort expression for {sortColumn}.");
+                    var summarySource = BuildProcessSummarySortSource(
+                        GetProcessSource(connection),
+                        summaryExpression);
+                    AddQueryPlan(
+                        plans,
+                        connection,
+                        operation,
+                        $"""
+                        SELECT ProcessKey
+                        FROM {summarySource}
+                        ORDER BY {BuildOrderByClause(sort, summarySortAvailable: true)}
+                        LIMIT $PageSize OFFSET $Offset;
+                        """,
+                        command =>
+                        {
+                            command.Parameters.AddWithValue("$PageSize", 100);
+                            command.Parameters.AddWithValue("$Offset", 0);
+                        });
+                }
+
                 return plans;
             },
             "representative process listing EXPLAIN QUERY PLAN reads",
             plans => plans.Count);
     }
 
-    private string BuildFilterClause(ProcessListingFilterSet filters, SqliteParameterCollection parameters)
+    private string BuildFilterClause(ProcessListingFilterSet filters, SqliteParameterCollection parameters, SqliteConnection connection, ProcessListingSortColumn? excludedColumn = null)
     {
         var predicates = new List<string>();
+        AddHeaderFilters(predicates, parameters, filters, connection, excludedColumn);
 
         if (!string.IsNullOrEmpty(filters.ProcessNameContains))
         {
-            predicates.Add("ProcessName LIKE $ProcessNameContains");
-            parameters.AddWithValue("$ProcessNameContains", $"%{filters.ProcessNameContains}%");
+            predicates.Add("dfiroscope_column_match(ProcessName, $ProcessNameContains)");
+            parameters.AddWithValue("$ProcessNameContains", filters.ProcessNameContains);
         }
         if (filters.ProcessIdEquals.HasValue)
         {
@@ -451,8 +530,8 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
         }
         if (!string.IsNullOrEmpty(filters.ProcessIdContains))
         {
-            predicates.Add("CAST(ProcessId AS TEXT) LIKE $ProcessIdContains");
-            parameters.AddWithValue("$ProcessIdContains", $"%{filters.ProcessIdContains}%");
+            predicates.Add("dfiroscope_column_match(CAST(ProcessId AS TEXT), $ProcessIdContains)");
+            parameters.AddWithValue("$ProcessIdContains", filters.ProcessIdContains);
         }
         if (filters.ParentProcessIdEquals.HasValue)
         {
@@ -461,28 +540,28 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
         }
         if (!string.IsNullOrEmpty(filters.ParentProcessIdContains))
         {
-            predicates.Add("CAST(ParentProcessId AS TEXT) LIKE $ParentProcessIdContains");
-            parameters.AddWithValue("$ParentProcessIdContains", $"%{filters.ParentProcessIdContains}%");
+            predicates.Add("dfiroscope_column_match(CAST(ParentProcessId AS TEXT), $ParentProcessIdContains)");
+            parameters.AddWithValue("$ParentProcessIdContains", filters.ParentProcessIdContains);
         }
         if (!string.IsNullOrEmpty(filters.ParentProcessNameContains))
         {
-            predicates.Add("ParentProcessName LIKE $ParentProcessNameContains");
-            parameters.AddWithValue("$ParentProcessNameContains", $"%{filters.ParentProcessNameContains}%");
+            predicates.Add("dfiroscope_column_match(ParentProcessName, $ParentProcessNameContains)");
+            parameters.AddWithValue("$ParentProcessNameContains", filters.ParentProcessNameContains);
         }
         if (!string.IsNullOrEmpty(filters.ProcessPathContains))
         {
-            predicates.Add("ProcessPath LIKE $ProcessPathContains");
-            parameters.AddWithValue("$ProcessPathContains", $"%{filters.ProcessPathContains}%");
+            predicates.Add("dfiroscope_column_match(ProcessPath, $ProcessPathContains)");
+            parameters.AddWithValue("$ProcessPathContains", filters.ProcessPathContains);
         }
         if (!string.IsNullOrEmpty(filters.CommandLineContains))
         {
-            predicates.Add("CommandLine LIKE $CommandLineContains");
-            parameters.AddWithValue("$CommandLineContains", $"%{filters.CommandLineContains}%");
+            predicates.Add("dfiroscope_column_match(CommandLine, $CommandLineContains)");
+            parameters.AddWithValue("$CommandLineContains", filters.CommandLineContains);
         }
         if (!string.IsNullOrEmpty(filters.UserNameContains))
         {
-            predicates.Add("UserName LIKE $UserNameContains");
-            parameters.AddWithValue("$UserNameContains", $"%{filters.UserNameContains}%");
+            predicates.Add("dfiroscope_column_match(UserName, $UserNameContains)");
+            parameters.AddWithValue("$UserNameContains", filters.UserNameContains);
         }
         if (filters.SessionIdEquals.HasValue)
         {
@@ -491,8 +570,8 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
         }
         if (!string.IsNullOrEmpty(filters.ArchitectureContains))
         {
-            predicates.Add("Architecture LIKE $ArchitectureContains");
-            parameters.AddWithValue("$ArchitectureContains", $"%{filters.ArchitectureContains}%");
+            predicates.Add("dfiroscope_column_match(Architecture, $ArchitectureContains)");
+            parameters.AddWithValue("$ArchitectureContains", filters.ArchitectureContains);
         }
         if (filters.Status.HasValue)
         {
@@ -501,23 +580,23 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
         }
         if (!string.IsNullOrEmpty(filters.StatusContains))
         {
-            predicates.Add("Status LIKE $StatusContains");
-            parameters.AddWithValue("$StatusContains", $"%{filters.StatusContains}%");
+            predicates.Add("dfiroscope_column_match(Status, $StatusContains)");
+            parameters.AddWithValue("$StatusContains", filters.StatusContains);
         }
         if (!string.IsNullOrEmpty(filters.CompanyNameContains))
         {
-            predicates.Add("CompanyName LIKE $CompanyNameContains");
-            parameters.AddWithValue("$CompanyNameContains", $"%{filters.CompanyNameContains}%");
+            predicates.Add("dfiroscope_column_match(CompanyName, $CompanyNameContains)");
+            parameters.AddWithValue("$CompanyNameContains", filters.CompanyNameContains);
         }
         if (!string.IsNullOrEmpty(filters.FileDescriptionContains))
         {
-            predicates.Add("FileDescription LIKE $FileDescriptionContains");
-            parameters.AddWithValue("$FileDescriptionContains", $"%{filters.FileDescriptionContains}%");
+            predicates.Add("dfiroscope_column_match(FileDescription, $FileDescriptionContains)");
+            parameters.AddWithValue("$FileDescriptionContains", filters.FileDescriptionContains);
         }
         if (!string.IsNullOrEmpty(filters.Sha256HashContains))
         {
-            predicates.Add("Sha256Hash LIKE $Sha256HashContains");
-            parameters.AddWithValue("$Sha256HashContains", $"%{filters.Sha256HashContains}%");
+            predicates.Add("dfiroscope_column_match(Sha256Hash, $Sha256HashContains)");
+            parameters.AddWithValue("$Sha256HashContains", filters.Sha256HashContains);
         }
         AddFilterIdentityPredicate(predicates, parameters, "CaseId", filters.CaseId, "$CaseId");
         AddFilterIdentityPredicate(predicates, parameters, "EvidenceSessionId", filters.EvidenceSessionId, "$EvidenceSessionId");
@@ -903,6 +982,14 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
 
     private string BuildProcessSourceExpression(ProcessListingFilterSet filters, SqliteConnection connection)
     {
+        var source = BuildBaseProcessSourceExpression(filters, connection);
+        return filters.ColumnFilters.TryGetValue(ProcessListingSortColumn.ProcessRisk, out var risk) && risk.IsActive &&
+            ConfigureProcessRiskSort(connection, new ProcessListingSortDescriptor { Column = ProcessListingSortColumn.ProcessRisk })
+            ? BuildProcessRiskSortSource(source) : source;
+    }
+
+    private string BuildBaseProcessSourceExpression(ProcessListingFilterSet filters, SqliteConnection connection)
+    {
         var canonicalSource = GetProcessSource(connection);
         var canonicalTable = GetProcessTable(connection);
         if (!ShouldIncludeUnresolvedAnnotationTargets(filters))
@@ -1036,7 +1123,8 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
 
     private static string BuildOrderByClause(
         ProcessListingSortDescriptor sort,
-        bool riskSortAvailable = false)
+        bool riskSortAvailable = false,
+        bool summarySortAvailable = false)
     {
         var dir = sort.Direction == ProcessListingSortDirection.Descending ? "DESC" : "ASC";
         const string stableIdentity = "COALESCE(NULLIF(ProcessEntityId, ''), ProcessKey) COLLATE BINARY";
@@ -1045,6 +1133,13 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
             return riskSortAvailable
                 ? $"CASE WHEN ListingRiskSortScore IS NULL THEN 1 ELSE 0 END ASC, ListingRiskSortScore {dir}, {stableIdentity} ASC"
                 : $"COALESCE(NULLIF(ExecutionRootId, ''), ProcessKey) COLLATE NOCASE ASC, TreeDepth ASC, COALESCE(StartTimeUtc, FirstObservedUtc) ASC, ProcessName COLLATE NOCASE ASC, ProcessId ASC, {stableIdentity} ASC";
+        }
+
+        if (summarySortAvailable)
+        {
+            return IsNullableSummarySort(sort.Column)
+                ? $"CASE WHEN ListingSummarySortValue IS NULL THEN 1 ELSE 0 END ASC, ListingSummarySortValue {dir}, {stableIdentity} ASC"
+                : $"ListingSummarySortValue {dir}, {stableIdentity} ASC";
         }
 
         if (sort.Column is ProcessListingSortColumn.Tree or ProcessListingSortColumn.Unknown)
@@ -1197,6 +1292,107 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
         ) AS Processes
         """;
 
+    private static string BuildProcessSummarySortSource(
+        string processSource,
+        string summarySortExpression) =>
+        $"""
+        (
+            SELECT Processes.*,
+                   {summarySortExpression} AS ListingSummarySortValue
+            FROM {processSource}
+        ) AS Processes
+        """;
+
+    private static string? BuildSummarySortExpression(
+        SqliteConnection connection,
+        ProcessListingSortColumn column)
+    {
+        var statisticsColumn = column switch
+        {
+            ProcessListingSortColumn.TotalProcessorTime => "TotalProcessorTimeTicks",
+            ProcessListingSortColumn.ReadBytes => "ReadBytes",
+            ProcessListingSortColumn.WrittenBytes => "WrittenBytes",
+            _ => null
+        };
+        if (statisticsColumn != null)
+        {
+            if (!TableExists(connection, "ProcessStatistics"))
+            {
+                return "NULL";
+            }
+
+            var ownershipPredicate = ColumnExists(connection, "ProcessStatistics", "ProcessEntityId")
+                ? "COALESCE(NULLIF(statistics.ProcessEntityId, ''), statistics.ProcessKey) = " +
+                  "COALESCE(NULLIF(Processes.ProcessEntityId, ''), Processes.ProcessKey)"
+                : "statistics.ProcessKey = Processes.ProcessKey";
+            return $"""
+                (
+                    SELECT statistics.{statisticsColumn}
+                    FROM ProcessStatistics statistics
+                    WHERE {ownershipPredicate}
+                    ORDER BY statistics.ObservedUtc DESC, statistics.SampleId DESC
+                    LIMIT 1
+                )
+                """;
+        }
+
+        var eventSource = column switch
+        {
+            ProcessListingSortColumn.RuntimeEventCount => "Runtime",
+            ProcessListingSortColumn.EtwEventCount => "ETW",
+            ProcessListingSortColumn.SecurityEventCount => "Security",
+            ProcessListingSortColumn.PowerShellEventCount => "PowerShell",
+            ProcessListingSortColumn.OtherWindowsEventCount => "WindowsOther",
+            ProcessListingSortColumn.SysmonEventCount => "Sysmon",
+            _ => null
+        };
+        if (eventSource == null)
+        {
+            return null;
+        }
+        if (!TableExists(connection, "ProcessEvents"))
+        {
+            return "0";
+        }
+
+        var canonicalProcessTable = GetCanonicalProcessTable(connection);
+        var supportsUniqueScopedFallback = canonicalProcessTable.Length > 0 &&
+                                           HasProcessCompatibilityScope(connection, "ProcessEvents") &&
+                                           HasProcessCompatibilityScope(connection, canonicalProcessTable) &&
+                                           ColumnExists(connection, canonicalProcessTable, "ProcessKey");
+        var (exact, fallback) = ProcessEventAttachmentSql.BuildBranches(
+            "events",
+            "Processes",
+            canonicalProcessTable,
+            ColumnExists(connection, "ProcessEvents", "ProcessEntityId"),
+            supportsUniqueScopedFallback);
+        // Without statistics SQLite can prefer Source to EntityTimestamp, scanning every
+        // Security event once PER PROCESS. Use the existing entity index when present;
+        // old archives without it retain the compatible unhinted query.
+        using var indexCheck = connection.CreateCommand();
+        indexCheck.CommandText = "SELECT 1 FROM sqlite_master WHERE type='index' AND name='IX_ProcessEvents_EntityTimestamp' AND tbl_name='ProcessEvents';";
+        var entityIndex = indexCheck.ExecuteScalar() != null
+            ? " INDEXED BY IX_ProcessEvents_EntityTimestamp" : string.Empty;
+        return $"""
+            ((
+                SELECT COUNT(*)
+                FROM ProcessEvents events{entityIndex}
+                WHERE events.Source = '{eventSource}'
+                  AND ({exact})
+            ) + (
+                SELECT COUNT(*)
+                FROM ProcessEvents events
+                WHERE events.Source = '{eventSource}'
+                  AND ({fallback})
+            ))
+            """;
+    }
+
+    private static bool IsNullableSummarySort(ProcessListingSortColumn column) =>
+        column is ProcessListingSortColumn.TotalProcessorTime or
+            ProcessListingSortColumn.ReadBytes or
+            ProcessListingSortColumn.WrittenBytes;
+
     private static ProcessCursorPayload? DecodeAndValidateCursor(
         string? token,
         ProcessListingSortDescriptor sort)
@@ -1315,6 +1511,8 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
             ProcessListingSortColumn.Status => new("Status COLLATE NOCASE", ProcessCursorValueKind.Text),
             ProcessListingSortColumn.CpuUsage => new("CpuUsage", ProcessCursorValueKind.Real),
             ProcessListingSortColumn.MemoryUsage => new("MemoryUsageBytes", ProcessCursorValueKind.Integer),
+            ProcessListingSortColumn.ModuleCount => new("ModuleCount", ProcessCursorValueKind.Integer),
+            ProcessListingSortColumn.HandleCount => new("HandleCount", ProcessCursorValueKind.Integer),
             ProcessListingSortColumn.CompanyName => new("CompanyName COLLATE NOCASE", ProcessCursorValueKind.Text),
             ProcessListingSortColumn.FileDescription => new("FileDescription COLLATE NOCASE", ProcessCursorValueKind.Text),
             ProcessListingSortColumn.Sha256Hash => new("Sha256Hash COLLATE NOCASE", ProcessCursorValueKind.Text),
@@ -1338,6 +1536,8 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
             ProcessListingSortColumn.Status => row.Status.ToString(),
             ProcessListingSortColumn.CpuUsage => row.CpuUsage,
             ProcessListingSortColumn.MemoryUsage => row.MemoryUsageBytes,
+            ProcessListingSortColumn.ModuleCount => row.ModuleCount,
+            ProcessListingSortColumn.HandleCount => row.HandleCount,
             ProcessListingSortColumn.CompanyName => row.CompanyName,
             ProcessListingSortColumn.FileDescription => row.FileDescription,
             ProcessListingSortColumn.Sha256Hash => row.Sha256Hash,
@@ -1484,6 +1684,39 @@ internal sealed class ProcessListingQueryService : IProcessListingQueryService
 
     private static string GetProcessSource(SqliteConnection connection)
         => TableExists(connection, "ProcessEntities") ? "ProcessEntities AS Processes" : "Processes";
+
+    private static string GetCanonicalProcessTable(SqliteConnection connection)
+        => TableExists(connection, "ProcessEntities")
+            ? "ProcessEntities"
+            : TableExists(connection, "Processes")
+                ? "Processes"
+                : string.Empty;
+
+    private static bool ColumnExists(
+        SqliteConnection connection,
+        string tableName,
+        string columnName)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(GetString(reader, 1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasProcessCompatibilityScope(SqliteConnection connection, string tableName)
+        => ColumnExists(connection, tableName, "CaseId") &&
+           ColumnExists(connection, tableName, "EvidenceSessionId") &&
+           ColumnExists(connection, tableName, "CaptureId") &&
+           ColumnExists(connection, tableName, "HostId") &&
+           ColumnExists(connection, tableName, "ExecutionRootId");
 
     private static bool TableExists(SqliteConnection connection, string tableName)
     {

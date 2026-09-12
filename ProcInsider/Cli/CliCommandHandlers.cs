@@ -82,10 +82,34 @@ internal sealed class CliDispatcher
                     capability.CommandKind == agentCommand &&
                     capability.OperationalAvailability == AgentCommandOperationalAvailability.Supported))
         {
+            var reason = invocation.Kind is
+                    CliCommandKind.HostMonitoringConfigurationShow or
+                    CliCommandKind.HostMonitoringConfigurationCheck or
+                    CliCommandKind.HostMonitoringConfigurationSave or
+                    CliCommandKind.HostMonitoringDeploy or
+                    CliCommandKind.HostMonitoringReverse
+                ? $"Command '{definition.Name}' is not published because no host-monitoring configuration group is available."
+                : $"Command '{definition.Name}' is not operationally available.";
             return CliCommandResult.Failed(
                 CliExitCode.Rejected,
                 ViewerAgentCommandErrorCodes.CommandNotAvailable,
-                $"Command '{definition.Name}' is not operationally available.");
+                reason);
+        }
+
+        if (invocation.Kind is CliCommandKind.CaptureSourceStart or CliCommandKind.CaptureSourceStop &&
+            !string.IsNullOrWhiteSpace(invocation.Source))
+        {
+            AgentCommand sourceCommand = invocation.Kind == CliCommandKind.CaptureSourceStart
+                ? new StartLiveCaptureSourceCommand { Source = invocation.Source }
+                : new StopLiveCaptureSourceCommand { Source = invocation.Source };
+            var decision = AgentCommandFeaturePolicy.EvaluateCommand(featureCatalog, sourceCommand);
+            if (!decision.Allowed)
+            {
+                return CliCommandResult.Failed(
+                    CliExitCode.Rejected,
+                    decision.ErrorCode,
+                    decision.ErrorMessage);
+            }
         }
 
         return null;
@@ -153,7 +177,7 @@ internal sealed class DefaultCliCommandHandlerFactory : ICliCommandHandlerFactor
             CliCommandKind.HostMonitoringConfigurationSave or
             CliCommandKind.HostMonitoringDeploy or
             CliCommandKind.HostMonitoringReverse =>
-                new HostMonitoringCliCommandHandler(kind, GetAgentService()),
+                new HostMonitoringCliCommandHandler(kind, GetAgentService(), _featureCatalog),
             CliCommandKind.AgentReconnect or
             CliCommandKind.AgentStart or
             CliCommandKind.AgentStop or
@@ -199,37 +223,48 @@ internal sealed class HelpCliCommandHandler : ICliCommandHandler
     {
         cancellationToken.ThrowIfCancellationRequested();
         var published = CliHelpFormatter.GetPublishedDefinitions(_featureCatalog);
-        var monitoringPublished = _featureCatalog.IsPublished(
-            FeatureIds.SecurityMonitoringConfiguration);
+        var monitoringPublished =
+            _featureCatalog.IsPublished(FeatureIds.SecurityMonitoringConfiguration) ||
+            _featureCatalog.IsPublished(FeatureIds.WindowsSecurityEvents);
+        var publishedSources = CliHelpFormatter.GetPublishedCaptureSources(_featureCatalog);
+        var options = new List<string>
+        {
+            "--output text|json",
+            "--session <absolute-session-root-or-session.json>",
+            "--yes",
+            "--live-buffer-memory-mb 500|1024|2048",
+            "--timeout-seconds 1..86400",
+            monitoringPublished
+                ? "--file <absolute-json> (capture or host-monitoring configuration)"
+                : "--file <absolute-json> (capture configuration)"
+        };
+        if (published.Any(definition => definition.Kind is
+                CliCommandKind.CaptureSourceStart or CliCommandKind.CaptureSourceStop))
+        {
+            options.Add($"--source <{string.Join('|', publishedSources)}>");
+        }
+
+        options.AddRange(
+        [
+            "--job-id <guid>",
+            "--wait",
+            "--all | --process-entity-id <id>... | --process-key <PID_StartTimeTicks>...",
+            "--modules | --handles | --pe [--pe-strings deferred|immediate]",
+            "--kind full|mini",
+            "--path <absolute-file-or-folder> [--recurse] [--include-ntfs] [--include-prefetch] [--max-files 1..10000]",
+            "--output-file-name <leaf> [--acquisition-timeout-seconds 1..7200]",
+            "--image-path <absolute-memory-image> | --image-id <staged-image-id>",
+            "--plugin <name>... [--plugin-timeout-seconds 30..86400]"
+        ]);
         return Task.FromResult(CliCommandResult.Succeeded(
-            CliHelpFormatter.Format(published, monitoringPublished),
+            CliHelpFormatter.Format(published, monitoringPublished, publishedSources),
             new CliHelpDto(
                 "dfiroscope <noun> <verb> [options]",
                 published.Select(definition => new CliHelpCommandDto(
                     definition.Name,
                     definition.Usage,
                     definition.Summary)).ToArray(),
-                new[]
-                {
-                    "--output text|json",
-                    "--session <absolute-session-root-or-session.json>",
-                    "--yes",
-                    "--live-buffer-memory-mb 500|1024|2048",
-                    "--timeout-seconds 1..86400",
-                    monitoringPublished
-                        ? "--file <absolute-json> (capture or host-monitoring configuration)"
-                        : "--file <absolute-json> (capture configuration)",
-                    "--source <Runtime|ETW|Security|PowerShell|WindowsOther|Sysmon>",
-                    "--job-id <guid>",
-                    "--wait",
-                    "--all | --process-entity-id <id>... | --process-key <PID_StartTimeTicks>...",
-                    "--modules | --handles | --pe [--pe-strings deferred|immediate]",
-                    "--kind full|mini",
-                    "--path <absolute-file-or-folder> [--recurse] [--include-ntfs] [--include-prefetch] [--max-files 1..10000]",
-                    "--output-file-name <leaf> [--acquisition-timeout-seconds 1..7200]",
-                    "--image-path <absolute-memory-image> | --image-id <staged-image-id>",
-                    "--plugin <name>... [--plugin-timeout-seconds 30..86400]"
-                },
+                options,
                 CliShellBuiltInCatalog.Definitions.Select(definition => new CliHelpCommandDto(
                     definition.Name,
                     definition.Usage,
@@ -658,10 +693,12 @@ internal sealed class AgentCaptureCliCommandHandler : ICliCommandHandler
 internal sealed class HostMonitoringCliCommandHandler : ICliCommandHandler
 {
     private readonly IViewerCliAgentService _agentService;
+    private readonly IFeatureCatalog _featureCatalog;
 
     public HostMonitoringCliCommandHandler(
         CliCommandKind kind,
-        IViewerCliAgentService agentService)
+        IViewerCliAgentService agentService,
+        IFeatureCatalog featureCatalog)
     {
         if (kind is not
             (CliCommandKind.HostMonitoringConfigurationShow or
@@ -675,6 +712,7 @@ internal sealed class HostMonitoringCliCommandHandler : ICliCommandHandler
 
         Kind = kind;
         _agentService = agentService ?? throw new ArgumentNullException(nameof(agentService));
+        _featureCatalog = featureCatalog ?? throw new ArgumentNullException(nameof(featureCatalog));
     }
 
     public CliCommandKind Kind { get; }
@@ -716,13 +754,17 @@ internal sealed class HostMonitoringCliCommandHandler : ICliCommandHandler
 
         using var session = opened.Session!;
         var captureTarget = session.CaptureTarget;
+        var configurationAreas = _featureCatalog.IsPublished(FeatureIds.WindowsSecurityEvents)
+            ? AgentHostMonitoringConfigurationAreas.WindowsSecurity.ToArray()
+            : [];
         var target = new ViewerHostMonitoringActionTarget(
             captureTarget.AgentId,
             captureTarget.HostId,
             captureTarget.SessionId,
             captureTarget.SessionRoot,
             captureTarget.WorkspaceGeneration,
-            RequireViewerConnection: false);
+            RequireViewerConnection: false,
+            configurationAreas);
         var actions = new ViewerHostMonitoringActionService(
             new DelegateViewerHostMonitoringActionRuntime(
                 candidate => candidate == target,
@@ -1629,6 +1671,8 @@ internal static class CliHelpFormatter
     public static IReadOnlyList<CliCommandDefinition> GetPublishedDefinitions(
         IFeatureCatalog featureCatalog)
     {
+        var publishedSources = GetPublishedCaptureSources(featureCatalog);
+        var sourceUsage = $"<{string.Join('|', publishedSources)}>";
         var supportedCommands = AgentCommandFeaturePolicy
             .GetPublishedCommandCapabilities(featureCatalog)
             .Where(capability =>
@@ -1642,12 +1686,40 @@ internal static class CliHelpFormatter
             .Where(definition =>
                 definition.AgentCommand is not { } commandKind ||
                 supportedCommands.Contains(commandKind))
+            .Select(definition => definition.Kind is
+                    CliCommandKind.CaptureSourceStart or CliCommandKind.CaptureSourceStop
+                ? definition with
+                {
+                    Usage = definition.Usage.Replace(
+                        "<Runtime|ETW|Security|PowerShell|WindowsOther|Sysmon>",
+                        sourceUsage,
+                        StringComparison.Ordinal)
+                }
+                : definition)
             .ToArray();
+    }
+
+    public static IReadOnlyList<string> GetPublishedCaptureSources(IFeatureCatalog featureCatalog)
+    {
+        ArgumentNullException.ThrowIfNull(featureCatalog);
+        var sources = new List<string> { "Runtime" };
+        if (featureCatalog.IsPublished(FeatureIds.WindowsSecurityEvents))
+        {
+            sources.Add("Security");
+        }
+
+        if (featureCatalog.IsPublished(FeatureIds.EventTelemetry))
+        {
+            sources.AddRange(["ETW", "PowerShell", "WindowsOther", "Sysmon"]);
+        }
+
+        return sources;
     }
 
     public static string Format(
         IReadOnlyList<CliCommandDefinition> definitions,
-        bool monitoringPublished)
+        bool monitoringPublished,
+        IReadOnlyList<string> publishedSources)
     {
         var text = new StringBuilder();
         text.AppendLine(ProductIdentity.DisplayName);
@@ -1676,7 +1748,13 @@ internal static class CliHelpFormatter
         text.AppendLine(monitoringPublished
             ? "  --file <absolute-json> (capture or host-monitoring configuration check/save)"
             : "  --file <absolute-json> (capture configuration check/save)");
-        text.AppendLine("  --source Runtime|ETW|Security|PowerShell|WindowsOther|Sysmon (capture source start/stop)");
+        if (definitions.Any(definition => definition.Kind is
+                CliCommandKind.CaptureSourceStart or CliCommandKind.CaptureSourceStop))
+        {
+            text.Append("  --source ")
+                .Append(string.Join('|', publishedSources))
+                .AppendLine(" (capture source start/stop)");
+        }
         text.AppendLine("  --job-id <guid> (job status/wait/cancel)");
         text.AppendLine("  --wait (capture start/stop or queued evidence action)");
         text.AppendLine("  --all | --process-entity-id <id>... | --process-key <PID_StartTimeTicks>... (enrichment scope)");
@@ -1797,6 +1875,8 @@ internal sealed record CliHostMonitoringSysmonDto(
 
 internal sealed record CliHostMonitoringSecurityAuditDto(
     bool ConfigureAuditPolicy,
+    bool AuditUserDataFolders,
+    bool AuditRegistryWrites,
     bool EnableProcessCommandLineLogging,
     string ProfileId,
     string Status);
@@ -2226,6 +2306,8 @@ internal static class CliDtoMapper
                 configuration.Sysmon.Status.ToString()),
             new CliHostMonitoringSecurityAuditDto(
                 configuration.SecurityAuditPolicy.ConfigureAuditPolicy,
+                configuration.SecurityAuditPolicy.AuditUserDataFolders,
+                configuration.SecurityAuditPolicy.AuditRegistryWrites,
                 configuration.SecurityAuditPolicy.EnableProcessCommandLineLogging,
                 CliValueSanitizer.Value(configuration.SecurityAuditPolicy.PolicyProfileId),
                 configuration.SecurityAuditPolicy.Status.ToString()),
@@ -2692,7 +2774,7 @@ internal static class CliTextFormatter
             $"Host monitoring configuration: {data.ConfigurationVersion} ({data.Status})",
             $"Updated: {data.UpdatedAtUtc}",
             $"Sysmon: install/update={OnOff(data.Sysmon.InstallOrUpdate)}, verify={OnOff(data.Sysmon.VerifyService)}, profile={data.Sysmon.ProfileId}",
-            $"Security audit: policy={OnOff(data.SecurityAudit.ConfigureAuditPolicy)}, process-command-line={OnOff(data.SecurityAudit.EnableProcessCommandLineLogging)}, profile={data.SecurityAudit.ProfileId}",
+            $"Security audit: policy={OnOff(data.SecurityAudit.ConfigureAuditPolicy)}, user-data-writes={OnOff(data.SecurityAudit.AuditUserDataFolders)}, registry-writes={OnOff(data.SecurityAudit.AuditRegistryWrites)}, process-command-line={OnOff(data.SecurityAudit.EnableProcessCommandLineLogging)}, profile={data.SecurityAudit.ProfileId}",
             $"Event logs: channels={OnOff(data.EventLogs.ConfigureChannels)}, retention={OnOff(data.EventLogs.ConfigureRetention)}, count={data.EventLogs.ChannelCount.ToString(CultureInfo.InvariantCulture)}",
             $"PowerShell: script-block={OnOff(data.PowerShell.EnableScriptBlockLogging)}, module={OnOff(data.PowerShell.EnableModuleLogging)}, transcription={OnOff(data.PowerShell.EnableTranscription)}",
             $"ETW profile: {OnOff(data.Etw.ConfigureSession)} | Scheduled dumps: {OnOff(data.ScheduledDumps.Enabled)}",

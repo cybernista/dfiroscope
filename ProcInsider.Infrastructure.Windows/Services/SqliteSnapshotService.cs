@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using ProcInsider.Models;
+using SQLitePCL;
 
 namespace ProcInsider.Services;
 
@@ -165,7 +166,7 @@ public sealed class SqliteSnapshotService
                     tempPath,
                     SqliteOpenMode.ReadWriteCreate,
                     SqlitePerformanceProfileName.Conservative);
-                source.BackupDatabase(destination);
+                BackupDatabase(source, destination, cancellationToken);
             }
             catch (SqliteException ex) when (
                 ex.SqliteErrorCode is 5 or 6 &&
@@ -257,6 +258,48 @@ public sealed class SqliteSnapshotService
         SqliteOpenMode mode,
         SqlitePerformanceProfileName profile)
         => SqlitePerformanceProfile.OpenConnection(databasePath, mode, profile);
+
+    // Same SQLite online-backup mechanism as BackupDatabase, stepped so the analyst can
+    // see actual pages and cancel. Source stays read-only; no checkpoint is requested.
+    private static void BackupDatabase(SqliteConnection source, SqliteConnection destination,
+        CancellationToken cancellationToken)
+    {
+        using var stage = SqliteWorkScope.Begin("Copying database snapshot", unit: "pages");
+        // Pin one read version across batches. Otherwise each Agent commit may restart
+        // incremental backup from page zero. A WAL reader still permits writer commits.
+        using var sourceRead = source.BeginTransaction(deferred: true);
+        using (var pin = source.CreateCommand())
+        {
+            pin.Transaction = sourceRead;
+            pin.CommandText = "SELECT rootpage FROM sqlite_schema LIMIT 1;";
+            pin.ExecuteScalar();
+        }
+        using var backup = raw.sqlite3_backup_init(destination.Handle!, "main", source.Handle!, "main");
+        if (backup == null || backup.IsInvalid)
+            throw new IOException("SQLite could not initialize the snapshot backup.");
+        var busy = Stopwatch.StartNew();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = raw.sqlite3_backup_step(backup, 256);
+            var total = raw.sqlite3_backup_pagecount(backup);
+            var remaining = raw.sqlite3_backup_remaining(backup);
+            stage.Advance(Math.Max(0, total - remaining), total > 0 ? total : null);
+            if (result == raw.SQLITE_DONE) break;
+            if (result is raw.SQLITE_BUSY or raw.SQLITE_LOCKED)
+            {
+                if (busy.Elapsed > TimeSpan.FromSeconds(5))
+                    throw new SqliteException("SQLite snapshot source remained busy.", result);
+                if (cancellationToken.WaitHandle.WaitOne(25))
+                    cancellationToken.ThrowIfCancellationRequested();
+                continue;
+            }
+            if (result != raw.SQLITE_OK)
+                throw new SqliteException("SQLite snapshot backup failed.", result);
+            busy.Restart();
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+    }
 
     private static SqliteConnection OpenSnapshotSource(string liveDatabasePath)
         => OpenConnection(

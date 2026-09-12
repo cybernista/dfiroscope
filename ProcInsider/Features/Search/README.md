@@ -34,7 +34,7 @@ When extending Search:
 
 ## Validation
 
-Run the full Release solution build plus:
+Build one Release generation through the supported validation environment, then run each applicable check below once against that generation. Reuse a result only while its source, build inputs, and relevant environment remain unchanged; rerun affected checks after a correction or new evidence:
 
 - `SearchFeatureSelfTest.dll` for parsing/query equivalence, lazy typed activation, cancellation, stale-result rejection, rebinding, navigation, and repeated cleanup;
 - `FeatureCatalogSelfTest.dll` for shared Search/Sigma publication and stable Explorer registration;

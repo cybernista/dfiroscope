@@ -37,7 +37,7 @@ When extending the feature:
 
 ## Validation
 
-Run the full Release solution build plus:
+Build one Release generation through the supported validation environment, then run each applicable check below once against that generation. Reuse a result only while its source, build inputs, and relevant environment remain unchanged; rerun affected checks after a correction or new evidence:
 
 - `BaselineComparisonSelfTest.dll` for hash-stable completion, metadata ambiguity/unavailability, comparison and publication cancellation, exact live-snapshot baseline-risk publication, zero-match retention, empty replacement, bounds/ambiguity/group suppression, policy republish, workspace-rebind, hidden zero-construction, and repeated-disposal coverage;
 - `FeatureCatalogSelfTest.dll` for hidden/publication and lazy-activation behavior;

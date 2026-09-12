@@ -128,7 +128,7 @@ public class ProcessFilterService
                 continue;
 
             var value = GetColumnValue(proc, filter.Key);
-            if (!value.Contains(filter.Value, StringComparison.OrdinalIgnoreCase))
+            if (!ColumnTextFilter.Matches(value, filter.Value))
                 return false;
         }
 
