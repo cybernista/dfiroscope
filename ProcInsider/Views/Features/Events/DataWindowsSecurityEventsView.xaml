@@ -11,7 +11,15 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <TextBlock Text="{Binding StatusMessage}" Margin="5" TextWrapping="Wrap"/>
-        <Button Grid.Row="1" Content="Clear Audit Filters" Command="{Binding ClearFiltersCommand}" HorizontalAlignment="Right" Margin="5" Padding="8,4"/>
+        <StackPanel Grid.Row="1" Margin="5">
+            <WrapPanel>
+                <Button Content="Event profiles" Command="{Binding EditSecurityProfilesCommand}" Margin="0,0,6,0" Padding="8,4"/>
+                <ComboBox x:Name="AuditDetailsProfiles" ItemsSource="{Binding MatchingSecurityDetailsProfiles}" SelectedItem="{Binding SecurityDetailsProfile, Mode=TwoWay}" DisplayMemberPath="Name" MinWidth="200" MaxWidth="420" ToolTip="Details profile for the selected event's exact native schema"/>
+                <Button x:Name="UseAuditDetailsProfile" Content="Use for Details" Command="{Binding UseSecurityDetailsProfileCommand}" Margin="6,0" Padding="8,4"/>
+                <Button Content="Clear Audit Filters" Command="{Binding ClearFiltersCommand}" Padding="8,4"/>
+            </WrapPanel>
+            <TextBlock Text="{Binding SecurityProfilesStatus}" TextWrapping="Wrap"/>
+        </StackPanel>
         <DataGrid x:Name="AuditGrid" Grid.Row="2" Margin="5" FontSize="11"
                   ItemsSource="{Binding EventsView, NotifyOnTargetUpdated=True}" SelectedItem="{Binding SelectedEvent, Mode=TwoWay}"
                   TargetUpdated="AuditGrid_TargetUpdated" Loaded="AuditGrid_Loaded"

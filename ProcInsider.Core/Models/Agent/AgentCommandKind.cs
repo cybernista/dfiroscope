@@ -56,4 +56,5 @@ public enum AgentCommandKind
     StopLiveCaptureSource = 32,
     StartLiveCaptureSource = 33,
     QueueMemoryAcquisition = 34,
+    RunTelemetryAuditTest = 35,
 }

@@ -55,6 +55,9 @@ public sealed record AgentIpcResponse
 
     public AgentCaptureLifecycleResult? CaptureLifecycle { get; init; }
 
+    /// <summary>Independent prerequisite, activity, evidence, and cleanup receipts for one fixed Telemetrios audit test.</summary>
+    public AgentTelemetryAuditTestResult? TelemetryAuditTest { get; init; }
+
     /// <summary>Nonce returned without health disclosure for a pairing challenge.</summary>
     public AgentPairingChallenge? PairingChallenge { get; init; }
 

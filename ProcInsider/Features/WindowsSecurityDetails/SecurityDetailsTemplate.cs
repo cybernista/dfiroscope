@@ -20,6 +20,8 @@ public sealed class SecurityDetailsTemplate
     private readonly Token[] _tokens;
     private SecurityDetailsTemplate(Token[] tokens) => _tokens = tokens;
     public bool UsesPositions => _tokens.Any(t => t.Position > 0);
+    internal IEnumerable<string> NamedReferences => _tokens.Where(t => t.IsField && t.Position == 0).Select(t => t.Text).Distinct(StringComparer.Ordinal);
+    internal bool HasLiterals => _tokens.Any(t => !t.IsField && !string.IsNullOrWhiteSpace(t.Text));
 
     public static SecurityDetailsTemplate Compile(string text)
     {

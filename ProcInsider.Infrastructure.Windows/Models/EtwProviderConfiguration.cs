@@ -22,6 +22,7 @@ public class EtwProfileMetadata
     public string ExpectedVolume { get; set; } = string.Empty;
 
     public string RiskNote { get; set; } = string.Empty;
+    public bool CaptureUnmappedEvents { get; set; } = true;
 
     public List<string> CorrelationHints { get; set; } = new();
 }

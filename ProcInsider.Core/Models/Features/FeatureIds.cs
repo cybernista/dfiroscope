@@ -7,6 +7,7 @@ public static partial class FeatureIds
 {
     public static readonly FeatureId ProcessListing = new("process-listing");
     public static readonly FeatureId SelectedProcessDetails = new("selected-process-details");
+    public static readonly FeatureId EventsWorkspace = new("events-workspace");
     public static readonly FeatureId ProcessRiskScore = new("process-risk-score");
     public static readonly FeatureId ApplicationComparison = new("application-comparison");
     public static readonly FeatureId ModulesAndHandles = new("modules-handles");
@@ -38,6 +39,8 @@ public static partial class FeatureIds
         [
             ProcessListing,
             SelectedProcessDetails,
+            InvestigationWorkspaces,
+            EventsWorkspace,
             ProcessRiskScore,
             ApplicationComparison,
             ModulesAndHandles,

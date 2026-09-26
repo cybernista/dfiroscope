@@ -23,6 +23,10 @@ public class ProcessEventInfo
     public string Summary { get; set; } = string.Empty;
     public string Details { get; set; } = string.Empty;
     public string RiskFlags { get; set; } = string.Empty;
+    /// <summary>Recorded native provider identity; presentation uses it only with the recorded channel.</summary>
+    public string RawProvider { get; set; } = string.Empty;
+    /// <summary>Recorded native channel identity; never infer a schema from the event source alone.</summary>
+    public string RawLogName { get; set; } = string.Empty;
     public bool IsInteresting { get; set; }
     public int RepeatCount { get; set; } = 1;
     public long EstimatedSizeBytes { get; set; }

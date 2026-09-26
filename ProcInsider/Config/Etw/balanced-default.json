@@ -4,7 +4,8 @@
     "DisplayName": "DFIRoscope Live ETW Balanced Default",
     "Description": "Default ETW provider and event mapping profile for process, image, file, registry, network, DNS, WMI, and optional threat-intelligence telemetry.",
     "ExpectedVolume": "Medium",
-    "RiskNote": "Balanced capture can still produce bursts during heavy file, registry, or network activity.",
+    "RiskNote": "Only mapped event IDs are retained. Balanced capture can still produce bursts during heavy file, registry, or network activity.",
+    "CaptureUnmappedEvents": false,
     "CorrelationHints": [
       "Correlate by ProcessID/ProcessId/PID with process start time when provider payloads do not include a stable process GUID.",
       "Image-load events can enrich selected process module context.",
@@ -75,27 +76,11 @@
       "Events": [
         {
           "Id": 12,
-          "Name": "FileCreate",
+          "Name": "FileCreateOrOpen",
           "Category": "File",
-          "Action": "FileCreate",
+          "Action": "EtwEvent",
           "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
-          "TargetFields": [ "FileName", "FilePath", "Path", "FileObject" ]
-        },
-        {
-          "Id": 14,
-          "Name": "FileDelete",
-          "Category": "File",
-          "Action": "FileDelete",
-          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
-          "TargetFields": [ "FileName", "FilePath", "Path", "FileObject" ]
-        },
-        {
-          "Id": 15,
-          "Name": "FileRename",
-          "Category": "File",
-          "Action": "FileRename",
-          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
-          "TargetFields": [ "FileName", "FilePath", "Path", "FileObject" ]
+          "TargetFields": [ "OpenPath", "FileName", "FilePath", "Path", "FileObject" ]
         }
       ]
     },
@@ -108,15 +93,7 @@
       "Events": [
         {
           "Id": 1,
-          "Name": "RegistryCreateKey",
-          "Category": "Registry",
-          "Action": "RegistryCreateKey",
-          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
-          "TargetFields": [ "KeyName", "KeyPath", "ObjectName" ]
-        },
-        {
-          "Id": 2,
-          "Name": "RegistryOpenKey",
+          "Name": "RegistryCreateOrOpenKey",
           "Category": "Registry",
           "Action": "EtwEvent",
           "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
@@ -137,14 +114,6 @@
           "Action": "RegistryDeleteValue",
           "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
           "TargetFields": [ "KeyName", "KeyPath", "ValueName", "ObjectName" ]
-        },
-        {
-          "Id": 7,
-          "Name": "RegistryDeleteKey",
-          "Category": "Registry",
-          "Action": "RegistryDeleteKey",
-          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
-          "TargetFields": [ "KeyName", "KeyPath", "ObjectName" ]
         }
       ]
     },
@@ -157,6 +126,14 @@
       "Events": [
         {
           "Id": 10,
+          "Name": "NetworkEvent",
+          "Category": "Network",
+          "Action": "EtwEvent",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "daddr", "destaddr", "DestinationAddress", "saddr", "SourceAddress" ]
+        },
+        {
+          "Id": 12,
           "Name": "TcpConnect",
           "Category": "Network",
           "Action": "Connect",
@@ -167,7 +144,7 @@
           "Id": 42,
           "Name": "UdpSend",
           "Category": "Network",
-          "Action": "Connect",
+          "Action": "EtwEvent",
           "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
           "TargetFields": [ "daddr", "destaddr", "DestinationAddress", "saddr", "SourceAddress" ]
         }

@@ -15,8 +15,8 @@ public class SysmonService
     private const string LegacyAppSettingsKey = @"Software\ProcInsider";
     private const string IntegrationValueName = "EnableSysmonIntegration";
     private const string SysmonLogName = "Microsoft-Windows-Sysmon/Operational";
-    private const string ConfigRelativePath = @"Config\Sysmon\Procinsider.Sysmon.Medium.xml";
-    private const string LegacyConfigRelativePath = @"Sysmon\Procinsider.Sysmon.Medium.xml";
+    private const string ConfigRelativePath = @"Config\Sysmon\DFIRoscope.Sysmon.Focused.xml";
+    private const string LegacyConfigRelativePath = @"Sysmon\DFIRoscope.Sysmon.Medium.xml";
 
     private readonly ConfigProfileService _configProfileService;
 
@@ -36,7 +36,7 @@ public class SysmonService
         _configProfileService = configProfileService;
     }
 
-    public SysmonSettings LoadSettings()
+    public virtual SysmonSettings LoadSettings()
     {
         var channelStatus = DetectChannelStatus();
         var serviceStateAvailable = true;
@@ -94,6 +94,44 @@ public class SysmonService
         return _configProfileService.GetProfiles(ConfigProfileKind.Sysmon);
     }
 
+    /// <summary>
+    /// Ensures that every packaged Sysmon profile is source-owned, uniquely identified, and
+    /// carries the analyst-facing change notice required before a mutation can be offered.
+    /// </summary>
+    public virtual void ValidateBundledConfigProfiles()
+    {
+        var profiles = GetBundledConfigProfiles();
+        if (profiles.Count == 0)
+        {
+            throw new InvalidOperationException("No source-owned Sysmon profiles are available.");
+        }
+
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sourceRoot = Path.GetFullPath(Path.Combine(_configProfileService.ConfigRoot, "Sysmon"))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        foreach (var profile in profiles)
+        {
+            if (string.IsNullOrWhiteSpace(profile.Id) || !ids.Add(profile.Id))
+            {
+                throw new InvalidOperationException("Sysmon profiles must have unique non-empty identifiers.");
+            }
+
+            if (string.IsNullOrWhiteSpace(profile.Warning))
+            {
+                throw new InvalidOperationException($"Sysmon profile '{profile.Id}' is missing its analyst-facing change notice.");
+            }
+
+            var profilePath = ResolveBundledConfigProfilePath(profile);
+            if (string.IsNullOrWhiteSpace(profilePath) ||
+                !string.Equals(Path.GetExtension(profilePath), ".xml", StringComparison.OrdinalIgnoreCase) ||
+                !Path.GetFullPath(profilePath).StartsWith(sourceRoot, StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(profilePath))
+            {
+                throw new InvalidOperationException($"Sysmon profile '{profile.Id}' must resolve to a packaged XML file under its source-owned Config\\Sysmon root.");
+            }
+        }
+    }
+
     public string? ResolveBundledConfigProfilePath(ConfigProfileDefinition profile)
     {
         return _configProfileService.ResolveProfileFilePath(profile);
@@ -118,13 +156,31 @@ public class SysmonService
         return null;
     }
 
-    public void ApplyBundledConfig()
+    /// <summary>
+    /// Returns only the executable registered for the installed Sysmon service. Read-only
+    /// inspection must not fall back to a different copy found on PATH or in the package.
+    /// </summary>
+    public virtual string? FindInstalledSysmonExecutablePath()
+    {
+        var installedPath = ReadInstalledImagePath();
+        return !string.IsNullOrWhiteSpace(installedPath) &&
+               Path.IsPathFullyQualified(installedPath) &&
+               File.Exists(installedPath) &&
+               Path.GetFileName(installedPath) is { } fileName &&
+               (fileName.Equals("Sysmon.exe", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("Sysmon64.exe", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("Sysmon64a.exe", StringComparison.OrdinalIgnoreCase))
+            ? Path.GetFullPath(installedPath)
+            : null;
+    }
+
+    public virtual void ApplyBundledConfig()
     {
         var configPath = GetBundledConfigPath();
         ApplyConfigPath(configPath);
     }
 
-    public void ApplyBundledConfig(ConfigProfileDefinition profile)
+    public virtual void ApplyBundledConfig(ConfigProfileDefinition profile)
     {
         var profileName = string.IsNullOrWhiteSpace(profile.DisplayName) ? profile.Id : profile.DisplayName;
         if (profile.Kind != ConfigProfileKind.Sysmon)
@@ -141,6 +197,50 @@ public class SysmonService
         ApplyConfigPath(configPath);
     }
 
+    public virtual void ApplyBundledConfigToInstalled(ConfigProfileDefinition profile, string installedExecutablePath)
+    {
+        var configPath = ResolveBundledConfigProfilePath(profile);
+        if (profile.Kind != ConfigProfileKind.Sysmon || string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
+            throw new InvalidOperationException("The selected bundled Sysmon profile is unavailable.");
+        RequireInstalledExecutable(installedExecutablePath);
+        RunInstalledSysmonCommand(installedExecutablePath, $"-c \"{configPath}\"");
+    }
+
+    public virtual void ResetInstalledToDefaults(string installedExecutablePath)
+    {
+        RequireInstalledExecutable(installedExecutablePath);
+        RunInstalledSysmonCommand(installedExecutablePath, "-c --");
+    }
+
+    private void RequireInstalledExecutable(string executablePath)
+    {
+        var registered = FindInstalledSysmonExecutablePath();
+        if (string.IsNullOrWhiteSpace(registered) ||
+            !string.Equals(Path.GetFullPath(executablePath), registered, StringComparison.OrdinalIgnoreCase) ||
+            !File.Exists(registered))
+            throw new InvalidOperationException("The installed Sysmon executable changed or is unavailable.");
+    }
+
+    private static void RunInstalledSysmonCommand(string executablePath, string arguments)
+    {
+        using var trusted = TrustedSysmonExecutable.Create(executablePath);
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = trusted.Path,
+            Arguments = arguments,
+            WorkingDirectory = Path.GetDirectoryName(trusted.Path)!,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        }) ?? throw new InvalidOperationException("Failed to start installed Sysmon.");
+        if (!process.WaitForExit(30_000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("Installed Sysmon configuration command exceeded 30 seconds.");
+        }
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"Installed Sysmon configuration command exited with code {process.ExitCode}.");
+    }
+
     private void ApplyConfigPath(string configPath)
     {
         if (!File.Exists(configPath))
@@ -151,13 +251,13 @@ public class SysmonService
         var executablePath = FindSysmonExecutablePath();
         if (string.IsNullOrWhiteSpace(executablePath))
         {
-            throw new InvalidOperationException("Unable to locate sysmon64.exe or sysmon.exe. Add Sysmon to PATH or install it first.");
+            throw new InvalidOperationException("Unable to locate sysmon.exe, sysmon64.exe, or sysmon64a.exe. Add Sysmon to PATH or install it first.");
         }
 
         RunSysmonCommand(executablePath, $"-c \"{configPath}\"");
     }
 
-    public void InstallWithBundledConfig()
+    public virtual void InstallWithBundledConfig()
     {
         var configPath = GetBundledConfigPath();
         if (!File.Exists(configPath))
@@ -168,13 +268,13 @@ public class SysmonService
         var executablePath = FindSysmonExecutablePath();
         if (string.IsNullOrWhiteSpace(executablePath))
         {
-            throw new InvalidOperationException("Unable to locate sysmon64.exe or sysmon.exe. Extract Sysmon and add it to PATH first.");
+            throw new InvalidOperationException("Unable to locate sysmon.exe, sysmon64.exe, or sysmon64a.exe. Extract Sysmon and add it to PATH first.");
         }
 
         RunSysmonCommand(executablePath, $"-accepteula -i \"{configPath}\"");
     }
 
-    public void InstallWithBundledConfig(ConfigProfileDefinition profile)
+    public virtual void InstallWithBundledConfig(ConfigProfileDefinition profile)
     {
         var profileName = string.IsNullOrWhiteSpace(profile.DisplayName) ? profile.Id : profile.DisplayName;
         if (profile.Kind != ConfigProfileKind.Sysmon)
@@ -191,7 +291,7 @@ public class SysmonService
         var executablePath = FindSysmonExecutablePath();
         if (string.IsNullOrWhiteSpace(executablePath))
         {
-            throw new InvalidOperationException("Unable to locate sysmon64.exe or sysmon.exe. Extract Sysmon and add it to PATH first.");
+            throw new InvalidOperationException("Unable to locate sysmon.exe, sysmon64.exe, or sysmon64a.exe. Extract Sysmon and add it to PATH first.");
         }
 
         RunSysmonCommand(executablePath, $"-accepteula -i \"{configPath}\"");
@@ -365,10 +465,12 @@ public class SysmonService
                      .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             candidates.Add(Path.Combine(pathEntry, "sysmon64.exe"));
+            candidates.Add(Path.Combine(pathEntry, "sysmon64a.exe"));
             candidates.Add(Path.Combine(pathEntry, "sysmon.exe"));
         }
 
         candidates.Add(Path.Combine(AppContext.BaseDirectory, "sysmon64.exe"));
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, "sysmon64a.exe"));
         candidates.Add(Path.Combine(AppContext.BaseDirectory, "sysmon.exe"));
 
         return candidates.Distinct(StringComparer.OrdinalIgnoreCase);

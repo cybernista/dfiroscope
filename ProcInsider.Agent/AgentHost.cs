@@ -35,7 +35,9 @@ internal sealed class AgentHost
         Log($"Host mode: {_options.Host.Mode}; effective identity: {_options.Host.EffectiveAccountName} ({_options.Host.EffectiveAccountSid}); " +
             $"LocalSystem={_options.Host.IsLocalSystem}; path scope={_options.Host.PathScope}.");
         Log($"Contract version: {AgentContracts.ContractVersion}");
-        IFeatureCatalog releaseCatalog = _options.ForegroundMemoryAcquisitionSmoke
+        IFeatureCatalog releaseCatalog = _options.ForegroundFiveSourceValidationSmoke
+            ? CreateFiveSourceValidationReleaseCatalog()
+            : _options.ForegroundMemoryAcquisitionSmoke
             ? CreateMemoryActionSmokeReleaseCatalog()
             : _options.ForegroundEvidenceActionSmoke
             ? CreateEvidenceActionSmokeReleaseCatalog()
@@ -1104,6 +1106,19 @@ internal sealed class AgentHost
                     : definition.Id == FeatureIds.EventTelemetry
                         ? FeatureReleaseState.Published
                         : definition.State,
+                definition.Dependencies)));
+    }
+
+    private static IFeatureCatalog CreateFiveSourceValidationReleaseCatalog()
+    {
+        var current = CurrentEducationalReleaseProfile.Catalog;
+        return new FeatureCatalog(
+            $"{current.ReleaseId}-five-source-validation",
+            current.Features.Select(definition => new FeatureDefinition(
+                definition.Id,
+                definition.Id == FeatureIds.EventTelemetry
+                    ? FeatureReleaseState.Published
+                    : definition.State,
                 definition.Dependencies)));
     }
 

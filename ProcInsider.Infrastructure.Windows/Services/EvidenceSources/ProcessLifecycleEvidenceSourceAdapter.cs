@@ -86,7 +86,7 @@ public sealed class ProcessLifecycleEvidenceSourceAdapter
             _ => ProcessObservationKind.RuntimeLifecycle
         };
         var metadata = JsonSerializer.Serialize(new { producer = input.Producer.ToString() });
-        var items = input.Processes.Select(process =>
+        var normalizedItems = input.Processes.Select(process =>
         {
             var observedUtc = process.Status == ProcessStatus.Exited
                 ? process.EndTime?.ToUniversalTime() ?? input.ObservedUtc
@@ -106,12 +106,24 @@ public sealed class ProcessLifecycleEvidenceSourceAdapter
                 includeStatistics: false,
                 metadataJson: metadata);
         }).ToArray();
+        var items = normalizedItems
+            .DistinctBy(item => item.Observation.ObservationId)
+            .ToArray();
 
-        return await PublishAsync(request, items, publisher, progress, cancellationToken).ConfigureAwait(false);
+        return await PublishAsync(
+            request,
+            input.Processes.Count,
+            normalizedItems.Length - items.Length,
+            items,
+            publisher,
+            progress,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask<EvidenceSourceExecutionResult> PublishAsync(
         EvidenceSourceAdapterRequest request,
+        int receivedCount,
+        int inputDuplicateCount,
         IReadOnlyList<ProcessObservationAdapterItem> items,
         IEvidenceSourcePublisher publisher,
         IProgress<EvidenceSourceProgress>? progress,
@@ -120,7 +132,7 @@ public sealed class ProcessLifecycleEvidenceSourceAdapter
         var rowsPerItem = 1 + Math.Max(1, items.Select(item => item.Aliases.Count).DefaultIfEmpty(1).Max());
         var batchSize = Math.Max(1, GetEffectiveBatchRowLimit(Descriptor, publisher) / rowsPerItem);
         var persisted = 0L;
-        var duplicate = 0L;
+        var duplicate = (long)inputDuplicateCount;
         var sequence = 0;
         var diagnostics = new List<EvidenceSourceDiagnostic>();
         try
@@ -153,7 +165,7 @@ public sealed class ProcessLifecycleEvidenceSourceAdapter
                 {
                     AdapterId = Id,
                     SourceRunId = request.SourceRunId,
-                    ReceivedCount = items.Count,
+                    ReceivedCount = receivedCount,
                     NormalizedCount = Math.Min(items.Count, sequence * batchSize),
                     PersistedCount = persisted,
                     DuplicateCount = duplicate,
@@ -182,7 +194,7 @@ public sealed class ProcessLifecycleEvidenceSourceAdapter
             return new EvidenceSourceExecutionResult
             {
                 State = persisted > 0 ? EvidenceSourceCompletionState.Partial : EvidenceSourceCompletionState.Failed,
-                ReceivedCount = items.Count,
+                ReceivedCount = receivedCount,
                 NormalizedCount = items.Count,
                 PersistedCount = persisted,
                 DuplicateCount = duplicate,
@@ -194,7 +206,7 @@ public sealed class ProcessLifecycleEvidenceSourceAdapter
         return new EvidenceSourceExecutionResult
         {
             State = EvidenceSourceCompletionState.Completed,
-            ReceivedCount = items.Count,
+            ReceivedCount = receivedCount,
             NormalizedCount = items.Count,
             PersistedCount = persisted,
             DuplicateCount = duplicate,

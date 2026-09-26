@@ -117,6 +117,9 @@ public partial class EventsViewModel : ViewModelBase
     public string EventSourceDisplayName =>
         string.IsNullOrWhiteSpace(_eventSource) ? "All sources" : _eventSource;
 
+    /// <summary>Native profile columns are meaningful only for sources with bundled native schemas.</summary>
+    public bool HasNativeProfileDetails => _eventSource is "PowerShell" or "Sysmon";
+
     /// <summary>
     /// Loads recent events for the selected process.
     /// </summary>
@@ -212,6 +215,7 @@ public partial class EventsViewModel : ViewModelBase
 
     partial void OnSelectedEventChanged(EventRowViewModel? value)
     {
+        RefreshSecurityProfileSelection();
         if (value == null)
         {
             _inspectorPaneViewModel.Clear("Select a row in Data to inspect its additional properties.");

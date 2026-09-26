@@ -741,7 +741,8 @@ public static class AgentCommandFeaturePolicy
             [AgentCommandKind.StartLiveCaptureSource] = Dynamic(
                 ResolverKind.LiveCaptureSource,
                 [agents],
-                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents])
+                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents]),
+            [AgentCommandKind.RunTelemetryAuditTest] = Static(agents, FeatureIds.WindowsSecurityEvents)
         };
 
         EnsureCoverage(

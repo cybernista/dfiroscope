@@ -1,0 +1,125 @@
+<UserControl x:Class="ProcInsider.Features.InvestigationWorkspaces.ExplorerSectionsView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:vm="clr-namespace:ProcInsider.ViewModels"
+ xmlns:local="clr-namespace:ProcInsider.Features.InvestigationWorkspaces"
+ xmlns:agent="clr-namespace:ProcInsider.Views.Features.Agents"
+ xmlns:search="clr-namespace:ProcInsider.Views.Features.Search"
+ xmlns:ai="clr-namespace:ProcInsider.Views.Features.Ai"
+ xmlns:network="clr-namespace:ProcInsider.Views.Features.Network"
+ xmlns:memory="clr-namespace:ProcInsider.Views.Features.Memory"
+ xmlns:presentation="clr-namespace:ProcInsider.Services.Presentation"
+ presentation:ViewerPresentationContext.SharedActions="{Binding SharedActions}">
+ <UserControl.Resources>
+   <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries>
+    <ResourceDictionary Source="../../Views/Presentation/ViewerPresentationResources.xaml"/>
+   </ResourceDictionary.MergedDictionaries>
+   <DataTemplate DataType="{x:Type vm:AgentsViewModel}"><agent:ExplorerAgentsView/></DataTemplate>
+   <DataTemplate DataType="{x:Type vm:SigmaViewModel}"><search:ExplorerSigmaView/></DataTemplate>
+   <DataTemplate DataType="{x:Type vm:ProcessPresentationViewModel}"><ai:ExplorerAiView/></DataTemplate>
+   <DataTemplate DataType="{x:Type vm:NetworkCapturesViewModel}"><network:ExplorerNetworkView/></DataTemplate>
+   <DataTemplate DataType="{x:Type vm:MemoryInvestigationViewModel}"><memory:ExplorerMemoryView/></DataTemplate>
+   <local:ExplorerTreeItemStyleSelector x:Key="ExplorerItemStyles"/>
+   <BooleanToVisibilityConverter x:Key="SysmonGreenVisibility"/>
+   <Style x:Key="ProcessNodeStyle" TargetType="TreeViewItem">
+    <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=local:ExplorerSectionsView}}"/>
+    <Setter Property="ContextMenu"><Setter.Value><ContextMenu>
+     <MenuItem Header="Open in a new workspace" Command="{Binding PlacementTarget.Tag.OpenNewCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+    </ContextMenu></Setter.Value></Setter>
+   </Style>
+   <Style x:Key="EventCategoryStyle" TargetType="TreeViewItem">
+    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+   </Style>
+   <Style x:Key="EventsRootStyle" TargetType="TreeViewItem" BasedOn="{StaticResource EventCategoryStyle}">
+    <Setter Property="ContextMenu"><Setter.Value><ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+     <MenuItem Header="Refresh" Command="{Binding RefreshCommand}"/>
+
+    </ContextMenu></Setter.Value></Setter>
+   </Style>
+   <Style x:Key="IdentityCategoryStyle" TargetType="TreeViewItem" BasedOn="{StaticResource EventCategoryStyle}">
+    <Setter Property="Tag" Value="{Binding DataContext.Events, RelativeSource={RelativeSource AncestorType=local:ExplorerSectionsView}}"/>
+    <Setter Property="ToolTip" Value="{Binding Tag.IdentityRole, RelativeSource={RelativeSource Self}, StringFormat=Identity role: {0}. Right-click to change role.}"/>
+    <Setter Property="ContextMenu"><Setter.Value><ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
+     <MenuItem Header="Identity role" ItemsSource="{Binding IdentityRoles}">
+      <MenuItem.ItemContainerStyle><Style TargetType="MenuItem">
+       <Setter Property="Header" Value="{Binding}"/>
+       <Setter Property="Command" Value="{Binding DataContext.SetIdentityRoleCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+       <Setter Property="CommandParameter" Value="{Binding}"/>
+      </Style></MenuItem.ItemContainerStyle>
+     </MenuItem>
+    </ContextMenu></Setter.Value></Setter>
+   </Style>
+   <Style x:Key="EventPivotStyle" TargetType="TreeViewItem">
+    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+    <Setter Property="Tag" Value="{Binding DataContext.Events, RelativeSource={RelativeSource AncestorType=local:ExplorerSectionsView}}"/>
+    <Setter Property="ContextMenu"><Setter.Value><ContextMenu>
+     <MenuItem Header="Open in a new workspace" Command="{Binding PlacementTarget.Tag.OpenNewCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+    </ContextMenu></Setter.Value></Setter>
+   </Style>
+   <Style x:Key="SysmonNodeStyle" TargetType="TreeViewItem">
+    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+    <Setter Property="Tag" Value="{Binding DataContext.Events, RelativeSource={RelativeSource AncestorType=local:ExplorerSectionsView}}"/>
+    <Setter Property="ContextMenu"><Setter.Value><ContextMenu>
+     <MenuItem Header="Open in a new workspace" Command="{Binding PlacementTarget.Tag.OpenNewSysmonCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+    </ContextMenu></Setter.Value></Setter>
+   </Style>
+   <Style x:Key="EventPlaceholderStyle" TargetType="TreeViewItem"><Setter Property="IsEnabled" Value="False"/></Style>
+   <HierarchicalDataTemplate DataType="{x:Type local:EventsExplorerViewModel}" ItemsSource="{Binding Children}" ItemContainerStyleSelector="{StaticResource ExplorerItemStyles}">
+    <TextBlock Text="{Binding Header}" ToolTip="Recorded Events. Right-click to refresh."/>
+   </HierarchicalDataTemplate>
+   <HierarchicalDataTemplate DataType="{x:Type local:EventsExplorerSection}" ItemsSource="{Binding Children}" ItemContainerStyleSelector="{StaticResource ExplorerItemStyles}">
+    <StackPanel Orientation="Horizontal" Margin="1">
+     <Button Content="{Binding ScopeGlyph}" Style="{StaticResource ExplorerGreenButtonStyle}" ToolTip="{Binding ScopeStateDescription}"
+             Command="{Binding DataContext.Events.ToggleCategoryGreenCommand, RelativeSource={RelativeSource AncestorType=local:ExplorerSectionsView}}" CommandParameter="{Binding}"/>
+     <TextBlock Text="{Binding Header}" ToolTip="{Binding Status}" VerticalAlignment="Center"/>
+    </StackPanel>
+   </HierarchicalDataTemplate>
+   <HierarchicalDataTemplate DataType="{x:Type local:EventsPivot}" ItemsSource="{Binding Children}" ItemContainerStyleSelector="{StaticResource ExplorerItemStyles}">
+    <StackPanel Orientation="Horizontal" Margin="1">
+     <Button Content="{Binding ScopeGlyph}" Style="{StaticResource ExplorerGreenButtonStyle}"
+             ToolTip="{Binding ScopeStateDescription}"
+             Command="{Binding DataContext.Events.ToggleGreenCommand, RelativeSource={RelativeSource AncestorType=local:ExplorerSectionsView}}"
+             CommandParameter="{Binding}"/>
+     <TextBlock Text="{Binding Display}" ToolTip="{Binding ToolTip}" VerticalAlignment="Center"/>
+    </StackPanel>
+   </HierarchicalDataTemplate>
+   <HierarchicalDataTemplate DataType="{x:Type local:SysmonExplorerNode}" ItemsSource="{Binding Children}" ItemContainerStyleSelector="{StaticResource ExplorerItemStyles}">
+    <StackPanel Orientation="Horizontal" Margin="1">
+     <Button Content="{Binding ScopeGlyph}" Style="{StaticResource ExplorerGreenButtonStyle}" ToolTip="{Binding ScopeStateDescription}"
+             Visibility="{Binding CanGreenSelect, Converter={StaticResource SysmonGreenVisibility}}"
+             Command="{Binding DataContext.Events.ToggleSysmonGreenCommand, RelativeSource={RelativeSource AncestorType=local:ExplorerSectionsView}}"
+             CommandParameter="{Binding}"/>
+     <TextBlock Text="{Binding Display}" ToolTip="{Binding ToolTip}" VerticalAlignment="Center"/>
+    </StackPanel>
+   </HierarchicalDataTemplate>
+   <DataTemplate DataType="{x:Type local:EventsCategoryPlaceholder}"><TextBlock Text="{Binding Display}" Foreground="#666666"/></DataTemplate>
+   <DataTemplate DataType="{x:Type vm:ExplorerViewModel}">
+    <DockPanel>
+     <TextBlock DockPanel.Dock="Bottom" Text="{Binding DataContext.Events.Status, RelativeSource={RelativeSource AncestorType=local:ExplorerSectionsView}}" TextWrapping="Wrap" Foreground="#8B0000"/>
+     <TreeView ItemsSource="{Binding DataContext.Roots, RelativeSource={RelativeSource AncestorType=local:ExplorerSectionsView}}"
+               Tag="{Binding DataContext.ToggleGreenCommand, RelativeSource={RelativeSource AncestorType=local:ExplorerSectionsView}}"
+               ItemContainerStyleSelector="{StaticResource ExplorerItemStyles}"
+               VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+               BorderBrush="#FFD8D8D8" BorderThickness="1" AutomationProperties.AutomationId="WorkspaceExplorerProcesses"/>
+    </DockPanel>
+   </DataTemplate>
+  </ResourceDictionary>
+ </UserControl.Resources>
+ <Border BorderBrush="#FFD0D0D0" BorderThickness="0,0,1,0" Background="#FFFAFAFA">
+  <Grid>
+   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+   <Border Grid.Row="0" Background="#FFE8E8E8" Padding="7,4"><TextBlock Text="Explorer" FontWeight="SemiBold"/></Border>
+   <TabControl Grid.Row="1" ItemsSource="{Binding Sections}" SelectedItem="{Binding SelectedSection, Mode=TwoWay}" Margin="4">
+    <TabControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Header}"/></DataTemplate></TabControl.ItemTemplate>
+    <TabControl.ContentTemplate><DataTemplate>
+     <DockPanel>
+      <TextBlock DockPanel.Dock="Bottom" Text="{Binding Availability}" TextWrapping="Wrap" Foreground="#8B0000"/>
+      <ContentControl Content="{Binding Content}"/>
+     </DockPanel>
+    </DataTemplate></TabControl.ContentTemplate>
+   </TabControl>
+   <TextBlock Grid.Row="2" Text="{Binding Navigation.Status}" Padding="6,4" Foreground="#555555" TextWrapping="Wrap"/>
+  </Grid>
+ </Border>
+</UserControl>

@@ -1,0 +1,40 @@
+<UserControl x:Class="ProcInsider.Features.InvestigationWorkspaces.EventsComparisonView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <UserControl.Resources>
+  <DataTemplate x:Key="CurrentComparisonHeader"><StackPanel Width="225">
+   <TextBlock Text="Current selection" FontWeight="SemiBold"/>
+   <TextBlock Text="{Binding Header}" TextTrimming="CharacterEllipsis" MaxHeight="76" ToolTip="{Binding Header}"/>
+  </StackPanel></DataTemplate>
+  <DataTemplate x:Key="ComparisonHeader"><StackPanel Width="225">
+   <TextBlock Text="{Binding Header}" TextTrimming="CharacterEllipsis" MaxHeight="76" ToolTip="{Binding Header}"/>
+   <WrapPanel><Button Content="Inspect source" Command="{Binding DataContext.InspectComparisonCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}" Margin="2"/>
+    <Button Content="Remove" Command="{Binding DataContext.RemoveComparisonCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}" Margin="2"/></WrapPanel>
+  </StackPanel></DataTemplate>
+  <DataTemplate x:Key="ComparisonCell"><Border Padding="4"><Border.Style><Style TargetType="Border">
+   <Setter Property="Background" Value="Transparent"/><Style.Triggers><DataTrigger Binding="{Binding IsDifferent}" Value="True"><Setter Property="Background" Value="#FFFFD68A"/></DataTrigger></Style.Triggers>
+  </Style></Border.Style><TextBlock Text="{Binding Display}" Foreground="Black" TextTrimming="CharacterEllipsis" ToolTip="{Binding Detail}"/></Border></DataTemplate>
+ </UserControl.Resources>
+ <DockPanel Margin="4">
+  <StackPanel DockPanel.Dock="Top">
+   <WrapPanel>
+    <TextBlock Text="Fields" VerticalAlignment="Center" Margin="3"/><ComboBox Width="85" ItemsSource="{Binding ComparisonModes}" SelectedItem="{Binding ComparisonMode}"/>
+    <ToggleButton x:Name="ManualButton" Content="Choose manual fields" Margin="3"/>
+    <Popup PlacementTarget="{Binding ElementName=ManualButton}" IsOpen="{Binding IsChecked, ElementName=ManualButton}" StaysOpen="False">
+     <Border Background="White" BorderBrush="Gray" BorderThickness="1" Padding="6"><ListBox ItemsSource="{Binding ComparisonFields}" Width="620" MaxHeight="380" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True">
+      <ListBox.ItemTemplate><DataTemplate><CheckBox Content="{Binding Description}" IsChecked="{Binding IsSelected, Mode=TwoWay}"/></DataTemplate></ListBox.ItemTemplate>
+     </ListBox></Border>
+    </Popup>
+    <CheckBox Content="Differences only" IsChecked="{Binding ComparisonDifferencesOnly}" VerticalAlignment="Center" Margin="5"/>
+    <Button Content="Recompute" Command="{Binding RefreshComparisonCommand}" Margin="3"/>
+    <Button Content="Cancel comparison" Command="{Binding CancelComparisonCommand}" Margin="3"/>
+    <Button Content="Clear" Command="{Binding ClearComparisonCommand}" Margin="3"/>
+   </WrapPanel>
+   <TextBlock Text="{Binding ComparisonStatus}" TextWrapping="Wrap" Margin="2"/>
+  </StackPanel>
+  <DataGrid x:Name="ComparisonGrid" ItemsSource="{Binding ComparisonRows}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserSortColumns="False"
+   EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+   RowHeight="46" FrozenColumnCount="2" CanUserReorderColumns="False" AutomationProperties.AutomationId="EventsComparisonMatrix">
+   <DataGrid.Columns><DataGridTextColumn Header="Native type / path / occurrence" Binding="{Binding Description}" Width="230"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding Description}"/><Setter Property="TextTrimming" Value="CharacterEllipsis"/></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn></DataGrid.Columns>
+  </DataGrid>
+ </DockPanel>
+</UserControl>

@@ -40,6 +40,9 @@ public sealed class ConfigurableEtwService : IDisposable
     private string? _profilePath;
     private string? _profileDisplayName;
     private bool _isRunning;
+    private bool _hasActiveProviders;
+    private int _processingFailed;
+    private int _stoppingSession;
     private bool _disposed;
 
     public ConfigurableEtwService(
@@ -80,6 +83,12 @@ public sealed class ConfigurableEtwService : IDisposable
 
     public string StatusMessage { get; private set; } = "ETW collection is stopped.";
 
+    public bool HasActiveProviders
+    {
+        get { lock (_sync) return _hasActiveProviders && _session != null &&
+            _processingThread?.IsAlive == true && Volatile.Read(ref _processingFailed) == 0; }
+    }
+
     public void ConfigureProfile(string? profileId, string? profilePath, string? profileDisplayName)
     {
         lock (_sync)
@@ -105,8 +114,14 @@ public sealed class ConfigurableEtwService : IDisposable
     {
         lock (_sync)
         {
-            if (_isRunning || _disposed)
+            if (_disposed)
             {
+                return;
+            }
+
+            if (_isRunning)
+            {
+                if (!HasActiveProviders) RestartSession();
                 return;
             }
 
@@ -116,14 +131,15 @@ public sealed class ConfigurableEtwService : IDisposable
         }
     }
 
-    public void Stop()
+    public bool Stop()
     {
         lock (_sync)
         {
             _isRunning = false;
             StopConfigWatcher();
-            StopSession();
-            StatusMessage = "ETW collection is stopped.";
+            var stopped = StopSession();
+            if (stopped) StatusMessage = "ETW collection is stopped.";
+            return stopped;
         }
     }
 
@@ -204,8 +220,8 @@ public sealed class ConfigurableEtwService : IDisposable
             return;
         }
 
+        if (!StopSession()) return;
         _configuration = configuration;
-        StopSession();
         StartSession(configuration);
     }
 
@@ -281,15 +297,35 @@ public sealed class ConfigurableEtwService : IDisposable
             }
 
             _session.Source.Dynamic.All += OnEtwEvent;
+            Volatile.Write(ref _processingFailed, 0);
+            Volatile.Write(ref _stoppingSession, 0);
+            var profileName = GetProfileDisplayName(configuration);
+            StatusMessage = failedProviders.Count == 0
+                ? $"ETW collection started with profile '{profileName}' ({enabledCount} providers)."
+                : $"ETW collection started with profile '{profileName}' ({enabledCount} providers; failed: {string.Join("; ", failedProviders)}).";
+            _hasActiveProviders = enabledCount > 0;
             _processingThread = new Thread(() =>
             {
                 try
                 {
                     _session.Source.Process();
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Real-time ETW processing can stop during session disposal or privilege changes.
+                    if (Volatile.Read(ref _stoppingSession) == 0)
+                    {
+                        Volatile.Write(ref _processingFailed, 1);
+                        StatusMessage = $"ETW processing failed: {ex.Message}";
+                    }
+                }
+                finally
+                {
+                    if (Volatile.Read(ref _stoppingSession) == 0)
+                    {
+                        Volatile.Write(ref _processingFailed, 1);
+                        if (!StatusMessage.Contains("failed", StringComparison.OrdinalIgnoreCase))
+                            StatusMessage = "ETW processing stopped unexpectedly.";
+                    }
                 }
             })
             {
@@ -297,21 +333,19 @@ public sealed class ConfigurableEtwService : IDisposable
                 Name = $"{ProductIdentity.DisplayName} ETW"
             };
             _processingThread.Start();
-
-            var profileName = GetProfileDisplayName(configuration);
-            StatusMessage = failedProviders.Count == 0
-                ? $"ETW collection started with profile '{profileName}' ({enabledCount} providers)."
-                : $"ETW collection started with profile '{profileName}' ({enabledCount} providers; failed: {string.Join("; ", failedProviders)}).";
         }
         catch (Exception ex)
         {
-            StopSession();
-            StatusMessage = $"ETW collection failed to start: {ex.Message}";
+            var cleanupConfirmed = StopSession();
+            StatusMessage = cleanupConfirmed
+                ? $"ETW collection failed to start: {ex.Message}"
+                : $"ETW collection failed to start: {ex.Message}; ETW stop was not confirmed and its session may still be active.";
         }
     }
 
-    private void StopSession()
+    private bool StopSession()
     {
+        Volatile.Write(ref _stoppingSession, 1);
         try
         {
             if (_session != null)
@@ -321,18 +355,22 @@ public sealed class ConfigurableEtwService : IDisposable
                 _session = null;
             }
 
-            if (_processingThread != null && _processingThread.IsAlive)
+            if (_processingThread != null && _processingThread.IsAlive &&
+                !_processingThread.Join(TimeSpan.FromSeconds(2)))
             {
-                _processingThread.Join(TimeSpan.FromSeconds(2));
+                Volatile.Write(ref _processingFailed, 1);
+                StatusMessage = "ETW collection failed to stop: processing thread did not exit.";
+                return false;
             }
-        }
-        catch
-        {
-            // Best-effort shutdown.
-        }
-        finally
-        {
+            _hasActiveProviders = false;
             _processingThread = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Volatile.Write(ref _processingFailed, 1);
+            StatusMessage = $"ETW collection failed to stop: {ex.Message}";
+            return false;
         }
     }
 
@@ -341,6 +379,10 @@ public sealed class ConfigurableEtwService : IDisposable
         try
         {
             var eventDefinition = FindEventDefinition(traceEvent);
+            if (eventDefinition == null && !_configuration.Profile.CaptureUnmappedEvents)
+            {
+                return;
+            }
             var timestampUtc = traceEvent.TimeStamp.ToUniversalTime();
             var process = ResolveProcess(traceEvent, eventDefinition, timestampUtc);
             if (process == null)
@@ -870,6 +912,11 @@ public sealed class ConfigurableEtwService : IDisposable
 
     private static ProcessEventAction ResolveAction(TraceEvent traceEvent, EtwEventDefinition? eventDefinition)
     {
+        if (string.Equals(eventDefinition?.Action, nameof(ProcessEventAction.EtwEvent), StringComparison.OrdinalIgnoreCase))
+        {
+            return ProcessEventAction.EtwEvent;
+        }
+
         var configured = ParseAction(eventDefinition?.Action);
         if (configured != ProcessEventAction.EtwEvent)
         {

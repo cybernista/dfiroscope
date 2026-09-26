@@ -2,13 +2,21 @@
   "schemaVersion": 1,
   "profiles": [
     {
+      "id": "dfiroscope-sysmon-focused",
+      "kind": "Sysmon",
+      "displayName": "DFIRoscope Sysmon Focused",
+      "description": "Daily process, network, DNS and high-signal persistence telemetry with restricted LSASS access and registry changes.",
+      "warning": "Focused filtering omits many process-access, registry, DLL, pipe and file events. Applying it replaces active Sysmon rules; excluded events cannot be recovered later.",
+      "filePath": "DFIRoscope.Sysmon.Focused.xml",
+      "isDefault": true
+    },
+    {
       "id": "procinsider-sysmon-medium",
       "kind": "Sysmon",
       "displayName": "DFIRoscope Live Sysmon Medium",
       "description": "Broad selected-event Sysmon telemetry with known-good noise exclusions for process, network, file, registry, DNS, WMI, and tampering events.",
       "warning": "Applying this profile changes the local Sysmon configuration and may increase event volume.",
-      "filePath": "Procinsider.Sysmon.Medium.xml",
-      "isDefault": true
+      "filePath": "DFIRoscope.Sysmon.Medium.xml"
     },
     {
       "id": "procinsider-sysmon-quiet",
@@ -16,7 +24,39 @@
       "displayName": "DFIRoscope Live Sysmon Quiet",
       "description": "Lower-volume Sysmon telemetry focused on core IR process, network, DNS, persistence, and sensitive-access events.",
       "warning": "Applying this profile changes the local Sysmon configuration and can omit noisier diagnostic events.",
-      "filePath": "ProcInsider.Sysmon.Quiet.xml"
+      "filePath": "DFIRoscope.Sysmon.Quiet.xml"
+    },
+    {
+      "id": "swiftonsecurity-sysmon",
+      "kind": "Sysmon",
+      "displayName": "SwiftOnSecurity Sysmon config",
+      "description": "Upstream revision 1836897f; attribution and license in ThirdParty/ATTRIBUTION.md. Review and tune for this host before applying.",
+      "warning": "Upstream DNS and other rules can generate substantial telemetry. Applying this profile replaces active Sysmon rules.",
+      "filePath": "ThirdParty/SwiftOnSecurity.Sysmon.xml"
+    },
+    {
+      "id": "olafhartong-sysmon-balanced",
+      "kind": "Sysmon",
+      "displayName": "olafhartong Sysmon Modular Balanced",
+      "description": "Pre-generated Sysmon 15.21 balanced profile from release configs-082cba578667; attribution in ThirdParty/ATTRIBUTION.md.",
+      "warning": "Review upstream rules for host-specific volume. Applying this profile replaces active Sysmon rules.",
+      "filePath": "ThirdParty/olafhartong.Balanced.xml"
+    },
+    {
+      "id": "olafhartong-sysmon-balanced-filedelete",
+      "kind": "Sysmon",
+      "displayName": "olafhartong Sysmon Modular Balanced with FileDelete",
+      "description": "Pre-generated Sysmon 15.21 balanced profile with deleted-file archiving from release configs-082cba578667.",
+      "warning": "FileDelete archives deleted files and can consume substantial disk space. Applying this profile replaces active Sysmon rules.",
+      "filePath": "ThirdParty/olafhartong.BalancedWithFileDelete.xml"
+    },
+    {
+      "id": "olafhartong-sysmon-excludes-only",
+      "kind": "Sysmon",
+      "displayName": "olafhartong Sysmon Modular Excludes only",
+      "description": "Pre-generated Sysmon 15.21 exclusion-only profile from release configs-082cba578667; intended for short controlled investigations.",
+      "warning": "Extremely verbose; expect substantial event volume. Applying this profile replaces active Sysmon rules.",
+      "filePath": "ThirdParty/olafhartong.ExcludesOnly.xml"
     }
   ]
 }

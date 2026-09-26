@@ -25,6 +25,9 @@ public sealed class SqliteStagingQueryService
     private const int MaxSigmaAnalysisRecordsPerKind = 10000;
     private static readonly SigmaAnalysisEvaluator SigmaEvaluator = new();
     private readonly SqliteReadQueryContext _readContext;
+
+    // Same validated read policy used by the facade's focused query services.
+    internal SqliteReadQueryContext ReadContext => _readContext;
     private readonly ProcessListingQueryService _processListingQueries;
     private readonly SystemActivityCandidateQuery _systemActivityCandidates;
     private readonly ExplorerQueryService _explorerQueries;
@@ -664,6 +667,11 @@ public sealed class SqliteStagingQueryService
     /// <inheritdoc cref="GetProcessByKey"/>
     public Task<ProcessKeyLookupResult> GetProcessByKeyAsync(string processKey)
         => _processListingQueries.GetProcessByKeyAsync(processKey);
+
+    public IReadOnlyList<ProcessRecord> GetProcessesByExactScope(
+        ExplorerScope scope,
+        int maxCount = 2)
+        => _processListingQueries.GetProcessesByExactScope(scope, maxCount);
 
     public ProcessEntityLookupResult GetProcessByEntityId(string processEntityId)
         => _processListingQueries.GetProcessByEntityId(processEntityId);

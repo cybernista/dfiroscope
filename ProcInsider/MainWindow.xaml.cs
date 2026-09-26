@@ -19,7 +19,6 @@ public partial class MainWindow : Window
     private MainViewModel? _viewModel;
     private bool _closeConfirmed;
     private bool _closeWorkflowInProgress;
-    private bool _isRestoringProcessViewport;
 
     public MainWindow()
         : this(null)
@@ -35,12 +34,6 @@ public partial class MainWindow : Window
         // Create and set the view model
         _viewModel = new MainViewModel(
             infrastructureCaseWorkspaceDependencies: infrastructureCaseWorkspaceDependencies);
-        _viewModel.ProcessRowNavigationRequested += row =>
-            Dispatcher.BeginInvoke(
-                DispatcherPriority.Background,
-                new Action(() => ProcessDataGrid.ScrollIntoView(row)));
-        _viewModel.ProcessViewportAnchorCaptureRequested += CaptureProcessViewportAnchor;
-        _viewModel.ProcessViewportAnchorRestoreRequested += RestoreProcessViewportAnchor;
         DataContext = _viewModel;
     }
 
@@ -161,161 +154,9 @@ public partial class MainWindow : Window
         _closeWorkflowInProgress = false;
     }
 
-    /// <summary>
-    /// Handles DataGrid sorting to use custom tree-aware sorting for ProcessName.
-    /// </summary>
-    private void ProcessDataGrid_Sorting(object sender, DataGridSortingEventArgs e)
-    {
-        e.Handled = true; // We handle sorting ourselves
+    internal static void SynchronizeProcessSortIndicators(DataGrid grid, Func<string, ListSortDirection?> getDirection)
+        => Views.Presentation.ProcessInvestigationView.SynchronizeProcessSortIndicators(grid, getDirection);
 
-        if (_viewModel == null || e.Column.SortMemberPath == null)
-            return;
-
-        // Get column name for sorting
-        var columnName = e.Column.SortMemberPath;
-
-        _viewModel.SortVisibleProcessRows(columnName);
-        ApplyProcessSortIndicators(
-            ProcessDataGrid,
-            e.Column,
-            _viewModel.GetSortDirection(columnName));
-    }
-
-    private void ProcessDataGrid_TargetUpdated(object sender, DataTransferEventArgs e)
-    {
-        if (e.Property == ItemsControl.ItemsSourceProperty)
-            RestoreProcessSortIndicators();
-    }
-
-    private void ProcessDataGrid_Loaded(object sender, RoutedEventArgs e) => RestoreProcessSortIndicators();
-
-    private void RestoreProcessSortIndicators()
-    {
-        if (_viewModel != null)
-            SynchronizeProcessSortIndicators(ProcessDataGrid, _viewModel.GetSortDirection);
-    }
-
-    internal static void SynchronizeProcessSortIndicators(
-        DataGrid grid, Func<string, ListSortDirection?> getDirection)
-    {
-        // WPF clears column directions when ItemsSource changes. Restore only the
-        // presentation state; the Listing query/tree owner still orders the rows.
-        foreach (var column in grid.Columns)
-            column.SortDirection = getDirection(column.SortMemberPath);
-    }
-
-    internal static void ApplyProcessSortIndicators(
-        DataGrid grid,
-        DataGridColumn activeColumn,
-        ListSortDirection? direction)
-    {
-        ArgumentNullException.ThrowIfNull(grid);
-        ArgumentNullException.ThrowIfNull(activeColumn);
-
-        foreach (var column in grid.Columns)
-        {
-            column.SortDirection = ReferenceEquals(column, activeColumn) ? direction : null;
-        }
-    }
-
-    private void ProcessDataGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (sender is DataGrid grid && grid.SelectedItem is ProcessListingPlaceholder)
-        {
-            grid.UnselectAll();
-        }
-    }
-
-    private void ProcessDataGrid_LoadingRow(object sender, DataGridRowEventArgs e)
-    {
-        _viewModel?.RequestProcessListingRange(e.Row.GetIndex(), 1);
-    }
-
-    private void ProcessDataGrid_ScrollChanged(object sender, ScrollChangedEventArgs e)
-    {
-        if (!_isRestoringProcessViewport &&
-            (Math.Abs(e.VerticalChange) > double.Epsilon ||
-             Math.Abs(e.ViewportHeightChange) > double.Epsilon))
-        {
-            _viewModel?.NotifyProcessViewportChanged();
-        }
-    }
-
-    private ViewerProcessViewportAnchor? CaptureProcessViewportAnchor()
-    {
-        var row = FindVisualChildren<DataGridRow>(ProcessDataGrid)
-            .Select(candidate => new
-            {
-                Row = candidate,
-                Top = candidate.TranslatePoint(new Point(0, 0), ProcessDataGrid).Y
-            })
-            .Where(candidate =>
-                candidate.Row.DataContext is ProcessRowViewModel &&
-                candidate.Top + candidate.Row.ActualHeight > 0 &&
-                candidate.Top < ProcessDataGrid.ActualHeight)
-            .OrderBy(candidate => candidate.Top)
-            .FirstOrDefault();
-        if (row?.Row.DataContext is not ProcessRowViewModel process)
-        {
-            return null;
-        }
-
-        return new ViewerProcessViewportAnchor(
-            process.ProcessInfo.ProcessEntityId ?? string.Empty,
-            process.ProcessKey,
-            row.Top);
-    }
-
-    private void RestoreProcessViewportAnchor(ProcessRowViewModel row, double relativeOffset)
-    {
-        _isRestoringProcessViewport = true;
-        ProcessDataGrid.ScrollIntoView(row);
-        Dispatcher.BeginInvoke(
-            DispatcherPriority.Loaded,
-            new Action(() =>
-            {
-                try
-                {
-                    ProcessDataGrid.UpdateLayout();
-                    if (ProcessDataGrid.ItemContainerGenerator.ContainerFromItem(row) is not DataGridRow container ||
-                        FindVisualChild<ScrollViewer>(ProcessDataGrid) is not { } scrollViewer)
-                    {
-                        return;
-                    }
-
-                    var currentOffset = container.TranslatePoint(
-                        new Point(0, 0),
-                        ProcessDataGrid).Y;
-                    scrollViewer.ScrollToVerticalOffset(
-                        Math.Max(0, scrollViewer.VerticalOffset + currentOffset - relativeOffset));
-                }
-                finally
-                {
-                    _isRestoringProcessViewport = false;
-                }
-            }));
-    }
-
-    private static T? FindVisualChild<T>(DependencyObject parent)
-        where T : DependencyObject
-        => FindVisualChildren<T>(parent).FirstOrDefault();
-
-    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent)
-        where T : DependencyObject
-    {
-        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, index);
-            if (child is T match)
-            {
-                yield return match;
-            }
-
-            foreach (var descendant in FindVisualChildren<T>(child))
-            {
-                yield return descendant;
-            }
-        }
-    }
-
+    internal static void ApplyProcessSortIndicators(DataGrid grid, DataGridColumn activeColumn, ListSortDirection? direction)
+        => Views.Presentation.ProcessInvestigationView.ApplyProcessSortIndicators(grid, activeColumn, direction);
 }

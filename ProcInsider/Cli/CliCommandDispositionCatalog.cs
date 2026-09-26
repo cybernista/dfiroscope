@@ -123,18 +123,18 @@ internal static class CliCommandDispositionCatalog
             Runnable(AgentCommandKind.StopConfiguredCapture, CliCommandKind.CaptureStop,
                 CliSharedServiceBoundary.ViewerAgentCaptureActionService, FeatureIds.AgentsAndCapture,
                 "Configured capture stop uses authoritative shared capture state."),
-            Hidden(AgentCommandKind.StartProcessMonitorCapture, CliCommandKind.AgentProcessMonitorStart,
+            Runnable(AgentCommandKind.StartProcessMonitorCapture, CliCommandKind.AgentProcessMonitorStart,
                 CliSharedServiceBoundary.ViewerAgentToolActionService, FeatureIds.EventTelemetry,
-                "Process Monitor start is typed but hidden until Event Telemetry is published."),
-            Hidden(AgentCommandKind.StopProcessMonitorCapture, CliCommandKind.AgentProcessMonitorStop,
+                "Published Process Monitor start uses the typed shared tool action service."),
+            Runnable(AgentCommandKind.StopProcessMonitorCapture, CliCommandKind.AgentProcessMonitorStop,
                 CliSharedServiceBoundary.ViewerAgentToolActionService, FeatureIds.EventTelemetry,
-                "Process Monitor stop is typed but hidden until Event Telemetry is published."),
-            Hidden(AgentCommandKind.QueueProcessMonitorImport, CliCommandKind.AgentProcessMonitorImport,
+                "Published Process Monitor stop uses the typed shared tool action service."),
+            Runnable(AgentCommandKind.QueueProcessMonitorImport, CliCommandKind.AgentProcessMonitorImport,
                 CliSharedServiceBoundary.ViewerAgentToolActionService, FeatureIds.EventTelemetry,
-                "Process Monitor import is typed but hidden until Event Telemetry is published."),
-            Hidden(AgentCommandKind.QueueSqliteBenchmark, CliCommandKind.AgentSqliteBenchmarkStart,
+                "Published Process Monitor import uses the typed shared tool action service and bounded selected path."),
+            Runnable(AgentCommandKind.QueueSqliteBenchmark, CliCommandKind.AgentSqliteBenchmarkStart,
                 CliSharedServiceBoundary.ViewerAgentToolActionService, FeatureIds.EventTelemetry,
-                "The isolated benchmark is typed but hidden until Event Telemetry is published."),
+                "The published isolated benchmark uses the typed shared tool action service and never writes the live evidence database."),
             Compatibility(AgentCommandKind.StopEtwCapture,
                 "The former ETW-only stop discriminator remains an agent compatibility path; new CLI and WPF source control use StopLiveCaptureSource."),
             Runnable(AgentCommandKind.StopLiveCaptureSource, CliCommandKind.CaptureSourceStop,
@@ -145,7 +145,9 @@ internal static class CliCommandDispositionCatalog
                 "Typed source start uses shared authoritative source state."),
             Hidden(AgentCommandKind.QueueMemoryAcquisition, CliCommandKind.AgentMemoryAcquire,
                 CliSharedServiceBoundary.ViewerMemoryActionService, FeatureIds.SystemMemoryAndVolatility,
-                "System-memory acquisition is typed and confirmation-gated but hidden until its domain feature is published.")
+                "System-memory acquisition is typed and confirmation-gated but hidden until its domain feature is published."),
+            GuiOnly(AgentCommandKind.RunTelemetryAuditTest,
+                "Only the separate Telemetrios GUI may request a catalog-registered fixed audit test through an exact paired disposable local Agent; the DFIRoscope CLI exposes no audit executor.")
         ]);
 
     private static readonly IReadOnlyList<CliSurfaceOperationDisposition> SurfaceOperationsValue =

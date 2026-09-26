@@ -310,6 +310,38 @@ public static class EventSourceFamilyOwnershipCatalog
             .Distinct()
             .ToArray());
 
+    /// <summary>
+    /// Returns the operational assets eligible for a concrete publication profile. A source
+    /// asset is included only when its presentation, capture, and configuration owners are all
+    /// published; this keeps a partial aggregate candidate from carrying mutable host assets.
+    /// </summary>
+    public static IReadOnlyList<string> GetPublishedOperationalReleaseAssetRoots(IFeatureCatalog catalog)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        ValidateAgainstCatalog(catalog);
+
+        var active = DefinitionsValue
+            .Where(definition =>
+                catalog.IsPublished(definition.PresentationFeatureId) &&
+                catalog.IsPublished(definition.CaptureFeatureId) &&
+                catalog.IsPublished(definition.ConfigurationFeatureId))
+            .SelectMany(definition => definition.ReleaseAssetRoots)
+            .ToList();
+
+        // The two retained compatibility roots configure only non-Security families. They use
+        // the same complete aggregate closure as those families rather than a logical ID.
+        if (catalog.IsPublished(Models.Features.FeatureIds.EventTelemetry) &&
+            catalog.IsPublished(Models.Features.FeatureIds.SecurityMonitoringConfiguration))
+        {
+            active.AddRange(LegacySharedReleaseAssetRootsValue);
+        }
+
+        return new ReadOnlyCollection<string>(active
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(root => root, StringComparer.Ordinal)
+            .ToArray());
+    }
+
     public static bool TryGet(
         EventSourceFamilyKind family,
         out EventSourceFamilyOwnershipDefinition? definition) =>

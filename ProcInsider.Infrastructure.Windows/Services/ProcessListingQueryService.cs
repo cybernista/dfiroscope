@@ -18,7 +18,8 @@ namespace ProcInsider.Services;
 public interface IProcessListingQueryService
 {
     Task<ColumnFilterValuePage> GetColumnValuesAsync(ProcessListingFilterSet filters,
-        ProcessListingSortColumn column, string? search, int limit = 256, CancellationToken cancellationToken = default);
+        ProcessListingSortColumn column, string? search, int limit = 256, CancellationToken cancellationToken = default,
+        ColumnFilterValueSort sort = ColumnFilterValueSort.ValueAscending);
     int CountProcesses(
         ProcessListingFilterSet filters,
         CancellationToken cancellationToken = default);
@@ -38,6 +39,10 @@ public interface IProcessListingQueryService
     ProcessKeyLookupResult GetProcessByKey(string processKey);
 
     Task<ProcessKeyLookupResult> GetProcessByKeyAsync(string processKey);
+
+    IReadOnlyList<ProcessRecord> GetProcessesByExactScope(
+        ExplorerScope scope,
+        int maxCount = 2);
 
     ProcessEntityLookupResult GetProcessByEntityId(string processEntityId);
 
@@ -263,6 +268,69 @@ internal sealed partial class ProcessListingQueryService : IProcessListingQueryS
     /// <inheritdoc cref="GetProcessByKey"/>
     public Task<ProcessKeyLookupResult> GetProcessByKeyAsync(string processKey)
         => Task.Run(() => GetProcessByKey(processKey));
+
+    public IReadOnlyList<ProcessRecord> GetProcessesByExactScope(
+        ExplorerScope scope,
+        int maxCount = 2)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        if (string.IsNullOrWhiteSpace(scope.ProcessKey) ||
+            string.IsNullOrWhiteSpace(scope.CaseId) ||
+            string.IsNullOrWhiteSpace(scope.EvidenceSessionId) ||
+            string.IsNullOrWhiteSpace(scope.SourceIdentityId) ||
+            string.IsNullOrWhiteSpace(scope.HostId) ||
+            string.IsNullOrWhiteSpace(scope.ExecutionRootId) ||
+            maxCount <= 0)
+        {
+            return [];
+        }
+
+        using var connection = OpenListingConnection();
+        var processTable = GetProcessTable(connection);
+        if (!HasProcessCompatibilityScope(connection, processTable))
+        {
+            return [];
+        }
+
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT ProcessKey, ProcessId, ProcessGuid, StartTimeUtc, EndTimeUtc, Status,
+                   ModuleCaptureStatus, ModuleCount, ModuleLastCapturedUtc, ModuleCaptureError,
+                   HandleCaptureStatus, HandleCount, HandleLastCapturedUtc, HandleCaptureError,
+                   ParentProcessId, ParentProcessKey, ParentProcessName, ProcessName, ProcessPath,
+                   CommandLine, UserName, SessionId, Architecture, CpuUsage, MemoryUsageBytes,
+                   CompanyName, FileDescription, Sha256Hash, TreeDepth, FirstObservedUtc,
+                   LastObservedUtc, LastSource, CaseId, EvidenceSessionId, CaptureId,
+                   SourceIdentityId, HostId, ExecutionRootId, ProcessEntityId, ParentProcessEntityId
+            FROM {processTable}
+            WHERE ProcessKey = $ProcessKey
+              AND CaseId = $CaseId
+              AND EvidenceSessionId = $EvidenceSessionId
+              AND CaptureId = $CaptureId
+              AND SourceIdentityId = $SourceIdentityId
+              AND HostId = $HostId
+              AND ExecutionRootId = $ExecutionRootId
+            ORDER BY COALESCE(NULLIF(ProcessEntityId, ''), ProcessKey) COLLATE BINARY
+            LIMIT $MaxCount;
+            """;
+        command.Parameters.AddWithValue("$ProcessKey", scope.ProcessKey);
+        command.Parameters.AddWithValue("$CaseId", scope.CaseId);
+        command.Parameters.AddWithValue("$EvidenceSessionId", scope.EvidenceSessionId);
+        command.Parameters.AddWithValue("$CaptureId", scope.CaptureId);
+        command.Parameters.AddWithValue("$SourceIdentityId", scope.SourceIdentityId);
+        command.Parameters.AddWithValue("$HostId", scope.HostId);
+        command.Parameters.AddWithValue("$ExecutionRootId", scope.ExecutionRootId);
+        command.Parameters.AddWithValue("$MaxCount", Math.Clamp(maxCount, 1, 100));
+
+        var matches = new List<ProcessRecord>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            matches.Add(ReadProcess(reader));
+        }
+
+        return matches;
+    }
 
     public ProcessEntityLookupResult GetProcessByEntityId(string processEntityId)
     {
@@ -766,6 +834,8 @@ internal sealed partial class ProcessListingQueryService : IProcessListingQueryS
                     )
                     OR
                     (
+                        ({childAlias}.ParentProcessEntityId IS NULL OR {childAlias}.ParentProcessEntityId = '')
+                        AND
                         {childAlias}.ParentProcessKey = {parentAlias}.ProcessKey
                         AND {BuildIdentityMatchPredicate(childAlias, parentAlias)}
                     )

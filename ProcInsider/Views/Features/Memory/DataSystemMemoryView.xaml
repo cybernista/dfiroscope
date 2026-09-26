@@ -1,6 +1,7 @@
 <UserControl x:Class="ProcInsider.Views.Features.Memory.DataSystemMemoryView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:presentation="clr-namespace:ProcInsider.Services.Presentation">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -13,10 +14,10 @@
                     Command="{Binding RefreshMemoryInvestigationCommand}"
                     Padding="10,3" Margin="0,0,10,0"/>
             <Button Content="Import Image"
-                    Command="{Binding DataContext.QueueMemoryImageImportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Command="{Binding (presentation:ViewerPresentationContext.SharedActions).QueueMemoryImageImportCommand, RelativeSource={RelativeSource Self}}"
                     Padding="10,3" Margin="0,0,10,0"/>
             <Button Content="Run Volatility"
-                    Command="{Binding DataContext.QueueSelectedMemoryImageVolatilityAnalysisCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Command="{Binding (presentation:ViewerPresentationContext.SharedActions).QueueSelectedMemoryImageVolatilityAnalysisCommand, RelativeSource={RelativeSource Self}}"
                     Padding="10,3" Margin="0,0,10,0"/>
             <TextBlock Text="{Binding StatusMessage}"
                        VerticalAlignment="Center"

@@ -7,7 +7,8 @@ namespace ProcInsider.Services;
 internal sealed partial class ProcessListingQueryService
 {
     public Task<ColumnFilterValuePage> GetColumnValuesAsync(ProcessListingFilterSet filters,
-        ProcessListingSortColumn column, string? search, int limit = 256, CancellationToken cancellationToken = default)
+        ProcessListingSortColumn column, string? search, int limit = 256, CancellationToken cancellationToken = default,
+        ColumnFilterValueSort sort = ColumnFilterValueSort.ValueAscending)
         => Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -21,20 +22,28 @@ internal sealed partial class ProcessListingQueryService
                 limit = Math.Clamp(limit, 1, 1000);
                 var hasSearch = ColumnTextFilter.Normalize(search) != null;
                 command.CommandText = $"""
-                    SELECT DISTINCT CAST({expression} AS TEXT) AS FilterValue
+                    SELECT CAST({expression} AS TEXT) AS FilterValue, COUNT(*) AS MatchingCount
                     FROM {source}
                     WHERE ({(string.IsNullOrEmpty(where) ? "1=1" : where)})
                       AND {(hasSearch ? $"dfiroscope_column_match(CAST({expression} AS TEXT), $FacetSearch)" : "1=1")}
-                    ORDER BY FilterValue COLLATE BINARY LIMIT $FacetLimit;
+                    GROUP BY FilterValue COLLATE BINARY
+                    ORDER BY {sort switch
+                    {
+                        ColumnFilterValueSort.ValueAscending => "FilterValue COLLATE BINARY ASC",
+                        ColumnFilterValueSort.ValueDescending => "FilterValue COLLATE BINARY DESC",
+                        ColumnFilterValueSort.CountAscending => "MatchingCount ASC, FilterValue COLLATE BINARY ASC",
+                        ColumnFilterValueSort.CountDescending => "MatchingCount DESC, FilterValue COLLATE BINARY ASC",
+                        _ => throw new ArgumentOutOfRangeException(nameof(sort))
+                    }} LIMIT $FacetLimit;
                     """;
                 if (hasSearch) command.Parameters.AddWithValue("$FacetSearch", search!);
                 command.Parameters.AddWithValue("$FacetLimit", limit + 1);
                 using var reader = command.ExecuteReader();
-                var values = new List<string?>();
+                var values = new List<ColumnFilterValue>();
                 while (reader.Read())
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    values.Add(reader.IsDBNull(0) ? null : reader.GetString(0));
+                    values.Add(new(reader.IsDBNull(0) ? null : reader.GetString(0), reader.GetInt64(1)));
                 }
                 return new ColumnFilterValuePage(values.Take(limit).ToArray(), values.Count > limit);
             });

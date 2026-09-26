@@ -64,6 +64,38 @@ public sealed class ConfigProfileService
         return profiles.FirstOrDefault(profile => profile.IsDefault) ?? profiles.FirstOrDefault();
     }
 
+    private string? GetProfileDirectory(ConfigProfileKind kind)
+    {
+        return KindDirectories.TryGetValue(kind, out var directoryName)
+            ? Path.GetFullPath(Path.Combine(ConfigRoot, directoryName))
+            : null;
+    }
+
+    public string? ResolveBundledProfileFilePath(ConfigProfileDefinition profile)
+    {
+        var directory = GetProfileDirectory(profile.Kind);
+        if (directory == null || string.IsNullOrWhiteSpace(profile.ManifestDirectory) ||
+            !Path.GetFullPath(profile.ManifestDirectory).Equals(directory, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var path = ResolveProfileFilePath(profile);
+        return path != null && path.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            ? path
+            : null;
+    }
+
+    public string? GetBundledProfileFolder(ConfigProfileKind kind)
+    {
+        var profiles = GetProfiles(kind);
+        var root = GetProfileDirectory(kind);
+        return root != null && profiles.Count > 0 && profiles.All(profile =>
+            ResolveBundledProfileFilePath(profile) is { } path &&
+            path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            ? root : null;
+    }
+
     public string? ResolveProfileFilePath(ConfigProfileDefinition profile)
     {
         return ResolveProfileRelativePath(profile, profile.FilePath);

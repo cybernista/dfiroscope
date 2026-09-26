@@ -885,6 +885,20 @@ public static class SessionPathService
         Path.Combine(ResolveLocalAppDataDirectory(localAppDataDirectory), LocalDataRootFolderName,
             "Settings", "windows-security-details.json");
 
+    /// <summary>Shared current-user native event presentation profiles; never capture evidence.</summary>
+    public static string GetNativeEventProfilesPath(string? localAppDataDirectory = null) =>
+        Path.Combine(ResolveLocalAppDataDirectory(localAppDataDirectory), LocalDataRootFolderName,
+            "Settings", "native-event-profiles.json");
+
+    /// <summary>Saved Events column presets outside capture evidence.</summary>
+    public static string GetNativeEventPresetsPath(string? localAppDataDirectory = null) =>
+        Path.Combine(ResolveLocalAppDataDirectory(localAppDataDirectory), LocalDataRootFolderName,
+            "Settings", "native-event-presets.json");
+
+    /// <summary>Disposable viewer analysis outside opened capture packages; no fallback or evidence mutation.</summary>
+    internal static string GetEventsStatisticsPath() => Path.Combine(AppContext.BaseDirectory,
+        "Sessions", "Derived", "events-statistics-" + Guid.NewGuid().ToString("N") + ".sqlite");
+
     /// <summary>Machine-monitoring backups belong to the portable package, independently of captures.</summary>
     public static string GetMonitoringConfigurationDirectory(string? applicationBaseDirectory = null)
     {

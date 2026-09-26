@@ -21,8 +21,16 @@
      <StackPanel Visibility="{Binding IsValues, Converter={StaticResource BoolVisibility}}">
       <TextBox Text="{Binding ValueSearch, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Find distinct values" ToolTip="Find values (literal text, ignoring case)"/>
       <StackPanel Orientation="Horizontal" Margin="0,6"><Button Content="Select all values" Command="{Binding SelectAllCommand}" Padding="5,3"/><Button Content="Select none" Command="{Binding SelectNoneCommand}" Margin="6,0" Padding="5,3"/></StackPanel>
-      <ListBox ItemsSource="{Binding Choices}" Height="220" VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-       <ListBox.ItemTemplate><DataTemplate><CheckBox Content="{Binding Label}" IsChecked="{Binding IsChecked, Mode=TwoWay}" ToolTip="{Binding Label}"/></DataTemplate></ListBox.ItemTemplate>
+      <Grid Margin="0,0,0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="85"/><ColumnDefinition Width="17"/></Grid.ColumnDefinitions>
+       <Button Content="{Binding ValueSortHeader}" Command="{Binding SortValuesCommand}" HorizontalContentAlignment="Left" Padding="5,3" ToolTip="Sort all matching values by value"/>
+       <Button Grid.Column="1" Content="{Binding CountSortHeader}" Command="{Binding SortCountsCommand}" HorizontalContentAlignment="Right" Padding="5,3" ToolTip="Sort all matching values by matching row count"/>
+      </Grid>
+      <ListBox ItemsSource="{Binding Choices}" Height="220" VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Visible">
+       <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/></Style></ListBox.ItemContainerStyle>
+       <ListBox.ItemTemplate><DataTemplate><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="80"/></Grid.ColumnDefinitions>
+        <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" ToolTip="{Binding Label}"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis"/></CheckBox>
+        <TextBlock Grid.Column="1" Text="{Binding Count, StringFormat={}{0:N0}}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="5,0"/>
+       </Grid></DataTemplate></ListBox.ItemTemplate>
       </ListBox>
       <TextBlock Text="Loading values…" Visibility="{Binding IsLoading, Converter={StaticResource BoolVisibility}}"/>
       <TextBlock Text="{Binding ChoiceStatus}" TextWrapping="Wrap" Margin="0,5"/>

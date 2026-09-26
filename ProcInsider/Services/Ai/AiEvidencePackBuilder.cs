@@ -18,6 +18,7 @@ public sealed class AiEvidencePackBuilder
 {
     private const int MaxRowsPerSource = 25;
     private readonly TelemetryProjectionService _projectionService;
+    private readonly IAiInvestigationTools _investigationTools;
     private readonly ApplicationInfoResolutionService _applicationInfoResolver;
     private AnnotationDatabaseService? _annotationStore;
 
@@ -27,6 +28,7 @@ public sealed class AiEvidencePackBuilder
         ApplicationCatalogService? applicationCatalog = null)
     {
         _projectionService = projectionService;
+        _investigationTools = new AiInvestigationTools(projectionService);
         _annotationStore = annotationStore;
         _applicationInfoResolver = new ApplicationInfoResolutionService(applicationCatalog);
     }
@@ -38,6 +40,7 @@ public sealed class AiEvidencePackBuilder
         ProcessInfo process,
         IEnumerable<AiEvidenceSourceKind> selectedSources)
     {
+        using var readScope = _projectionService.BeginReadScope();
         var sources = selectedSources.Distinct().ToList();
         var evidence = new StringBuilder();
         var summary = new List<string>();
@@ -49,6 +52,7 @@ public sealed class AiEvidencePackBuilder
         evidence.AppendLine();
 
         AppendProcessIdentity(evidence, process);
+        AppendInvestigationContext(evidence, process);
         AppendEvidenceRelations(evidence, process);
 
         foreach (var source in sources)
@@ -115,6 +119,58 @@ public sealed class AiEvidencePackBuilder
             EvidenceText = evidence.ToString(),
             Summary = string.Join("; ", summary)
         };
+    }
+
+    private void AppendInvestigationContext(StringBuilder builder, ProcessInfo process)
+    {
+        var context = _investigationTools.GetProcessContext(new AiProcessContextRequest(
+            new AiProcessReference(
+                process.ProcessEntityId,
+                process.GetUniqueKey(),
+                process.CaseId,
+                process.EvidenceSessionId,
+                process.CaptureId,
+                process.SourceIdentityId,
+                process.HostId,
+                process.ExecutionRootId),
+            MaxRowsPerSource,
+            MaxRowsPerSource));
+
+        builder.AppendLine("## AI Investigation Process Context");
+        builder.AppendLine($"Availability: {context.Availability}");
+        builder.AppendLine($"Read path: {context.Diagnostics.StatusCode}");
+        builder.AppendLine($"Status: {context.StatusMessage}");
+        if (context.SelectedProcess is { } selected)
+        {
+            builder.AppendLine($"Selected: Entity={selected.Reference.ProcessEntityId}; Key={selected.Reference.ProcessKey}; Name={selected.ProcessName}; PID={selected.ProcessId}; Path={selected.ProcessPath}; Status={selected.Status}");
+        }
+        if (context.ParentProcess is { } parent)
+        {
+            builder.AppendLine($"Parent: Entity={parent.Reference.ProcessEntityId}; Key={parent.Reference.ProcessKey}; Name={parent.ProcessName}; PID={parent.ProcessId}");
+        }
+        else
+        {
+            builder.AppendLine($"Parent: {context.ParentAvailability}; {context.ParentStatusMessage}");
+        }
+
+        var childCount = context.ChildCountIsExact
+            ? context.ObservedChildCount.ToString()
+            : $">={context.ObservedChildCount}";
+        builder.AppendLine($"Immediate children: observed={childCount}; included={context.ImmediateChildren.Count}; truncated={context.ChildrenTruncated}");
+        foreach (var child in context.ImmediateChildren)
+        {
+            builder.AppendLine($"- Child Entity={child.Reference.ProcessEntityId}; Key={child.Reference.ProcessKey}; Name={child.ProcessName}; PID={child.ProcessId}; Status={child.Status}");
+        }
+
+        var eventCount = context.EventCountIsExact
+            ? context.ObservedEventCount.ToString()
+            : $">={context.ObservedEventCount}";
+        builder.AppendLine($"Related events: observed={eventCount}; included={context.RelatedEvents.Count}; truncated={context.EventsTruncated}");
+        foreach (var processEvent in context.RelatedEvents)
+        {
+            builder.AppendLine($"- Time={processEvent.TimestampUtc:O}; Seq={processEvent.SequenceId}; EventCode={processEvent.EventCode}; Category={processEvent.Category}; Action={processEvent.Action}; Target={processEvent.Target}; Summary={processEvent.Summary}; Details={processEvent.Details}; RiskFlags={processEvent.RiskFlags}; RepeatCount={processEvent.RepeatCount}; SourceRunId={processEvent.SourceRunId}");
+        }
+        builder.AppendLine();
     }
 
     private static void AppendProcessIdentity(StringBuilder builder, ProcessInfo process)

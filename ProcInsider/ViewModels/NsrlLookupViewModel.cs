@@ -257,6 +257,8 @@ public partial class NsrlLookupViewModel : ViewModelBase
         }
     }
 
+    internal void CancelPendingLookup() => InvalidateLookup("Evidence refresh canceled the lookup.", clearRecords: false);
+
     [RelayCommand(CanExecute = nameof(CanRefreshLookup))]
     private Task RefreshLookupAsync()
     {

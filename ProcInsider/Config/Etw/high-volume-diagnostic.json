@@ -75,25 +75,25 @@
       "Events": [
         {
           "Id": 12,
-          "Name": "FileCreate",
+          "Name": "FileCreateOrOpen",
           "Category": "File",
-          "Action": "FileCreate",
+          "Action": "EtwEvent",
           "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
-          "TargetFields": [ "FileName", "FilePath", "Path", "FileObject" ]
+          "TargetFields": [ "OpenPath", "FileName", "FilePath", "Path", "FileObject" ]
         },
         {
           "Id": 14,
-          "Name": "FileDelete",
+          "Name": "FileClose",
           "Category": "File",
-          "Action": "FileDelete",
+          "Action": "EtwEvent",
           "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
           "TargetFields": [ "FileName", "FilePath", "Path", "FileObject" ]
         },
         {
           "Id": 15,
-          "Name": "FileRename",
+          "Name": "FileRead",
           "Category": "File",
-          "Action": "FileRename",
+          "Action": "EtwEvent",
           "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
           "TargetFields": [ "FileName", "FilePath", "Path", "FileObject" ]
         }
@@ -108,9 +108,9 @@
       "Events": [
         {
           "Id": 1,
-          "Name": "RegistryCreateKey",
+          "Name": "RegistryCreateOrOpenKey",
           "Category": "Registry",
-          "Action": "RegistryCreateKey",
+          "Action": "EtwEvent",
           "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
           "TargetFields": [ "KeyName", "KeyPath", "ObjectName" ]
         },
@@ -132,9 +132,9 @@
         },
         {
           "Id": 7,
-          "Name": "RegistryDeleteKey",
+          "Name": "RegistryQueryValueKey",
           "Category": "Registry",
-          "Action": "RegistryDeleteKey",
+          "Action": "EtwEvent",
           "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
           "TargetFields": [ "KeyName", "KeyPath", "ObjectName" ]
         }
@@ -149,6 +149,14 @@
       "Events": [
         {
           "Id": 10,
+          "Name": "NetworkEvent",
+          "Category": "Network",
+          "Action": "EtwEvent",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "daddr", "destaddr", "DestinationAddress", "saddr", "SourceAddress" ]
+        },
+        {
+          "Id": 12,
           "Name": "TcpConnect",
           "Category": "Network",
           "Action": "Connect",
@@ -159,7 +167,7 @@
           "Id": 42,
           "Name": "UdpSend",
           "Category": "Network",
-          "Action": "Connect",
+          "Action": "EtwEvent",
           "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
           "TargetFields": [ "daddr", "destaddr", "DestinationAddress", "saddr", "SourceAddress" ]
         }

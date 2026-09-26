@@ -79,7 +79,7 @@ public sealed class WindowsSettingsTransferViewModel : ViewModelBase
         OnPropertyChanged(nameof(Details));
     }
     public bool IsLoading { get; }
-    public string Title => IsLoading ? "Restore saved config" : "Save current computer configuration";
+    public string Title => IsLoading ? "Restore saved Security config" : "Save current computer configuration";
     public string ActionLabel => IsLoading ? "Restore selected settings" : "Save selected settings...";
     public string Details { get; private set; } = string.Empty;
     public ObservableCollection<WindowsSettingsAreaSelection> Areas { get; } = [];

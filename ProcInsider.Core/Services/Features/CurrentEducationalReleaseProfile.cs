@@ -8,7 +8,7 @@ namespace ProcInsider.Services.Features;
 /// </summary>
 public static class CurrentEducationalReleaseProfile
 {
-    public const string ReleaseId = "edu-2026.08-core-process-agent-infra-g1-readyhidden-r4";
+    public const string ReleaseId = "workspaces-2026.09-m2-events-v1";
 
     public static IFeatureCatalog Catalog { get; } = BuildCatalog();
 
@@ -38,10 +38,12 @@ public static class CurrentEducationalReleaseProfile
         {
             Published(FeatureIds.ProcessListing),
             Published(FeatureIds.SelectedProcessDetails, FeatureIds.ProcessListing),
+            Published(FeatureIds.InvestigationWorkspaces, FeatureIds.ProcessListing, FeatureIds.SelectedProcessDetails),
+            Published(FeatureIds.EventsWorkspace, FeatureIds.InvestigationWorkspaces),
             ReadyHidden(FeatureIds.ProcessRiskScore, FeatureIds.ProcessListing, FeatureIds.SelectedProcessDetails),
             ReadyHidden(FeatureIds.ApplicationComparison, FeatureIds.SelectedProcessDetails),
             ReadyHidden(FeatureIds.ModulesAndHandles, FeatureIds.SelectedProcessDetails),
-            ReadyHidden(FeatureIds.EventTelemetry, FeatureIds.ProcessListing),
+            Published(FeatureIds.EventTelemetry, FeatureIds.ProcessListing),
             InDevelopment(FeatureIds.RuntimeEvents, FeatureIds.ProcessListing),
             InDevelopment(FeatureIds.EtwEvents, FeatureIds.ProcessListing),
             Published(FeatureIds.WindowsSecurityEvents, FeatureIds.ProcessListing),
@@ -61,7 +63,7 @@ public static class CurrentEducationalReleaseProfile
                 FeatureIds.SelectedProcessDetails,
                 FeatureIds.ApplicationComparison),
             ReadyHidden(FeatureIds.KnownFileReferenceData, FeatureIds.SelectedProcessDetails),
-            ReadyHidden(FeatureIds.SecurityMonitoringConfiguration, FeatureIds.AgentsAndCapture),
+            Published(FeatureIds.SecurityMonitoringConfiguration, FeatureIds.AgentsAndCapture),
             ReadyHidden(FeatureIds.InfrastructureMode),
             ReadyHidden(FeatureIds.InfrastructureAgentManagement, FeatureIds.InfrastructureMode),
             ReadyHidden(FeatureIds.InfrastructureCaseWorkspaces, FeatureIds.InfrastructureMode),

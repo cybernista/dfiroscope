@@ -44,16 +44,14 @@
       <CopyToOutputDirectory Condition="'$(PublishWindowsSecurityEvents)' == 'true'">PreserveNewest</CopyToOutputDirectory>
       <CopyToOutputDirectory Condition="'$(PublishWindowsSecurityEvents)' != 'true'">Never</CopyToOutputDirectory>
     </None>
+    <None Update="Config\Etw\**\*.*;Config\etw-providers.json;Config\EventLogs\**\*.*;Config\PowerShellAuditing\**\*.*;Config\SecurityMonitoring\**\*.*;Config\Sysmon\**\*.*;Sysmon\**\*.*">
+      <CopyToOutputDirectory Condition="'$(PublishEventTelemetry)' == 'true' And '$(PublishSecurityMonitoringConfiguration)' == 'true'">PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory Condition="'$(PublishEventTelemetry)' != 'true' Or '$(PublishSecurityMonitoringConfiguration)' != 'true'">Never</CopyToOutputDirectory>
+    </None>
     <None Remove="Config\ApplicationCatalog\catalog.index.json" />
     <None Remove="Config\ApplicationCatalog\Profiles\**\*.json" />
     <None Remove="Config\ApplicationCatalog\catalog-quality.v1.json" />
     <None Remove="Config\ApplicationCatalog\README.md" />
-    <Content Include="Sysmon\Procinsider.Sysmon.Medium.xml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Sysmon\ProcInsider.Sysmon.Quiet.xml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
     <Content Include="dfiroscope.cmd">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <TargetPath>dfiroscope.cmd</TargetPath>

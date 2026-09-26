@@ -1,4 +1,5 @@
 using ProcInsider.Models;
+using ProcInsider.Features.NativeEventProfiles;
 using System.Collections.Generic;
 
 namespace ProcInsider.ViewModels;
@@ -13,16 +14,19 @@ public class EventRowViewModel : ViewModelBase
     public EventRowViewModel(ProcessEventInfo eventInfo, string? eventSource = null)
     {
         _eventInfo = eventInfo;
-        Description = string.Equals(eventSource, "Security", System.StringComparison.OrdinalIgnoreCase)
-            ? WindowsSecurityEventDescriptions.GetDescription(eventInfo.EventCode)
-            : string.Empty;
+        // Legacy selected-process Security projections predate retained provider/channel fields.
+        // That established source has one exact native identity; other source families never infer one.
+        Description = eventInfo.RawProvider.Length == 0 && eventInfo.RawLogName.Length == 0 &&
+            string.Equals(eventSource, "Security", System.StringComparison.OrdinalIgnoreCase)
+            ? EventsTextProjection.Describe(eventInfo.EventCode, "Microsoft-Windows-Security-Auditing", "Security")
+            : EventsTextProjection.Describe(eventInfo.EventCode, eventInfo.RawProvider, eventInfo.RawLogName);
     }
 
     public long SequenceId => _eventInfo.SequenceId;
     public System.DateTime TimestampUtc => _eventInfo.TimestampUtc;
     public int? EventCode => _eventInfo.EventCode;
     public string Description { get; }
-    private string _detailsSummary = "No details definition";
+    private string _detailsSummary = "Profile Details pending";
     public string DetailsSummary { get => _detailsSummary; internal set => SetProperty(ref _detailsSummary, value); }
     public string TimeDisplay => _eventInfo.GetDisplayTime();
     public string EventCodeDisplay => _eventInfo.EventCode?.ToString() ?? string.Empty;
@@ -32,6 +36,8 @@ public class EventRowViewModel : ViewModelBase
     public string Target => _eventInfo.Target;
     public string Summary => _eventInfo.Summary;
     public string Details => _eventInfo.Details;
+    public string RawProvider => _eventInfo.RawProvider;
+    public string RawLogName => _eventInfo.RawLogName;
     public string RiskFlags => _eventInfo.RiskFlags;
     public bool IsInteresting => _eventInfo.IsInteresting;
     public int RepeatCount => _eventInfo.RepeatCount;

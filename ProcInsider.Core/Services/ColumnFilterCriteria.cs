@@ -43,4 +43,28 @@ public sealed record ColumnFilterCriteria
     }
 }
 
-public sealed record ColumnFilterValuePage(IReadOnlyList<string?> Values, bool HasMore);
+public enum ColumnFilterValueSort { ValueAscending, ValueDescending, CountAscending, CountDescending }
+
+public sealed record ColumnFilterValue(string? Value, long Count);
+
+public sealed record ColumnFilterValuePage(IReadOnlyList<ColumnFilterValue> Entries, bool HasMore)
+{
+    public IReadOnlyList<string?> Values => Entries.Select(entry => entry.Value).ToArray();
+
+    /// <summary>Group the full matching input before sorting and bounding the displayed values.</summary>
+    public static ColumnFilterValuePage FromValues(IEnumerable<string?> values, ColumnFilterValueSort sort, int limit = 256)
+    {
+        var groups = values.GroupBy(value => value, StringComparer.Ordinal)
+            .Select(group => new ColumnFilterValue(group.Key, group.LongCount()));
+        var ordered = sort switch
+        {
+            ColumnFilterValueSort.ValueAscending => groups.OrderBy(entry => entry.Value, StringComparer.Ordinal),
+            ColumnFilterValueSort.ValueDescending => groups.OrderByDescending(entry => entry.Value, StringComparer.Ordinal),
+            ColumnFilterValueSort.CountAscending => groups.OrderBy(entry => entry.Count).ThenBy(entry => entry.Value, StringComparer.Ordinal),
+            ColumnFilterValueSort.CountDescending => groups.OrderByDescending(entry => entry.Count).ThenBy(entry => entry.Value, StringComparer.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(sort))
+        };
+        var page = ordered.Take(limit + 1).ToArray();
+        return new(page.Take(limit).ToArray(), page.Length > limit);
+    }
+}

@@ -145,12 +145,18 @@ public sealed class ViewerHostMonitoringActionService
         _portableStore = portableStore ?? (() => new MonitoringConfigurationStore());
     }
 
-    /// <summary>Validate the published source scope and exact current transfer target.</summary>
-    public void RequireCurrentSettingsTarget(ViewerHostMonitoringActionTarget target)
+    /// <summary>Validate the published source scope and exact current Agent/workspace target.</summary>
+    public void RequireCurrentTarget(ViewerHostMonitoringActionTarget target)
     {
         var invalid = ValidateTarget(ViewerHostMonitoringActionKind.GetConfiguration, target);
         if (invalid != null) throw new InvalidOperationException(invalid.Diagnostic);
-        if (!_runtime.IsCurrent(target)) throw new InvalidOperationException("The selected Agent/workspace changed; settings transfer canceled.");
+        if (!_runtime.IsCurrent(target)) throw new InvalidOperationException("The selected Agent/workspace changed; monitoring action canceled.");
+    }
+
+    /// <summary>Validate the Windows Security scope required by current-settings transfer.</summary>
+    public void RequireCurrentSettingsTarget(ViewerHostMonitoringActionTarget target)
+    {
+        RequireCurrentTarget(target);
         if (!AgentHostMonitoringConfigurationAreas.IsWindowsSecurityOnly(ResolveAreas(target)))
             throw new InvalidOperationException("Current-settings transfer requires the published Windows Security scope.");
     }
@@ -458,6 +464,35 @@ public sealed class ViewerHostMonitoringActionService
             configuration,
             AgentMonitoringDeploymentAction.Reverse,
             result);
+    }
+
+    public async Task<ViewerHostMonitoringActionResult> ResetSysmonToFactoryDefaultsAsync(
+        ViewerHostMonitoringActionTarget target,
+        CancellationToken cancellationToken = default)
+    {
+        var saved = await GetConfigurationAsync(target, cancellationToken).ConfigureAwait(false);
+        if (!saved.Succeeded || saved.Response?.HostMonitoringConfiguration is not { } configuration)
+            return saved with { Action = ViewerHostMonitoringActionKind.ReverseDeployment };
+        if (!HasExactSavedIdentity(configuration))
+            return Rejected(ViewerHostMonitoringActionKind.ReverseDeployment,
+                "HostMonitoringConfigurationIdentityMissing",
+                "The Agent did not return an exact monitoring configuration identity.");
+        var result = await ExecuteCommandAsync(
+            ViewerHostMonitoringActionKind.ReverseDeployment,
+            target,
+            new ReverseHostMonitoringDeploymentCommand
+            {
+                AgentId = target.AgentId,
+                HostId = target.HostId,
+                ConfigurationVersion = configuration.ConfigurationVersion,
+                ConfigurationHash = configuration.ConfigurationHash,
+                ConfigurationAreas = [AgentConfigurationAreaKind.Sysmon],
+                ResetSysmonToFactoryDefaults = true
+            },
+            "restore Sysmon monitoring to factory defaults",
+            cancellationToken).ConfigureAwait(false);
+        return ValidateDeploymentResult(target, configuration, AgentMonitoringDeploymentAction.Reverse, result,
+            factoryReset: true);
     }
 
     private async Task<ViewerHostMonitoringActionResult> CheckConfigurationCoreAsync(
@@ -1205,7 +1240,8 @@ public sealed class ViewerHostMonitoringActionService
         ViewerHostMonitoringActionTarget target,
         AgentHostMonitoringConfiguration configuration,
         AgentMonitoringDeploymentAction expectedAction,
-        ViewerHostMonitoringActionResult result)
+        ViewerHostMonitoringActionResult result,
+        bool factoryReset = false)
     {
         if (!result.Succeeded)
         {
@@ -1289,6 +1325,12 @@ public sealed class ViewerHostMonitoringActionService
                 Diagnostic = FormatAgentFailureDiagnostic(deployment.LastError)
             };
         }
+
+        if (factoryReset)
+            return areas is [{ Area: AgentConfigurationAreaKind.Sysmon, OriginalStateRestored: false }]
+                ? result
+                : Rejected(result.Action, "SysmonFactoryResetResultInvalid",
+                    "The Agent did not return one Sysmon factory-reset result.");
 
         return !baseline.BaselineExists ||
                !string.Equals(baseline.AgentId, target.AgentId, StringComparison.Ordinal) ||

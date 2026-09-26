@@ -1,10 +1,14 @@
 {
   "schemaVersion": 1,
-  "editionId": "edu2",
-  "editionLabel": "EDU2",
+  "editionId": "0.3.0",
+  "editionLabel": "0.3.0",
   "publishedGroups": [
     "agents-capture",
+    "event-telemetry",
+    "events-workspace",
+    "investigation-workspaces",
     "process-listing",
+    "security-monitoring-configuration",
     "selected-process-details",
     "windows-security-events"
   ]

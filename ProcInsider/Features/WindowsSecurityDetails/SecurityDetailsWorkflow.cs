@@ -1,46 +1,40 @@
 using System.Windows;
-using Microsoft.Win32;
-using ProcInsider.Services;
+using ProcInsider.Features.NativeEventProfiles;
 using ProcInsider.ViewModels;
 
 namespace ProcInsider.Features.WindowsSecurityDetails;
 
-/// <summary>Published Security module owns configuration, dialog lifetime and revision notifications.</summary>
+/// <summary>Security presentation lifetime bridge to the shared native-profile owner.</summary>
 public sealed class SecurityDetailsWorkflow : IDisposable
 {
     private readonly EventsViewModel _events;
-    private readonly SecurityDetailsStore _store;
+    private readonly NativeEventProfileStore _profiles;
+    private readonly SecurityDetailsStore _legacy;
     private bool _disposed;
-    public SecurityDetailsWorkflow(EventsViewModel events)
+
+    internal SecurityDetailsWorkflow(EventsViewModel events, NativeEventProfileStore profiles, SecurityDetailsStore legacy)
     {
         _events = events;
-        _store = new SecurityDetailsStore(SessionPathService.GetWindowsSecurityDetailsDefinitionsPath());
-        _events.ConfigureSecurityDetails(_store);
-        _store.Changed += OnChanged;
+        _profiles = profiles;
+        _legacy = legacy;
+        _events.ConfigureSecurityProfiles(profiles);
+        _events.OpenSecurityProfiles = () => ShowEditor(Application.Current?.MainWindow);
+        _profiles.Changed += OnChanged;
     }
     private void OnChanged(object? sender, EventArgs e) { if (!_disposed) _events.RefreshSecurityDetails(); }
+    internal NativeEventProfileEditorViewModel CreateEditor() => new(_profiles,
+        _events.SelectedEvent is { } row ? EventsViewModel.ExtractSecurityFields(row) : null,
+        _legacy.Snapshot().FirstOrDefault(d => d.EventId == _events.SelectedEvent?.EventCode), _legacy.LoadError,
+        type => type.Provider == SecurityDetailsTemplate.Provider && type.Channel == "Security");
     public void ShowEditor(Window? owner)
     {
         if (_disposed) return;
-        var dialog = new SecurityDetailsEditorWindow { Owner = owner };
-        dialog.DataContext = new SecurityDetailsEditorViewModel(_store, new Dialogs(dialog), () => _events.Events.ToArray());
-        dialog.ShowDialog();
+        new NativeEventProfileEditorWindow { Owner = owner, DataContext = CreateEditor() }.ShowDialog();
     }
-    public void Dispose() { _disposed = true; _store.Changed -= OnChanged; }
-
-    private sealed class Dialogs(Window owner) : ISecurityDetailsDialogs
+    public void Dispose()
     {
-        public string? ChooseImport()
-        {
-            var picker = new OpenFileDialog { Filter = "Details definitions (*.json)|*.json", CheckFileExists = true };
-            return picker.ShowDialog(owner) == true ? picker.FileName : null;
-        }
-        public string? ChooseExport()
-        {
-            var picker = new SaveFileDialog { Filter = "Details definitions (*.json)|*.json", FileName = "windows-security-details.json", DefaultExt = ".json", AddExtension = true };
-            return picker.ShowDialog(owner) == true ? picker.FileName : null;
-        }
-        public bool ConfirmDiscard() => MessageBox.Show(owner, "Discard unsaved definition edits? Saved definitions will remain in force.",
-            "Unsaved definitions", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+        _disposed = true;
+        _profiles.Changed -= OnChanged;
+        _events.OpenSecurityProfiles = null;
     }
 }

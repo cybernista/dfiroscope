@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DFIRoscope Sysmon Focused: daily capture with lower process-access and registry volume.
+  Event 10 records selected LSASS access only. The exact masks below are deliberately
+  restrictive; an access with a different mask will not be retained. Review local
+  Event 10 samples before broadening them. Sysmon has no registry-read event: 12-14
+  describe creation, deletion, modification and rename.
+-->
+<Sysmon schemaversion="4.90">
+  <HashAlgorithms>SHA256</HashAlgorithms>
+  <DnsLookup>false</DnsLookup>
+  <EventFiltering>
+    <!-- Preserve process execution, remote network and DNS context. -->
+    <ProcessCreate onmatch="exclude" />
+    <NetworkConnect onmatch="exclude">
+      <DestinationIp condition="is">127.0.0.1</DestinationIp>
+      <DestinationIp condition="is">::1</DestinationIp>
+      <DestinationHostname condition="is">localhost</DestinationHostname>
+    </NetworkConnect>
+    <DnsQuery onmatch="exclude" />
+
+    <!-- These are comparatively infrequent, high-value event families. -->
+    <DriverLoad onmatch="exclude" />
+    <CreateRemoteThread onmatch="exclude" />
+    <WmiEvent onmatch="exclude" />
+    <ProcessTampering onmatch="exclude" />
+
+    <!-- Selected high-rights LSASS opens; do not match every TargetImage=lsass.exe. -->
+    <RuleGroup name="DFIRoscope LSASS high-rights access" groupRelation="and">
+      <ProcessAccess onmatch="include">
+        <TargetImage condition="end with">\lsass.exe</TargetImage>
+        <GrantedAccess condition="is">0x1FFFFF</GrantedAccess>
+        <GrantedAccess condition="is">0x1F0FFF</GrantedAccess>
+        <GrantedAccess condition="is">0x1F3FFF</GrantedAccess>
+        <GrantedAccess condition="is">0x143A</GrantedAccess>
+        <GrantedAccess condition="is">0x1038</GrantedAccess>
+      </ProcessAccess>
+    </RuleGroup>
+    <!-- Any LSASS open by an executable launched from common staging locations. -->
+    <RuleGroup name="DFIRoscope LSASS staging-source access" groupRelation="and">
+      <ProcessAccess onmatch="include">
+        <TargetImage condition="end with">\lsass.exe</TargetImage>
+        <SourceImage condition="contains">\AppData\Local\Temp\</SourceImage>
+        <SourceImage condition="contains">\Users\Public\</SourceImage>
+        <SourceImage condition="contains">\Downloads\</SourceImage>
+      </ProcessAccess>
+    </RuleGroup>
+
+    <!-- Focus file creation on persistence locations, without global extension rules. -->
+    <FileCreate onmatch="include">
+      <TargetFilename condition="contains">\Start Menu\Programs\Startup\</TargetFilename>
+      <TargetFilename condition="contains">\Windows\System32\Tasks\</TargetFilename>
+      <TargetFilename condition="contains">\Windows\SysWOW64\Tasks\</TargetFilename>
+      <TargetFilename condition="contains">\Windows\System32\drivers\</TargetFilename>
+    </FileCreate>
+
+    <!-- Registry modifications for persistence, credential access and logging changes. -->
+    <RegistryEvent onmatch="include">
+      <TargetObject condition="contains">\CurrentVersion\Run\</TargetObject>
+      <TargetObject condition="contains">\CurrentVersion\RunOnce\</TargetObject>
+      <TargetObject condition="contains">\CurrentVersion\Policies\Explorer\Run\</TargetObject>
+      <TargetObject condition="contains">\Image File Execution Options\</TargetObject>
+      <TargetObject condition="contains">\SilentProcessExit\</TargetObject>
+      <TargetObject condition="contains">\Winlogon\Shell</TargetObject>
+      <TargetObject condition="contains">\Winlogon\Userinit</TargetObject>
+      <TargetObject condition="contains">\Schedule\TaskCache\Tree\</TargetObject>
+      <TargetObject condition="contains">\Control\Lsa\</TargetObject>
+      <TargetObject condition="contains">\SecurityProviders\WDigest\</TargetObject>
+      <TargetObject condition="contains">\Windows Defender\Exclusions\</TargetObject>
+      <TargetObject condition="contains">\Policies\Microsoft\Windows Defender\</TargetObject>
+      <TargetObject condition="contains">\PowerShell\ScriptBlockLogging\</TargetObject>
+      <TargetObject condition="contains">\PowerShell\ModuleLogging\</TargetObject>
+      <TargetObject condition="end with">\ImagePath</TargetObject>
+      <TargetObject condition="end with">\ServiceDll</TargetObject>
+    </RegistryEvent>
+  </EventFiltering>
+</Sysmon>

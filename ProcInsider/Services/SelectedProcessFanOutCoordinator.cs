@@ -172,6 +172,54 @@ public sealed class SelectedProcessFanOutCoordinator : IDisposable
     private CancellationTokenSource? _activeOperationCts;
     private SelectedProcessFanOutState _state;
     private bool _disposed;
+    private bool _suspended;
+    private int _activeConsumers;
+    private long _admissionGeneration;
+    private CancellationTokenSource _admissionCts = new();
+
+    public int ActiveConsumers => Volatile.Read(ref _activeConsumers);
+
+    public async Task QuiesceAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            _suspended = true;
+            _admissionGeneration++;
+            _admissionCts.Cancel();
+            _activeOperationCts?.Cancel();
+        }
+        while (ActiveConsumers != 0) await Task.Delay(25, cancellationToken);
+    }
+
+    public void Resume()
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            if (_admissionCts.IsCancellationRequested)
+            {
+                _admissionCts.Dispose();
+                _admissionCts = new();
+            }
+            _suspended = false;
+        }
+    }
+
+    public void InvalidateWorkspace(long workspaceGeneration)
+    {
+        SelectedProcessFanOutState state;
+        lock (_gate)
+        {
+            _activeOperationCts?.Cancel();
+            _boundConsumerKeys.Clear();
+            state = SelectedProcessFanOutState.Initial(workspaceGeneration) with
+            {
+                SelectionGeneration = checked(_state.SelectionGeneration + 1)
+            };
+            _state = state;
+        }
+        PublishState(state);
+    }
 
     public SelectedProcessFanOutCoordinator(
         long initialWorkspaceGeneration,
@@ -227,15 +275,17 @@ public sealed class SelectedProcessFanOutCoordinator : IDisposable
     {
         SelectedProcessFanOutState operationState;
         CancellationToken activeToken;
+        long admissionGeneration;
         lock (_gate)
         {
-            if (_disposed)
+            if (_disposed || _suspended)
             {
                 return CreateDisposedResultLocked();
             }
 
             operationState = _state;
-            activeToken = _activeOperationCts?.Token ?? _lifetimeCts.Token;
+            activeToken = _activeOperationCts?.Token ?? _admissionCts.Token;
+            admissionGeneration = _admissionGeneration;
         }
 
         IReadOnlyList<ISelectedProcessFanOutConsumer> consumers;
@@ -255,7 +305,7 @@ public sealed class SelectedProcessFanOutCoordinator : IDisposable
         var diagnostics = new List<SelectedProcessConsumerDiagnostic>();
         foreach (var consumer in NormalizeConsumers(consumers))
         {
-            if (!TryReserveConsumer(operationState, consumer.Key))
+            if (!TryReserveConsumer(operationState, consumer.Key, admissionGeneration))
             {
                 continue;
             }
@@ -296,6 +346,7 @@ public sealed class SelectedProcessFanOutCoordinator : IDisposable
             _activeOperationCts?.Cancel();
             _activeOperationCts?.Dispose();
             _activeOperationCts = null;
+            _admissionCts.Cancel();
             _lifetimeCts.Cancel();
             disposedState = _state with
             {
@@ -306,6 +357,7 @@ public sealed class SelectedProcessFanOutCoordinator : IDisposable
         }
 
         PublishState(disposedState);
+        _admissionCts.Dispose();
         _lifetimeCts.Dispose();
     }
 
@@ -325,9 +377,10 @@ public sealed class SelectedProcessFanOutCoordinator : IDisposable
 
         SelectedProcessFanOutState operationState;
         CancellationToken operationToken;
+        long admissionGeneration;
         lock (_gate)
         {
-            if (_disposed)
+            if (_disposed || _suspended)
             {
                 return CreateDisposedResultLocked();
             }
@@ -336,8 +389,10 @@ public sealed class SelectedProcessFanOutCoordinator : IDisposable
             _activeOperationCts?.Dispose();
             _activeOperationCts = CancellationTokenSource.CreateLinkedTokenSource(
                 _lifetimeCts.Token,
+                _admissionCts.Token,
                 cancellationToken);
             operationToken = _activeOperationCts.Token;
+            admissionGeneration = _admissionGeneration;
 
             var selectionGeneration = checked(_state.SelectionGeneration + 1);
             var context = row == null
@@ -372,7 +427,7 @@ public sealed class SelectedProcessFanOutCoordinator : IDisposable
         var pendingConsumers = new List<Task<SelectedProcessConsumerDiagnostic>>(consumers.Count);
         foreach (var consumer in consumers)
         {
-            if (!TryReserveConsumer(operationState, consumer.Key))
+            if (!TryReserveConsumer(operationState, consumer.Key, admissionGeneration))
             {
                 continue;
             }
@@ -384,26 +439,7 @@ public sealed class SelectedProcessFanOutCoordinator : IDisposable
                 operationToken));
         }
 
-        var diagnostics = new List<SelectedProcessConsumerDiagnostic>(pendingConsumers.Count);
-        foreach (var pendingConsumer in pendingConsumers)
-        {
-            var diagnostic = await pendingConsumer;
-            diagnostics.Add(diagnostic);
-
-            if (!IsCurrent(operationState))
-            {
-                return new SelectedProcessFanOutResult(
-                    SelectedProcessFanOutOutcome.Superseded,
-                    State);
-            }
-
-            if (diagnostic.Outcome is SelectedProcessConsumerOutcome.Canceled or
-                SelectedProcessConsumerOutcome.Superseded)
-            {
-                break;
-            }
-        }
-
+        var diagnostics = await Task.WhenAll(pendingConsumers);
         return PublishCompleted(operationState, diagnostics, cancellationToken);
     }
 
@@ -445,6 +481,7 @@ public sealed class SelectedProcessFanOutCoordinator : IDisposable
                 SelectedProcessConsumerOutcome.Failed,
                 ex.Message);
         }
+        finally { Interlocked.Decrement(ref _activeConsumers); }
     }
 
     private SelectedProcessFanOutResult PublishCompleted(
@@ -579,13 +616,14 @@ public sealed class SelectedProcessFanOutCoordinator : IDisposable
 
     private bool TryReserveConsumer(
         SelectedProcessFanOutState operationState,
-        string consumerKey)
+        string consumerKey, long admissionGeneration)
     {
         lock (_gate)
         {
-            return !_disposed &&
-                   IsCurrentLocked(operationState) &&
-                   _boundConsumerKeys.Add(consumerKey);
+            if (_disposed || _suspended || admissionGeneration != _admissionGeneration ||
+                !IsCurrentLocked(operationState) || !_boundConsumerKeys.Add(consumerKey)) return false;
+            Interlocked.Increment(ref _activeConsumers);
+            return true;
         }
     }
 

@@ -1,9 +1,11 @@
 ﻿<UserControl x:Class="ProcInsider.Views.Explorer.ExploreView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:presentation="clr-namespace:ProcInsider.Views.Presentation">
     <Grid>
         <TreeView
                   ItemsSource="{Binding RootNodes}"
+                  Tag="{Binding DataContext.ToggleExplorerGreenScopeCommand, RelativeSource={RelativeSource AncestorType=presentation:ExplorerPresentationView}}"
                   SelectedItemChanged="ExplorerTree_SelectedItemChanged"
                   PreviewMouseLeftButtonDown="ExplorerTree_PreviewMouseLeftButtonDown"
                   VirtualizingPanel.IsVirtualizing="True"

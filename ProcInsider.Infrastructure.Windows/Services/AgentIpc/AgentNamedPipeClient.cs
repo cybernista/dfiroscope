@@ -429,7 +429,8 @@ public sealed class AgentNamedPipeClient
         _useDefaultTimeout && request.Kind == AgentIpcRequestKind.SubmitCommand &&
         request.CommandKind is AgentCommandKind.CheckHostMonitoringConfiguration or
             AgentCommandKind.GetHostMonitoringConfiguration or AgentCommandKind.SaveHostMonitoringConfiguration or
-            AgentCommandKind.DeployHostMonitoringConfiguration or AgentCommandKind.ReverseHostMonitoringDeployment
+            AgentCommandKind.DeployHostMonitoringConfiguration or AgentCommandKind.ReverseHostMonitoringDeployment or
+            AgentCommandKind.RunTelemetryAuditTest
             ? TimeSpan.FromMinutes(2)
             : _timeout;
 

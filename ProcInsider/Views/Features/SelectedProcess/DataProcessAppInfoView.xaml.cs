@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using ProcInsider.ViewModels;
+using ProcInsider.Services.Presentation;
 
 namespace ProcInsider.Views.Features.SelectedProcess;
 
@@ -29,7 +30,7 @@ public partial class DataProcessAppInfoView : UserControl
         }
 
         _extensionTabs.Clear();
-        if (e.NewValue is not MainViewModel viewModel)
+        if (e.NewValue is not IAppInfoPresentation viewModel)
         {
             return;
         }

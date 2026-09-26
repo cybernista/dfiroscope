@@ -335,10 +335,16 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
 
     public void Shutdown()
     {
+        CancelPendingPresentationRequests();
+        Nsrl?.Shutdown();
+    }
+
+    internal void CancelPendingPresentationRequests()
+    {
         Interlocked.Exchange(ref _activeSelectionLoad, null)?.Cancel();
         CancelAiDraftRequest();
         SecurityAssessment?.Shutdown();
-        Nsrl?.Shutdown();
+        Nsrl?.CancelPendingLookup();
     }
 
     [RelayCommand]

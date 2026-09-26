@@ -4,6 +4,7 @@
     "DisplayName": "Process and Network Focused",
     "Description": "Lower-noise ETW profile focused on process lifecycle, image-load, network, DNS, and WMI activity.",
     "ExpectedVolume": "Low to Medium",
+    "CaptureUnmappedEvents": false,
     "RiskNote": "File and registry providers are disabled to reduce event volume; use Balanced or High-Volume Diagnostic when those artifacts matter.",
     "CorrelationHints": [
       "Use process lifecycle events to anchor PID plus start-time identity.",
@@ -75,6 +76,14 @@
       "Events": [
         {
           "Id": 10,
+          "Name": "NetworkEvent",
+          "Category": "Network",
+          "Action": "EtwEvent",
+          "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
+          "TargetFields": [ "daddr", "destaddr", "DestinationAddress", "saddr", "SourceAddress" ]
+        },
+        {
+          "Id": 12,
           "Name": "TcpConnect",
           "Category": "Network",
           "Action": "Connect",
@@ -85,7 +94,7 @@
           "Id": 42,
           "Name": "UdpSend",
           "Category": "Network",
-          "Action": "Connect",
+          "Action": "EtwEvent",
           "ProcessIdFields": [ "ProcessID", "ProcessId", "PID" ],
           "TargetFields": [ "daddr", "destaddr", "DestinationAddress", "saddr", "SourceAddress" ]
         }

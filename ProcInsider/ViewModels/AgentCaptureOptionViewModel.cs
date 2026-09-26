@@ -114,7 +114,7 @@ public partial class AgentCaptureOptionViewModel : ViewModelBase
         List<AgentCaptureOptionViewModel> options =
         [
             new(AgentCaptureOptionKind.ProcessLiveEvents, "Process/live events", "Runtime process snapshots and start/stop deltas.", true, true, true, true),
-            new(AgentCaptureOptionKind.EtwEvents, "ETW events", "Events from the selected bundled ETW capture profile.", false, true, true, true),
+            new(AgentCaptureOptionKind.EtwEvents, "ETW events (Extremely noisy/research only)", "Events from the selected bundled ETW capture profile.", false, true, true, true),
             new(AgentCaptureOptionKind.SecurityEvents, "Security events", "Windows Security event-log records correlated to processes.", true, true, true, true),
             new(AgentCaptureOptionKind.PowerShellEvents, "PowerShell events", "PowerShell operational logs and transcript-derived events.", true, true, true, true),
             new(AgentCaptureOptionKind.WindowsOtherEvents, "Windows events", "Supported non-Security Windows operational logs.", true, true, true, true),

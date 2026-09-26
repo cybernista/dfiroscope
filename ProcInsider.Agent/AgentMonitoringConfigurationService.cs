@@ -33,6 +33,7 @@ internal sealed partial class AgentMonitoringConfigurationService
     private readonly AgentSecurityAuditPolicyProfileResolver _securityAuditPolicyProfiles;
     private readonly AgentObjectAccessAuditingService _objectAccessAuditing;
     private readonly SysmonService _sysmonService;
+    private readonly Func<string, SysmonCurrentConfigurationResult> _sysmonConfigQuery;
     private readonly PowerShellAuditingService _powerShellAuditingService;
     private readonly TextWriter _log;
     private readonly MonitoringConfigurationStore _portableStore;
@@ -42,6 +43,7 @@ internal sealed partial class AgentMonitoringConfigurationService
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
         WriteIndented = true,
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
@@ -68,7 +70,10 @@ internal sealed partial class AgentMonitoringConfigurationService
         MonitoringConfigurationStore? portableStore = null,
         Func<AuditSubcategorySetting[]>? readSystemAuditPolicy = null,
         Func<string, WindowsSecuritySettingsSnapshot, string>? saveSettingsFolder = null,
-        Func<Guid, string>? auditPolicyDisplayName = null)
+        Func<Guid, string>? auditPolicyDisplayName = null,
+        PowerShellAuditingService? powerShellAuditingService = null,
+        SysmonService? sysmonService = null,
+        Func<string, SysmonCurrentConfigurationResult>? sysmonConfigQuery = null)
     {
         _sessionPaths = sessionPaths;
         _configurationChecks = configurationChecks;
@@ -78,8 +83,9 @@ internal sealed partial class AgentMonitoringConfigurationService
         _hostState = hostState ?? new WindowsAgentMonitoringHostStateAccessor();
         _auditPolicyBackup = auditPolicyBackup ?? BackupAuditPolicy;
         _processRunner = processRunner ?? RunProcess;
-        _sysmonService = new SysmonService(_configProfiles);
-        _powerShellAuditingService = new PowerShellAuditingService(_configProfiles);
+        _sysmonService = sysmonService ?? new SysmonService(_configProfiles);
+        _sysmonConfigQuery = sysmonConfigQuery ?? SysmonCurrentConfigurationReader.Query;
+        _powerShellAuditingService = powerShellAuditingService ?? new PowerShellAuditingService(_configProfiles);
         _log = log;
         _portableStore = portableStore ?? new MonitoringConfigurationStore();
         _readSystemAuditPolicy = readSystemAuditPolicy ?? WindowsSystemAuditPolicyReader.Read;
@@ -268,7 +274,7 @@ internal sealed partial class AgentMonitoringConfigurationService
         SaveOriginalState(previousState, command);
         var areaResults = AgentHostMonitoringConfigurationAreas.IsWindowsSecurityOnly(requestedAreas)
             ? DeployWindowsSecurity(configuration, previousState, requestedAreas, windowsSecurityPlan!, command)
-            : DeployLegacy(configuration, previousState, requestedAreas);
+            : DeployLegacy(configuration, previousState, requestedAreas, command);
 
         if (savedSettingsApply != null)
         {
@@ -294,6 +300,36 @@ internal sealed partial class AgentMonitoringConfigurationService
     private AgentMonitoringDeploymentResult ReverseHostMonitoringDeploymentCore(ReverseHostMonitoringDeploymentCommand command)
     {
         var startedAtUtc = DateTime.UtcNow;
+        if (command.ResetSysmonToFactoryDefaults)
+        {
+            if (command.ConfigurationAreas is not [AgentConfigurationAreaKind.Sysmon])
+                throw new InvalidOperationException("Factory reset requires an explicit Sysmon-only area selection.");
+            MonitoringDeploymentState? recorded = null;
+            var recoveryWarning = string.Empty;
+            try { recorded = TryReadDeploymentState(command); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
+                                       CryptographicException or JsonException or ArgumentException or NotSupportedException)
+            { recoveryWarning = "The existing monitoring recovery record could not be read: " + ex.Message; }
+            var area = ResetSysmonToFactoryDefaults();
+            if (area.Status == AgentConfigurationOperationStatus.Success && recorded != null)
+            {
+                try { ReconcileSysmonFactoryReset(recorded, command); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
+                                           CryptographicException or JsonException or ArgumentException or NotSupportedException)
+                { recoveryWarning = "Sysmon reset succeeded, but the saved monitoring state could not be updated: " + ex.Message; }
+            }
+            if (area.Status == AgentConfigurationOperationStatus.Success && recoveryWarning.Length > 0)
+                area = area with
+                {
+                    Status = AgentConfigurationOperationStatus.Warning,
+                    Message = area.Message + " Review the monitoring recovery record before another deployment.",
+                    TechnicalDetail = area.TechnicalDetail + Environment.NewLine + recoveryWarning
+                };
+            var reset = CreateResult(command, AgentMonitoringDeploymentAction.Reverse, startedAtUtc,
+                area.Status, [area], string.Empty, skipOriginalStateRead: true);
+            AppendLog(reset);
+            return reset;
+        }
         var configuration = TryReadConfiguration(command);
         var previousState = TryReadDeploymentState(command);
         if (configuration == null || previousState == null)
@@ -321,6 +357,13 @@ internal sealed partial class AgentMonitoringConfigurationService
             // Reversal is idempotent. Clear the uncertainty marker only after the host restore
             // returned successfully; a crash before the state save safely causes another restore.
             previousState.ProcessCommandLineMutationMayHaveOccurred = false;
+        }
+
+        if (areaResults.Any(result =>
+                result.Area == AgentConfigurationAreaKind.PowerShellAuditing &&
+                result.Status == AgentConfigurationOperationStatus.Success))
+        {
+            previousState.PowerShellMutationMayHaveOccurred = false;
         }
 
         var resultStatus = ResolveResultStatus(areaResults);
@@ -621,7 +664,9 @@ internal sealed partial class AgentMonitoringConfigurationService
             results.Add(DeployEventLogs(
                 configuration.EventLogs with { ChannelNames = ["Security"] },
                 AgentConfigurationAreaKind.WindowsSecurityEventLog,
-                plan.EventLogEntries));
+                plan.EventLogEntries,
+                previousState,
+                command));
         }
 
         return results;
@@ -630,25 +675,28 @@ internal sealed partial class AgentMonitoringConfigurationService
     private List<AgentMonitoringDeploymentAreaResult> DeployLegacy(
         AgentHostMonitoringConfiguration configuration,
         MonitoringDeploymentState previousState,
-        IEnumerable<AgentConfigurationAreaKind> requestedAreas)
+        IEnumerable<AgentConfigurationAreaKind> requestedAreas,
+        AgentConfigurationCommand command)
     {
         var areas = AgentHostMonitoringConfigurationAreas.ResolveEffective(requestedAreas);
         var results = new List<AgentMonitoringDeploymentAreaResult>();
         if (areas.Contains(AgentConfigurationAreaKind.Sysmon))
         {
-            results.Add(DeploySysmon(configuration.Sysmon));
+            results.Add(DeploySysmon(configuration.Sysmon, previousState, command));
         }
 
         if (areas.Contains(AgentConfigurationAreaKind.WindowsEventLogs))
         {
             results.Add(DeployEventLogs(
                 configuration.EventLogs,
-                AgentConfigurationAreaKind.WindowsEventLogs));
+                AgentConfigurationAreaKind.WindowsEventLogs,
+                previousState: previousState,
+                command: command));
         }
 
         if (areas.Contains(AgentConfigurationAreaKind.PowerShellAuditing))
         {
-            results.Add(DeployPowerShellAuditing(configuration.PowerShellAuditing, previousState));
+            results.Add(DeployPowerShellAuditing(configuration.PowerShellAuditing, previousState, command));
         }
 
         if (areas.Contains(AgentConfigurationAreaKind.Etw))
@@ -723,9 +771,11 @@ internal sealed partial class AgentMonitoringConfigurationService
         return results;
     }
 
-    private AgentMonitoringDeploymentAreaResult DeploySysmon(AgentSysmonMonitoringIntent intent)
+    private AgentMonitoringDeploymentAreaResult DeploySysmon(
+        AgentSysmonMonitoringIntent intent, MonitoringDeploymentState previousState,
+        AgentConfigurationCommand command)
     {
-        return TryArea(AgentConfigurationAreaKind.Sysmon, reverseSupported: false, () =>
+        return TryArea(AgentConfigurationAreaKind.Sysmon, reverseSupported: true, () =>
         {
             var profile = ResolveProfile(ConfigProfileKind.Sysmon, intent.ProfileId);
             var settings = _sysmonService.LoadSettings();
@@ -758,38 +808,74 @@ internal sealed partial class AgentMonitoringConfigurationService
                 };
             }
 
-            if (settings.IsInstalled)
+            _sysmonService.ValidateBundledConfigProfiles();
+            if (!string.IsNullOrWhiteSpace(intent.ProfileId) && profile == null)
             {
-                if (profile != null)
+                return new AgentMonitoringDeploymentAreaResult
                 {
-                    _sysmonService.ApplyBundledConfig(profile);
-                }
-                else
-                {
-                    _sysmonService.ApplyBundledConfig();
-                }
-            }
-            else if (profile != null)
-            {
-                _sysmonService.InstallWithBundledConfig(profile);
-            }
-            else
-            {
-                _sysmonService.InstallWithBundledConfig();
+                    Area = AgentConfigurationAreaKind.Sysmon,
+                    Status = AgentConfigurationOperationStatus.Failed,
+                    ReverseSupported = false,
+                    Message = "The requested Sysmon profile is not available from the source-owned profile manifest.",
+                    TechnicalDetail = intent.ProfileId
+                };
             }
 
+            if (!settings.IsInstalled || !settings.IsRunning || profile == null ||
+                !previousState.SysmonBaselineReadSucceeded ||
+                string.IsNullOrWhiteSpace(previousState.SysmonExecutablePath))
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = AgentConfigurationAreaKind.Sysmon,
+                    Status = AgentConfigurationOperationStatus.Unsupported,
+                    ReverseSupported = false,
+                    Message = "Sysmon apply requires a running installation and a readable pre-apply `sysmon -c` result.",
+                    TechnicalDetail = previousState.SysmonConfigurationSummary
+                };
+
+            var before = _sysmonConfigQuery(previousState.SysmonExecutablePath);
+            if (!before.Succeeded || before.Truncated ||
+                !string.Equals(before.Detail, previousState.SysmonConfigurationSummary, StringComparison.Ordinal))
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = AgentConfigurationAreaKind.Sysmon,
+                    Status = AgentConfigurationOperationStatus.Failed,
+                    ReverseSupported = false,
+                    Message = "Sysmon changed since its baseline was saved; no profile was applied.",
+                    TechnicalDetail = before.Detail
+                };
+
+            previousState.SysmonMutationMayHaveOccurred = true;
+            previousState.SysmonAppliedConfigurationSummary = string.Empty;
+            SaveOriginalState(previousState, command);
+            _sysmonService.ApplyBundledConfigToInstalled(profile, previousState.SysmonExecutablePath);
+            var applied = _sysmonConfigQuery(previousState.SysmonExecutablePath);
+            if (!applied.Succeeded || applied.Truncated || applied.NoRulesInstalled ||
+                !SysmonNetworkState(applied, enabled: true))
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = AgentConfigurationAreaKind.Sysmon,
+                    Status = AgentConfigurationOperationStatus.Failed,
+                    ReverseSupported = true,
+                    Message = "Sysmon accepted the profile command, but `sysmon -c` did not confirm rules and enabled network monitoring.",
+                    TechnicalDetail = applied.Detail
+                };
+            previousState.SysmonAppliedConfigurationSummary = applied.Detail;
+            SaveOriginalState(previousState, command);
             return new AgentMonitoringDeploymentAreaResult
             {
                 Area = AgentConfigurationAreaKind.Sysmon,
                 Status = AgentConfigurationOperationStatus.Success,
-                ReverseSupported = false,
-                Message = settings.IsInstalled
-                    ? "Sysmon configuration profile was applied."
-                    : "Sysmon install was requested with the selected bundled profile.",
-                TechnicalDetail = FirstNonEmpty(intent.ProfileDisplayName, intent.ProfileId, profile?.DisplayName ?? string.Empty)
+                ReverseSupported = true,
+                Message = "Sysmon profile applied, replacing the previous configuration; `sysmon -c` confirms rules and enabled network monitoring.",
+                TechnicalDetail = applied.Detail
             };
         });
     }
+
+    private static bool SysmonNetworkState(SysmonCurrentConfigurationResult result, bool enabled) =>
+        result.Detail.Split('\n').Any(line => line.Trim().Equals(
+            $"• Network connection: {(enabled ? "enabled" : "disabled")}", StringComparison.OrdinalIgnoreCase));
 
     private AgentMonitoringDeploymentAreaResult DeploySecurityAuditPolicy(
         AgentSecurityAuditMonitoringIntent intent,
@@ -902,7 +988,9 @@ internal sealed partial class AgentMonitoringConfigurationService
     private AgentMonitoringDeploymentAreaResult DeployEventLogs(
         AgentEventLogMonitoringIntent intent,
         AgentConfigurationAreaKind area,
-        IReadOnlyCollection<EventLogProfileEntry>? validatedEntries = null)
+        IReadOnlyCollection<EventLogProfileEntry>? validatedEntries = null,
+        MonitoringDeploymentState? previousState = null,
+        AgentConfigurationCommand? command = null)
     {
         return TryArea(area, reverseSupported: true, () =>
         {
@@ -964,12 +1052,22 @@ internal sealed partial class AgentMonitoringConfigurationService
                     var enableArguments = BuildEventLogEnableArguments(entry.Name, entry.Enable, area);
                     if (intent.ConfigureChannels && !string.IsNullOrWhiteSpace(enableArguments))
                     {
+                        RecordEventLogMutation(previousState, command, entry.Name, entry.Enable, null);
                         _processRunner("wevtutil.exe", enableArguments, true);
+                        ConfirmEventLogMutation(previousState, command, entry.Name, enableApplied: true, retentionApplied: false);
                     }
 
                     if (intent.ConfigureRetention && entry.SizeBytes > 0)
                     {
+                        RecordEventLogMutation(
+                            previousState,
+                            command,
+                            entry.Name,
+                            null,
+                            entry.SizeBytes,
+                            "Circular");
                         _processRunner("wevtutil.exe", $"sl \"{entry.Name}\" /ms:{entry.SizeBytes} /rt:false /ab:false", true);
+                        ConfirmEventLogMutation(previousState, command, entry.Name, enableApplied: false, retentionApplied: true);
                     }
 
                     messages.Add($"Configured {entry.Name}");
@@ -997,7 +1095,8 @@ internal sealed partial class AgentMonitoringConfigurationService
 
     private AgentMonitoringDeploymentAreaResult DeployPowerShellAuditing(
         AgentPowerShellMonitoringIntent intent,
-        MonitoringDeploymentState previousState)
+        MonitoringDeploymentState previousState,
+        AgentConfigurationCommand command)
     {
         return TryArea(AgentConfigurationAreaKind.PowerShellAuditing, reverseSupported: true, () =>
         {
@@ -1006,28 +1105,33 @@ internal sealed partial class AgentMonitoringConfigurationService
                 return Skipped(AgentConfigurationAreaKind.PowerShellAuditing, "PowerShell auditing deployment is disabled.");
             }
 
-            if (previousState.PowerShellStateAvailable == false)
+            if (!previousState.PowerShellPolicy.IsAvailable)
             {
                 return new AgentMonitoringDeploymentAreaResult
                 {
                     Area = AgentConfigurationAreaKind.PowerShellAuditing,
                     Status = AgentConfigurationOperationStatus.Failed,
                     ReverseSupported = false,
-                    Message = "PowerShell auditing state could not be captured; no policy write was attempted.",
-                    TechnicalDetail = previousState.PowerShellStateError
+                    Message = "PowerShell auditing policy state could not be captured; no policy write was attempted.",
+                    TechnicalDetail = previousState.PowerShellPolicy.Error
                 };
             }
 
+            previousState.PowerShellMutationMayHaveOccurred = true;
+            SaveOriginalState(previousState, command);
             _powerShellAuditingService.SetScriptBlockLogging(intent.EnableScriptBlockLogging);
+            CapturePowerShellAppliedState(previousState, command);
             _powerShellAuditingService.SetModuleLogging(intent.EnableModuleLogging);
+            CapturePowerShellAppliedState(previousState, command);
             _powerShellAuditingService.SetTranscription(intent.EnableTranscription, intent.TranscriptDirectory);
+            CapturePowerShellAppliedState(previousState, command);
 
             return new AgentMonitoringDeploymentAreaResult
             {
                 Area = AgentConfigurationAreaKind.PowerShellAuditing,
                 Status = AgentConfigurationOperationStatus.Success,
                 ReverseSupported = true,
-                Message = "PowerShell auditing registry policy was applied.",
+                Message = "PowerShell auditing registry policy was applied with exact per-root reversal provenance.",
                 TechnicalDetail = $"ScriptBlock={intent.EnableScriptBlockLogging}; module={intent.EnableModuleLogging}; transcription={intent.EnableTranscription}; transcriptPath={intent.TranscriptDirectory}."
             };
         });
@@ -1101,21 +1205,147 @@ internal sealed partial class AgentMonitoringConfigurationService
 
     private AgentMonitoringDeploymentAreaResult ReverseSysmon(MonitoringDeploymentState previousState)
     {
-        if (!WasDeploymentAreaApplied(previousState, AgentConfigurationAreaKind.Sysmon))
+        if (!previousState.SysmonMutationMayHaveOccurred &&
+            !WasDeploymentAreaApplied(previousState, AgentConfigurationAreaKind.Sysmon))
         {
             return Skipped(AgentConfigurationAreaKind.Sysmon, "Sysmon deployment was not applied; original state was retained for audit only.");
         }
 
-        return new AgentMonitoringDeploymentAreaResult
+        return TryArea(AgentConfigurationAreaKind.Sysmon, reverseSupported: true, () =>
         {
-            Area = AgentConfigurationAreaKind.Sysmon,
-            Status = AgentConfigurationOperationStatus.Unsupported,
-            ReverseSupported = false,
-            Message = "Sysmon removal is not automatic.",
-            TechnicalDetail = previousState.SysmonWasInstalled
-                ? $"Sysmon existed before deployment or ownership cannot be proven; {ProductIdentity.DisplayName} will not remove it automatically."
-                : "A Sysmon install may have been requested, but automatic removal is withheld until ownership can be proven."
-        };
+            if (!previousState.SysmonWasInstalled ||
+                !previousState.SysmonBaselineReadSucceeded || string.IsNullOrWhiteSpace(previousState.SysmonExecutablePath))
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = AgentConfigurationAreaKind.Sysmon,
+                    Status = AgentConfigurationOperationStatus.Unsupported,
+                    ReverseSupported = false,
+                    Message = "No verified Sysmon baseline is available; automatic restoration was withheld."
+                };
+            var current = _sysmonConfigQuery(previousState.SysmonExecutablePath);
+            if (!current.Succeeded || current.Truncated)
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = AgentConfigurationAreaKind.Sysmon,
+                    Status = AgentConfigurationOperationStatus.Failed,
+                    ReverseSupported = true,
+                    Message = "Current Sysmon configuration could not be verified; no reset command was started.",
+                    TechnicalDetail = current.Detail
+                };
+            if (!current.NoRulesInstalled || !SysmonNetworkState(current, enabled: false))
+            {
+                if (string.IsNullOrWhiteSpace(previousState.SysmonAppliedConfigurationSummary))
+                    return new AgentMonitoringDeploymentAreaResult
+                    {
+                        Area = AgentConfigurationAreaKind.Sysmon,
+                        Status = AgentConfigurationOperationStatus.Warning,
+                        ReverseSupported = true,
+                        Message = "Sysmon applied state was never verified; automatic reset was withheld for review.",
+                        TechnicalDetail = current.Detail
+                    };
+                if (!string.Equals(current.Detail, previousState.SysmonAppliedConfigurationSummary, StringComparison.Ordinal))
+                    return new AgentMonitoringDeploymentAreaResult
+                    {
+                        Area = AgentConfigurationAreaKind.Sysmon,
+                        Status = AgentConfigurationOperationStatus.Warning,
+                        ReverseSupported = true,
+                        Message = "Sysmon changed after application; reset was withheld to preserve the newer configuration.",
+                        TechnicalDetail = current.Detail
+                    };
+                _sysmonService.ResetInstalledToDefaults(previousState.SysmonExecutablePath);
+                current = _sysmonConfigQuery(previousState.SysmonExecutablePath);
+            }
+            if (!current.Succeeded || current.Truncated ||
+                !current.NoRulesInstalled || !SysmonNetworkState(current, enabled: false))
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = AgentConfigurationAreaKind.Sysmon,
+                    Status = AgentConfigurationOperationStatus.Failed,
+                    ReverseSupported = true,
+                    Message = "Sysmon reset was attempted, but `sysmon -c` did not confirm factory defaults.",
+                    TechnicalDetail = current.Detail
+                };
+            previousState.SysmonMutationMayHaveOccurred = false;
+            var exactBaseline = string.Equals(current.Detail, previousState.SysmonConfigurationSummary,
+                StringComparison.Ordinal);
+            return new AgentMonitoringDeploymentAreaResult
+            {
+                Area = AgentConfigurationAreaKind.Sysmon,
+                Status = exactBaseline ? AgentConfigurationOperationStatus.Success : AgentConfigurationOperationStatus.Warning,
+                ReverseSupported = true,
+                OriginalStateRestored = exactBaseline,
+                Message = exactBaseline
+                    ? "Sysmon reset to the recorded no-rules baseline with `sysmon -c --`."
+                    : "Sysmon reset to factory defaults with `sysmon -c --`; the previous configuration was not restored.",
+                TechnicalDetail = current.Detail + Environment.NewLine +
+                    "Recorded before apply:" + Environment.NewLine + previousState.SysmonConfigurationSummary
+            };
+        });
+    }
+
+    private AgentMonitoringDeploymentAreaResult ResetSysmonToFactoryDefaults() =>
+        TryArea(AgentConfigurationAreaKind.Sysmon, reverseSupported: false, () =>
+        {
+            var settings = _sysmonService.LoadSettings();
+            var executable = settings.IsServiceStateAvailable && settings.IsInstalled && settings.IsRunning
+                ? _sysmonService.FindInstalledSysmonExecutablePath()
+                : null;
+            if (string.IsNullOrWhiteSpace(executable))
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = AgentConfigurationAreaKind.Sysmon,
+                    Status = AgentConfigurationOperationStatus.Failed,
+                    Message = "Installed, running Sysmon could not be verified; factory reset was not started."
+                };
+            var before = _sysmonConfigQuery(executable);
+            if (!before.Succeeded || before.Truncated)
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = AgentConfigurationAreaKind.Sysmon,
+                    Status = AgentConfigurationOperationStatus.Failed,
+                    Message = "Current Sysmon settings could not be read; factory reset was not started.",
+                    TechnicalDetail = before.Detail
+                };
+            _sysmonService.ResetInstalledToDefaults(executable);
+            var after = _sysmonConfigQuery(executable);
+            var confirmed = after.Succeeded && !after.Truncated && after.NoRulesInstalled &&
+                            SysmonNetworkState(after, enabled: false);
+            return new AgentMonitoringDeploymentAreaResult
+            {
+                Area = AgentConfigurationAreaKind.Sysmon,
+                Status = confirmed ? AgentConfigurationOperationStatus.Success : AgentConfigurationOperationStatus.Failed,
+                Message = confirmed
+                    ? "Sysmon reset to factory defaults with `sysmon -c --`; previous rules were removed and network monitoring is disabled."
+                    : "Sysmon factory reset ran, but `sysmon -c` did not confirm no rules and disabled network monitoring.",
+                TechnicalDetail = "Before:" + Environment.NewLine + before.Detail + Environment.NewLine +
+                                  "After:" + Environment.NewLine + after.Detail
+            };
+        });
+
+    private void ReconcileSysmonFactoryReset(MonitoringDeploymentState state,
+        ReverseHostMonitoringDeploymentCommand command)
+    {
+        if (!string.Equals(state.AgentId, FirstNonEmpty(command.AgentId, AgentsViewModelLocalAgentId()), StringComparison.Ordinal) ||
+            !string.Equals(state.HostId, FirstNonEmpty(command.HostId, Environment.MachineName), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The recorded monitoring state belongs to a different Agent or host.");
+        var executable = _sysmonService.FindInstalledSysmonExecutablePath();
+        if (string.IsNullOrWhiteSpace(executable))
+            throw new InvalidOperationException("The registered Sysmon executable became unavailable after reset.");
+        var current = _sysmonConfigQuery(executable);
+        if (!current.Succeeded || current.Truncated || !current.NoRulesInstalled ||
+            !SysmonNetworkState(current, enabled: false))
+            throw new InvalidOperationException("Factory-default Sysmon state could not be reread for the monitoring record.");
+        state.SysmonExecutablePath = executable;
+        state.SysmonConfigurationSummary = current.Detail;
+        state.SysmonBaselineReadSucceeded = true;
+        state.SysmonBaselineNoRules = true;
+        state.SysmonMutationMayHaveOccurred = false;
+        state.SysmonAppliedConfigurationSummary = string.Empty;
+        state.AreaResults = state.AreaResults.Where(result => result.Area != AgentConfigurationAreaKind.Sysmon).ToArray();
+        state.LastRevertedUtc = null;
+        state.LastRevertStatus = AgentConfigurationOperationStatus.Unknown;
+        state.LastRevertAreaResults = [];
+        SaveOriginalState(state, command);
     }
 
     private AgentMonitoringDeploymentAreaResult ReverseSecurityAuditPolicy(MonitoringDeploymentState previousState)
@@ -1319,6 +1549,18 @@ internal sealed partial class AgentMonitoringConfigurationService
                 };
             }
 
+            if (previousState.EventLogMutations.Length == 0)
+            {
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = area,
+                    Status = AgentConfigurationOperationStatus.Unsupported,
+                    ReverseSupported = false,
+                    Message = "No confirmed application-owned event-log changes were recorded; no restore was attempted.",
+                    TechnicalDetail = "The captured baseline may predate mutation tracking or contain an untracked operation. Review current channel settings manually."
+                };
+            }
+
             var messages = new List<string>();
             var failures = 0;
             foreach (var entry in previousState.EventLogs)
@@ -1330,13 +1572,53 @@ internal sealed partial class AgentMonitoringConfigurationService
 
                 try
                 {
+                    var applied = previousState.EventLogMutations.FirstOrDefault(mutation =>
+                        string.Equals(mutation.Name, entry.Name, StringComparison.OrdinalIgnoreCase));
+                    if (applied != null)
+                    {
+                        var current = CaptureEventLogState(entry.Name);
+                        if (!current.StateAvailable)
+                        {
+                            failures++;
+                            messages.Add($"{entry.Name}: current state is unavailable; no restore was attempted. {current.StateError}");
+                            continue;
+                        }
+
+                        if ((applied.EnableApplied || applied.RetentionApplied) &&
+                            !MatchesEventLogAppliedState(
+                                current.IsEnabled,
+                                current.MaximumSizeInBytes,
+                                current.LogMode,
+                                applied.EnableApplied ? applied.IsEnabled : null,
+                                applied.RetentionApplied ? applied.MaximumSizeInBytes : null,
+                                applied.RetentionApplied ? applied.LogMode : null))
+                        {
+                            failures++;
+                            messages.Add($"{entry.Name}: current settings no longer match the application-owned deployment state; no restore was attempted to avoid overwriting third-party drift.");
+                            continue;
+                        }
+
+                        if ((applied.IsEnabled.HasValue && !applied.EnableApplied) ||
+                            (applied.MaximumSizeInBytes.HasValue && !applied.RetentionApplied))
+                        {
+                            failures++;
+                            messages.Add($"{entry.Name}: a previous change did not report completion; only confirmed settings were restored and the pending outcome requires manual review.");
+                        }
+                    }
+                    else
+                    {
+                        failures++;
+                        messages.Add($"{entry.Name}: no application-owned mutation record exists; no restore was attempted.");
+                        continue;
+                    }
+
                     var enableArguments = BuildEventLogRestoreEnableArguments(entry.Name, entry.IsEnabled, area);
-                    if (!string.IsNullOrWhiteSpace(enableArguments))
+                    if (!string.IsNullOrWhiteSpace(enableArguments) && (applied == null || applied.EnableApplied))
                     {
                         _processRunner("wevtutil.exe", enableArguments, true);
                     }
 
-                    if (entry.MaximumSizeInBytes > 0)
+                    if (entry.MaximumSizeInBytes > 0 && (applied == null || applied.RetentionApplied))
                     {
                         _processRunner("wevtutil.exe", $"sl \"{entry.Name}\" /ms:{entry.MaximumSizeInBytes}{BuildRetentionArguments(entry.LogMode)}", true);
                     }
@@ -1358,7 +1640,7 @@ internal sealed partial class AgentMonitoringConfigurationService
                 ReverseSupported = true,
                 Message = failures == 0
                     ? "Event-log settings were restored from the pre-deployment snapshot."
-                    : "Some event-log settings could not be restored.",
+                    : "Some event-log settings could not be restored safely; review the per-source outcomes.",
                 TechnicalDetail = string.Join("; ", messages)
             };
         });
@@ -1378,24 +1660,63 @@ internal sealed partial class AgentMonitoringConfigurationService
             };
         }
 
-        if (!WasDeploymentAreaApplied(previousState, AgentConfigurationAreaKind.PowerShellAuditing))
+        if (!previousState.PowerShellMutationMayHaveOccurred &&
+            !WasDeploymentAreaApplied(previousState, AgentConfigurationAreaKind.PowerShellAuditing))
         {
             return Skipped(AgentConfigurationAreaKind.PowerShellAuditing, "PowerShell auditing deployment was not applied; original state was retained for audit only.");
         }
 
         return TryArea(AgentConfigurationAreaKind.PowerShellAuditing, reverseSupported: true, () =>
         {
-            var previous = previousState.PowerShell;
-            _powerShellAuditingService.SetScriptBlockLogging(previous.ScriptBlockLoggingEnabled);
-            _powerShellAuditingService.SetModuleLogging(previous.ModuleLoggingEnabled);
-            _powerShellAuditingService.SetTranscription(previous.TranscriptionEnabled, previous.TranscriptPath);
+            var applied = previousState.PowerShellAppliedPolicy;
+            if (applied == null)
+            {
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = AgentConfigurationAreaKind.PowerShellAuditing,
+                    Status = AgentConfigurationOperationStatus.Unsupported,
+                    ReverseSupported = false,
+                    Message = "PowerShell auditing deployment has no confirmed application-owned policy snapshot; no restore was attempted.",
+                    TechnicalDetail = "Review the captured baseline and current policy manually."
+                };
+            }
+
+            var current = _powerShellAuditingService.CaptureManagedPolicySnapshot();
+            if (!current.IsAvailable)
+            {
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = AgentConfigurationAreaKind.PowerShellAuditing,
+                    Status = AgentConfigurationOperationStatus.Failed,
+                    ReverseSupported = true,
+                    Message = "PowerShell auditing current policy state is unavailable; no restore was attempted.",
+                    TechnicalDetail = current.Error
+                };
+            }
+
+            if (!PowerShellPolicySnapshotsEqual(current, applied))
+            {
+                return new AgentMonitoringDeploymentAreaResult
+                {
+                    Area = AgentConfigurationAreaKind.PowerShellAuditing,
+                    Status = AgentConfigurationOperationStatus.Warning,
+                    ReverseSupported = true,
+                    Message = "PowerShell auditing policy changed after deployment; no restore was attempted to avoid overwriting third-party drift.",
+                    TechnicalDetail = "One or more managed values differ by policy root, key, value name, kind, or value."
+                };
+            }
+
+            _powerShellAuditingService.RestoreManagedPolicySnapshot(previousState.PowerShellPolicy);
+            var restored = _powerShellAuditingService.CaptureManagedPolicySnapshot();
+            if (!restored.IsAvailable || !PowerShellPolicySnapshotsEqual(restored, previousState.PowerShellPolicy))
+                throw new InvalidOperationException("PowerShell auditing policy restoration did not reproduce the captured baseline.");
             return new AgentMonitoringDeploymentAreaResult
             {
                 Area = AgentConfigurationAreaKind.PowerShellAuditing,
                 Status = AgentConfigurationOperationStatus.Success,
                 ReverseSupported = true,
-                Message = "PowerShell auditing settings were restored from the pre-deployment snapshot.",
-                TechnicalDetail = $"ScriptBlock={previous.ScriptBlockLoggingEnabled}; module={previous.ModuleLoggingEnabled}; transcription={previous.TranscriptionEnabled}; transcriptPath={previous.TranscriptPath}."
+                Message = "PowerShell auditing policy was restored to the captured per-root baseline.",
+                TechnicalDetail = "Current policy matched the confirmed application-owned snapshot before restoration."
             };
         });
     }
@@ -1478,7 +1799,7 @@ internal sealed partial class AgentMonitoringConfigurationService
     {
         if (existing == null ||
             IsRestorationComplete(existing) ||
-            (!existing.ObjectAuditJournalExpected && !existing.ProcessCommandLineMutationMayHaveOccurred && existing.SnapshotMutationAreas.Length == 0 &&
+            (!existing.ObjectAuditJournalExpected && !existing.ProcessCommandLineMutationMayHaveOccurred && !existing.PowerShellMutationMayHaveOccurred && !existing.SysmonMutationMayHaveOccurred && existing.SnapshotMutationAreas.Length == 0 &&
              !existing.AreaResults.Any(result => result.Status is
                 AgentConfigurationOperationStatus.Success or AgentConfigurationOperationStatus.Warning)) ||
             !string.Equals(existing.AgentId, FirstNonEmpty(command.AgentId, configuration.AgentId, AgentsViewModelLocalAgentId()), StringComparison.Ordinal) ||
@@ -1541,7 +1862,8 @@ internal sealed partial class AgentMonitoringConfigurationService
              r.Status == AgentConfigurationOperationStatus.Skipped || IsRestorationComplete(r)) &&
          state.AreaResults.Where(r => r.Status is AgentConfigurationOperationStatus.Success or AgentConfigurationOperationStatus.Warning)
              .All(applied => state.LastRevertAreaResults.Any(restored => restored.Area == applied.Area && IsRestorationComplete(restored))) &&
-         state.SnapshotMutationAreas.Length == 0 && !state.ProcessCommandLineMutationMayHaveOccurred);
+         state.SnapshotMutationAreas.Length == 0 && !state.ProcessCommandLineMutationMayHaveOccurred &&
+         !state.PowerShellMutationMayHaveOccurred && !state.SysmonMutationMayHaveOccurred);
 
     private static AgentMonitoringDeploymentAreaResult[] MergeAppliedAreaResults(
         IReadOnlyCollection<AgentMonitoringDeploymentAreaResult> previous,
@@ -1565,6 +1887,113 @@ internal sealed partial class AgentMonitoringConfigurationService
 
         return merged.ToArray();
     }
+
+    private void RecordEventLogMutation(
+        MonitoringDeploymentState? previousState,
+        AgentConfigurationCommand? command,
+        string name,
+        bool? isEnabled,
+        long? maximumSizeInBytes,
+        string? logMode = null)
+    {
+        if (previousState == null || command == null)
+        {
+            return;
+        }
+
+        var mutations = previousState.EventLogMutations.ToList();
+        var existingIndex = mutations.FindIndex(mutation =>
+            string.Equals(mutation.Name, name, StringComparison.OrdinalIgnoreCase));
+        var existing = existingIndex >= 0 ? mutations[existingIndex] : new EventLogMutationState { Name = name };
+        var updated = existing with
+        {
+            IsEnabled = isEnabled ?? existing.IsEnabled,
+            MaximumSizeInBytes = maximumSizeInBytes ?? existing.MaximumSizeInBytes,
+            LogMode = logMode ?? existing.LogMode
+        };
+        if (existingIndex >= 0)
+        {
+            mutations[existingIndex] = updated;
+        }
+        else
+        {
+            mutations.Add(updated);
+        }
+
+        previousState.EventLogMutations = mutations.ToArray();
+        SaveOriginalState(previousState, command);
+    }
+
+    private void ConfirmEventLogMutation(MonitoringDeploymentState? state, AgentConfigurationCommand? command, string name, bool enableApplied, bool retentionApplied)
+    {
+        if (state == null || command == null) return;
+        state.EventLogMutations = state.EventLogMutations.Select(mutation => string.Equals(mutation.Name, name, StringComparison.OrdinalIgnoreCase)
+            ? mutation with { EnableApplied = mutation.EnableApplied || enableApplied, RetentionApplied = mutation.RetentionApplied || retentionApplied }
+            : mutation).ToArray();
+        SaveOriginalState(state, command);
+    }
+
+    private void CapturePowerShellAppliedState(MonitoringDeploymentState state, AgentConfigurationCommand command)
+    {
+        var applied = _powerShellAuditingService.CaptureManagedPolicySnapshot();
+        if (!applied.IsAvailable)
+            throw new InvalidOperationException($"PowerShell auditing policy state could not be read after mutation: {applied.Error}");
+        state.PowerShellAppliedPolicy = applied;
+        SaveOriginalState(state, command);
+    }
+
+    private static bool PowerShellPolicySnapshotsEqual(
+        PowerShellAuditingPolicySnapshot left,
+        PowerShellAuditingPolicySnapshot right)
+    {
+        if (left.IsAvailable != right.IsAvailable || left.Keys.Length != right.Keys.Length)
+            return false;
+
+        var leftKeys = left.Keys.OrderBy(key => key.Root, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(key => key.SubKey, StringComparer.OrdinalIgnoreCase).ToArray();
+        var rightKeys = right.Keys.OrderBy(key => key.Root, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(key => key.SubKey, StringComparer.OrdinalIgnoreCase).ToArray();
+        for (var keyIndex = 0; keyIndex < leftKeys.Length; keyIndex++)
+        {
+            var leftKey = leftKeys[keyIndex];
+            var rightKey = rightKeys[keyIndex];
+            if (!string.Equals(leftKey.Root, rightKey.Root, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(leftKey.SubKey, rightKey.SubKey, StringComparison.OrdinalIgnoreCase) ||
+                leftKey.Exists != rightKey.Exists ||
+                leftKey.Values.Length != rightKey.Values.Length)
+                return false;
+
+            var leftValues = leftKey.Values.OrderBy(value => value.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+            var rightValues = rightKey.Values.OrderBy(value => value.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+            for (var valueIndex = 0; valueIndex < leftValues.Length; valueIndex++)
+            {
+                var leftValue = leftValues[valueIndex];
+                var rightValue = rightValues[valueIndex];
+                if (!string.Equals(leftValue.Name, rightValue.Name, StringComparison.OrdinalIgnoreCase) ||
+                    leftValue.Kind != rightValue.Kind ||
+                    leftValue.DwordValue != rightValue.DwordValue ||
+                    leftValue.QwordValue != rightValue.QwordValue ||
+                    !string.Equals(leftValue.StringValue, rightValue.StringValue, StringComparison.Ordinal) ||
+                    !leftValue.MultiStringValue.SequenceEqual(rightValue.MultiStringValue, StringComparer.Ordinal) ||
+                    !leftValue.BinaryValue.SequenceEqual(rightValue.BinaryValue))
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    internal static bool MatchesEventLogAppliedState(
+        bool currentIsEnabled,
+        long currentMaximumSizeInBytes,
+        string currentLogMode,
+        bool? isEnabled,
+        long? maximumSizeInBytes,
+        string? logMode) =>
+        (!isEnabled.HasValue || currentIsEnabled == isEnabled.Value) &&
+        (!maximumSizeInBytes.HasValue || currentMaximumSizeInBytes == maximumSizeInBytes.Value) &&
+        (string.IsNullOrWhiteSpace(logMode) ||
+         string.Equals(currentLogMode, logMode, StringComparison.OrdinalIgnoreCase));
 
     internal static string? BuildEventLogEnableArguments(
         string channelName,
@@ -1645,10 +2074,16 @@ internal sealed partial class AgentMonitoringConfigurationService
         var captureSysmon = effectiveAreas.Contains(AgentConfigurationAreaKind.Sysmon);
         var sysmon = captureSysmon ? _sysmonService.LoadSettings() : null;
         var sysmonExecutablePath = sysmon?.IsServiceStateAvailable == true
-            ? _sysmonService.FindSysmonExecutablePath() ?? string.Empty
+            ? _sysmonService.FindInstalledSysmonExecutablePath() ?? string.Empty
             : string.Empty;
+        var sysmonConfiguration = sysmon?.IsInstalled == true && sysmonExecutablePath.Length > 0
+            ? _sysmonConfigQuery(sysmonExecutablePath)
+            : new SysmonCurrentConfigurationResult(false, "The installed Sysmon configuration is unavailable.");
         var capturePowerShell = effectiveAreas.Contains(AgentConfigurationAreaKind.PowerShellAuditing);
         var powerShell = capturePowerShell ? _powerShellAuditingService.LoadSettings() : null;
+        var powerShellPolicy = capturePowerShell
+            ? _powerShellAuditingService.CaptureManagedPolicySnapshot()
+            : new PowerShellAuditingPolicySnapshot { IsAvailable = true };
         return new MonitoringDeploymentState
         {
             CapturedAtUtc = DateTime.UtcNow,
@@ -1664,13 +2099,13 @@ internal sealed partial class AgentMonitoringConfigurationService
             SysmonWasRunning = sysmon?.IsRunning == true,
             SysmonChannelWasAvailable = sysmon?.IsChannelAvailable == true,
             SysmonExecutablePath = sysmonExecutablePath,
-            SysmonConfigurationSummary = sysmon == null
-                ? string.Empty
-                : CaptureSysmonConfigurationSummary(sysmon.IsInstalled, sysmonExecutablePath),
-            PowerShellStateAvailable = powerShell?.IsAvailable,
+            SysmonConfigurationSummary = captureSysmon ? sysmonConfiguration.Detail : string.Empty,
+            SysmonBaselineReadSucceeded = captureSysmon && sysmonConfiguration.Succeeded && !sysmonConfiguration.Truncated,
+            SysmonBaselineNoRules = captureSysmon && sysmonConfiguration.NoRulesInstalled,
+            PowerShellStateAvailable = powerShell?.IsAvailable == true && powerShellPolicy.IsAvailable,
             PowerShellStateError = powerShell == null
                 ? string.Empty
-                : FirstNonEmpty(powerShell.Error, powerShell.StatusDetail),
+                : FirstNonEmpty(powerShellPolicy.Error, powerShell.Error, powerShell.StatusDetail),
             PowerShell = powerShell == null
                 ? new PowerShellAuditState()
                 : new PowerShellAuditState
@@ -1680,31 +2115,9 @@ internal sealed partial class AgentMonitoringConfigurationService
                 TranscriptionEnabled = powerShell.TranscriptionEnabled,
                 TranscriptPath = powerShell.TranscriptPath
             },
+            PowerShellPolicy = powerShellPolicy,
             EventLogs = eventLogNames.Select(CaptureEventLogState).ToArray()
         };
-    }
-
-    private static string CaptureSysmonConfigurationSummary(bool isInstalled, string executablePath)
-    {
-        if (!isInstalled)
-        {
-            return "Sysmon was not installed before deployment.";
-        }
-
-        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
-        {
-            return "Sysmon was installed, but the executable path could not be resolved for a configuration query.";
-        }
-
-        try
-        {
-            return TrimForDisplay(RunProcess(executablePath, "-c", throwOnFailure: false), 1500);
-        }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or
-                                      TimeoutException or Win32Exception)
-        {
-            return $"Sysmon configuration query failed: {ex.Message}";
-        }
     }
 
     private static string SummarizeAuditPolicyBackup(string backupPath)
@@ -2034,12 +2447,12 @@ internal sealed partial class AgentMonitoringConfigurationService
             yield return new AgentMonitoringOriginalStateArea
             {
                 Area = AgentConfigurationAreaKind.Sysmon,
-            Status = state.SysmonStateAvailable == false
+            Status = state.SysmonStateAvailable == false || !state.SysmonBaselineReadSucceeded
                 ? AgentConfigurationOperationStatus.Warning
                 : state.SysmonWasInstalled
                 ? AgentConfigurationOperationStatus.Success
                 : AgentConfigurationOperationStatus.Unsupported,
-            RestoreSupported = false,
+            RestoreSupported = state.SysmonWasInstalled && state.SysmonBaselineReadSucceeded,
             Summary = state.SysmonStateAvailable == false
                 ? "Sysmon service state was inaccessible during baseline capture."
                 : state.SysmonWasInstalled
@@ -2048,9 +2461,7 @@ internal sealed partial class AgentMonitoringConfigurationService
             Detail = state.SysmonStateAvailable == false
                 ? state.SysmonStateError
                 : $"Installed={state.SysmonWasInstalled}; running={state.SysmonWasRunning}; channelAvailable={state.SysmonChannelWasAvailable}; executable={FirstNonEmpty(state.SysmonExecutablePath, "<unknown>")}. {state.SysmonConfigurationSummary}",
-            RestoreGuidance = state.SysmonWasInstalled
-                ? $"{ProductIdentity.DisplayName} will not replace or remove an existing Sysmon installation automatically."
-                : $"{ProductIdentity.DisplayName} will not uninstall Sysmon automatically until ownership can be proven."
+            RestoreGuidance = "Restore Sysmon monitoring to factory defaults with sysmon -c --; the previous rule set is not reapplied.",
             };
         }
 
@@ -2395,7 +2806,8 @@ internal sealed partial class AgentMonitoringConfigurationService
         AgentConfigurationOperationStatus status,
         IEnumerable<AgentMonitoringDeploymentAreaResult> areaResults,
         string lastError,
-        MonitoringDeploymentState? originalState = null)
+        MonitoringDeploymentState? originalState = null,
+        bool skipOriginalStateRead = false)
     {
         var results = areaResults.ToArray();
         return new AgentMonitoringDeploymentResult
@@ -2417,7 +2829,9 @@ internal sealed partial class AgentMonitoringConfigurationService
             LastError = status == AgentConfigurationOperationStatus.Failed
                 ? FirstNonEmpty(lastError, results.FirstOrDefault(result => result.Status == AgentConfigurationOperationStatus.Failed)?.Message ?? string.Empty)
                 : string.Empty,
-            OriginalState = BuildOriginalStateSnapshot(originalState ?? TryReadDeploymentState(command))
+            OriginalState = skipOriginalStateRead
+                ? new AgentMonitoringOriginalStateSnapshot()
+                : BuildOriginalStateSnapshot(originalState ?? TryReadDeploymentState(command))
         };
     }
 
@@ -2582,9 +2996,17 @@ internal sealed partial class AgentMonitoringConfigurationService
 
         public bool SysmonChannelWasAvailable { get; init; }
 
-        public string SysmonExecutablePath { get; init; } = string.Empty;
+        public string SysmonExecutablePath { get; set; } = string.Empty;
 
-        public string SysmonConfigurationSummary { get; init; } = string.Empty;
+        public string SysmonConfigurationSummary { get; set; } = string.Empty;
+
+        public bool SysmonBaselineReadSucceeded { get; set; }
+
+        public bool SysmonBaselineNoRules { get; set; }
+
+        public bool SysmonMutationMayHaveOccurred { get; set; }
+
+        public string SysmonAppliedConfigurationSummary { get; set; } = string.Empty;
 
         public CapturedRegistryValueState ProcessCommandLineLogging { get; init; } = new();
 
@@ -2604,7 +3026,15 @@ internal sealed partial class AgentMonitoringConfigurationService
 
         public PowerShellAuditState PowerShell { get; init; } = new();
 
+        public PowerShellAuditingPolicySnapshot PowerShellPolicy { get; init; } = new();
+
+        public PowerShellAuditingPolicySnapshot? PowerShellAppliedPolicy { get; set; }
+
+        public bool PowerShellMutationMayHaveOccurred { get; set; }
+
         public EventLogState[] EventLogs { get; init; } = [];
+
+        public EventLogMutationState[] EventLogMutations { get; set; } = [];
 
         public AgentMonitoringDeploymentAreaResult[] AreaResults { get; set; } = [];
 
@@ -2641,6 +3071,21 @@ internal sealed partial class AgentMonitoringConfigurationService
         public long MaximumSizeInBytes { get; init; }
 
         public string LogMode { get; init; } = string.Empty;
+    }
+
+    private sealed record EventLogMutationState
+    {
+        public string Name { get; init; } = string.Empty;
+
+        public bool? IsEnabled { get; init; }
+
+        public long? MaximumSizeInBytes { get; init; }
+
+        public string LogMode { get; init; } = string.Empty;
+
+        public bool EnableApplied { get; init; }
+
+        public bool RetentionApplied { get; init; }
     }
 
     private sealed class CapturedRegistryValueState

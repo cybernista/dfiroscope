@@ -1,7 +1,7 @@
 <UserControl x:Class="ProcInsider.Views.Features.Memory.ExplorerMemoryView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             DataContext="{Binding DataContext.MemoryInvestigationViewModel, RelativeSource={RelativeSource AncestorType=Window}}">
+             xmlns:presentation="clr-namespace:ProcInsider.Services.Presentation">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -15,15 +15,15 @@
                     Padding="8,2"
                     Margin="0,0,4,4"/>
             <Button Content="Dump System Memory"
-                    Command="{Binding DataContext.DumpSystemMemoryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Command="{Binding (presentation:ViewerPresentationContext.SharedActions).DumpSystemMemoryCommand, RelativeSource={RelativeSource Self}}"
                     Padding="8,2"
                     Margin="0,0,4,4"/>
             <Button Content="Import Image"
-                    Command="{Binding DataContext.QueueMemoryImageImportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Command="{Binding (presentation:ViewerPresentationContext.SharedActions).QueueMemoryImageImportCommand, RelativeSource={RelativeSource Self}}"
                     Padding="8,2"
                     Margin="0,0,4,4"/>
             <Button Content="Run Volatility"
-                    Command="{Binding DataContext.QueueSelectedMemoryImageVolatilityAnalysisCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Command="{Binding (presentation:ViewerPresentationContext.SharedActions).QueueSelectedMemoryImageVolatilityAnalysisCommand, RelativeSource={RelativeSource Self}}"
                     Padding="8,2"
                     Margin="0,0,4,4"/>
         </WrapPanel>

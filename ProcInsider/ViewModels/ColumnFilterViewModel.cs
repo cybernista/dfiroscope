@@ -12,17 +12,21 @@ public partial class ColumnFilterChoiceViewModel : ViewModelBase
 {
     private readonly Action<string?, bool> _changed;
     public string? Value { get; }
+    public long Count { get; }
     public string Label => Value == null ? "(Unavailable)" : Value.Length == 0 ? "(Blank)" : Value;
     [ObservableProperty] private bool isChecked;
-    public ColumnFilterChoiceViewModel(string? value, bool selected, Action<string?, bool> changed)
-    { Value = value; isChecked = selected; _changed = changed; }
+    public ColumnFilterChoiceViewModel(ColumnFilterValue value, bool selected, Action<string?, bool> changed)
+    { Value = value.Value; Count = value.Count; isChecked = selected; _changed = changed; }
     partial void OnIsCheckedChanged(bool value) => _changed(Value, value);
 }
 
 /// <summary>Shared draft/apply state. Reads are cancellable; closing or a newer search fences late replies.</summary>
 public partial class ColumnFilterViewModel : ViewModelBase
 {
-    private readonly Func<string, CancellationToken, Task<ColumnFilterValuePage>> _load;
+    private readonly Func<string, ColumnFilterValueSort, CancellationToken, Task<ColumnFilterValuePage>> _load;
+    private ColumnFilterValueSort _sort = ColumnFilterValueSort.ValueAscending;
+    public string ValueSortHeader => _sort switch { ColumnFilterValueSort.ValueAscending => "Value ▲", ColumnFilterValueSort.ValueDescending => "Value ▼", _ => "Value" };
+    public string CountSortHeader => _sort switch { ColumnFilterValueSort.CountAscending => "Count ▲", ColumnFilterValueSort.CountDescending => "Count ▼", _ => "Count" };
     private readonly Action _applied;
     private CancellationTokenSource? _loading;
     private long _version;
@@ -59,7 +63,7 @@ public partial class ColumnFilterViewModel : ViewModelBase
     public bool CanApply => !IsLoading && (!IsValues || ChoicesAvailable);
 
     public ColumnFilterViewModel(string key, ColumnFilterKind kind,
-        Func<string, CancellationToken, Task<ColumnFilterValuePage>> load, Action applied)
+        Func<string, ColumnFilterValueSort, CancellationToken, Task<ColumnFilterValuePage>> load, Action applied)
     { Key = key; Kind = kind; _load = load; _applied = applied; }
 
     public async Task OpenAsync()
@@ -84,6 +88,16 @@ public partial class ColumnFilterViewModel : ViewModelBase
     };
 
     partial void OnValueSearchChanged(string value) { if (IsOpen && IsValues) _ = LoadChoicesAsync(); }
+    [RelayCommand] private void SortValues() => SetSort(_sort == ColumnFilterValueSort.ValueAscending
+        ? ColumnFilterValueSort.ValueDescending : ColumnFilterValueSort.ValueAscending);
+    [RelayCommand] private void SortCounts() => SetSort(_sort == ColumnFilterValueSort.CountDescending
+        ? ColumnFilterValueSort.CountAscending : ColumnFilterValueSort.CountDescending);
+    private void SetSort(ColumnFilterValueSort sort)
+    {
+        _sort = sort;
+        OnPropertyChanged(nameof(ValueSortHeader)); OnPropertyChanged(nameof(CountSortHeader));
+        if (IsOpen && IsValues) _ = LoadChoicesAsync();
+    }
     partial void OnIsOpenChanged(bool value) { if (!value) CancelLoading(); }
     private void CancelLoading()
     { _version++; _loading?.Cancel(); _loading?.Dispose(); _loading = null; IsLoading = false; }
@@ -98,11 +112,11 @@ public partial class ColumnFilterViewModel : ViewModelBase
         try
         {
             await Task.Delay(150, token);
-            var result = await _load(ValueSearch, token);
+            var result = await _load(ValueSearch, _sort, token);
             if (version != _version || !IsOpen || token.IsCancellationRequested) return;
-            foreach (var value in result.Values)
-                Choices.Add(new ColumnFilterChoiceViewModel(value, _exceptions.Contains(value) != _allValues, OnChoiceChanged));
-            ChoiceStatus = result.HasMore ? "More values exist. Search to find them; other selections are retained."
+            foreach (var value in result.Entries)
+                Choices.Add(new ColumnFilterChoiceViewModel(value, _exceptions.Contains(value.Value) != _allValues, OnChoiceChanged));
+            ChoiceStatus = result.HasMore ? $"Showing {Choices.Count} values. More exist; search to find them. Other selections are retained."
                 : $"{Choices.Count} distinct values. Other selections are retained.";
             ChoicesAvailable = true;
         }

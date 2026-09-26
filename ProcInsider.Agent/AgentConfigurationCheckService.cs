@@ -254,7 +254,8 @@ internal sealed class AgentConfigurationCheckService
                     VerifyService = true,
                     ProfileId = sysmonProfile?.Id ?? string.Empty,
                     ProfileDisplayName = GetProfileName(sysmonProfile),
-                    ConfigurationPath = ResolveProfilePath(sysmonProfile)
+                    // Stable profile identity crosses IPC; the Agent resolves its local copy.
+                    ConfigurationPath = string.Empty
                 }
                 : new AgentSysmonMonitoringIntent { VerifyService = false },
             SecurityAuditPolicy = new AgentSecurityAuditMonitoringIntent
@@ -289,7 +290,8 @@ internal sealed class AgentConfigurationCheckService
                 {
                     ProfileId = etwProfile?.Id ?? string.Empty,
                     ProfileDisplayName = GetProfileName(etwProfile),
-                    ProfilePath = ResolveProfilePath(etwProfile)
+                    // Stable profile identity crosses IPC; the Agent resolves its local copy.
+                    ProfilePath = string.Empty
                 }
                 : new AgentEtwMonitoringIntent(),
             ScheduledDumps = includesScheduledDumps
@@ -387,7 +389,9 @@ internal sealed class AgentConfigurationCheckService
         TryCheck(findings, AgentConfigurationAreaKind.Sysmon, () =>
         {
             var settings = _sysmonService.LoadSettings();
-            var profilePath = FirstNonEmpty(intent.ConfigurationPath, ResolveProfilePath(_configProfiles.GetDefaultProfile(ConfigProfileKind.Sysmon)));
+            var profilePath = FirstNonEmpty(
+                intent.ConfigurationPath,
+                ResolveProfilePath(ConfigProfileKind.Sysmon, intent.ProfileId));
             if (!settings.IsServiceStateAvailable)
             {
                 Add(findings, AgentConfigurationAreaKind.Sysmon, AgentConfigurationFindingSeverity.Warning,
@@ -397,7 +401,7 @@ internal sealed class AgentConfigurationCheckService
                 return;
             }
 
-            var executablePath = _sysmonService.FindSysmonExecutablePath();
+            var executablePath = _sysmonService.FindInstalledSysmonExecutablePath();
             Add(findings, AgentConfigurationAreaKind.Sysmon,
                 settings.IsInstalled ? AgentConfigurationFindingSeverity.Info : AgentConfigurationFindingSeverity.Warning,
                 settings.IsInstalled ? "Sysmon service registration was detected." : "Sysmon service registration was not detected.",
@@ -437,8 +441,29 @@ internal sealed class AgentConfigurationCheckService
             {
                 Add(findings, AgentConfigurationAreaKind.Sysmon, AgentConfigurationFindingSeverity.Info,
                     "Bundled Sysmon profile is present.",
-                    $"Profile '{FirstNonEmpty(intent.ProfileDisplayName, intent.ProfileId, Path.GetFileName(profilePath))}' at {profilePath}. Current applied Sysmon profile identity is not read by this check.");
+                    $"Profile '{FirstNonEmpty(intent.ProfileDisplayName, intent.ProfileId, Path.GetFileName(profilePath))}' at {profilePath}. This bundled file is separate from the installed configuration shown below.");
             }
+
+            if (!settings.IsInstalled) return;
+            if (string.IsNullOrWhiteSpace(executablePath))
+            {
+                Add(findings, AgentConfigurationAreaKind.Sysmon, AgentConfigurationFindingSeverity.Warning,
+                    "Current Sysmon configuration could not be read.",
+                    "The installed service has no readable Sysmon executable at its registered image path. A bundled or PATH copy was not substituted.",
+                    "Check the installed Sysmon service image path and access to that file.");
+                return;
+            }
+
+            var current = SysmonCurrentConfigurationReader.Query(executablePath);
+            Add(findings, AgentConfigurationAreaKind.Sysmon,
+                current.Succeeded && !current.Truncated && !current.NoRulesInstalled
+                    ? AgentConfigurationFindingSeverity.Info : AgentConfigurationFindingSeverity.Warning,
+                !current.Succeeded ? "Current Sysmon configuration could not be read." :
+                current.NoRulesInstalled ? "Current installed Sysmon configuration has no rules." :
+                    "Current installed Sysmon configuration (read-only).",
+                current.Detail,
+                current.Succeeded && !current.Truncated && !current.NoRulesInstalled ? string.Empty :
+                    "Review the installed Sysmon configuration and confirm the active rules before relying on Sysmon events.");
         });
     }
 
@@ -699,7 +724,9 @@ internal sealed class AgentConfigurationCheckService
 
     private void CheckEtw(List<AgentConfigurationFinding> findings, AgentEtwMonitoringIntent intent, bool required)
     {
-        var profilePath = FirstNonEmpty(intent.ProfilePath, ResolveProfilePath(_configProfiles.GetDefaultProfile(ConfigProfileKind.Etw)));
+        var profilePath = FirstNonEmpty(
+            intent.ProfilePath,
+            ResolveProfilePath(ConfigProfileKind.Etw, intent.ProfileId));
         if (string.IsNullOrWhiteSpace(profilePath))
         {
             Add(findings, AgentConfigurationAreaKind.Etw,
@@ -1258,6 +1285,16 @@ internal sealed class AgentConfigurationCheckService
     private string ResolveProfilePath(ConfigProfileDefinition? profile)
     {
         return profile == null ? string.Empty : _configProfiles.ResolveProfileFilePath(profile) ?? string.Empty;
+    }
+
+    private string ResolveProfilePath(ConfigProfileKind kind, string profileId)
+    {
+        var profiles = _configProfiles.GetProfiles(kind);
+        var profile = string.IsNullOrWhiteSpace(profileId)
+            ? profiles.FirstOrDefault(candidate => candidate.IsDefault) ?? profiles.FirstOrDefault()
+            : profiles.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, profileId, StringComparison.OrdinalIgnoreCase));
+        return ResolveProfilePath(profile);
     }
 
     private static string GetProfileName(ConfigProfileDefinition? profile)

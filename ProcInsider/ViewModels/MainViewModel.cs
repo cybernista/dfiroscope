@@ -25,6 +25,7 @@ using ProcInsider.Services;
 using ProcInsider.Services.AgentIpc;
 using ProcInsider.Services.Ai;
 using ProcInsider.Services.Features;
+using ProcInsider.Services.Presentation;
 
 namespace ProcInsider.ViewModels;
 
@@ -33,15 +34,140 @@ namespace ProcInsider.ViewModels;
 /// Coordinates process tracking, filtering, sorting, and child view models.
 /// </summary>
 public partial class MainViewModel : ViewModelBase,
+    Services.Presentation.IAppInfoPresentation,
+    Services.Presentation.IProcessListingPresentation,
     IViewerNavigationRuntime,
     ISelectedProcessFanOutConsumerProvider
 {
-    public event Action<ProcessRowViewModel>? ProcessRowNavigationRequested;
-    public event Func<ViewerProcessViewportAnchor?>? ProcessViewportAnchorCaptureRequested;
-    public event Action<ProcessRowViewModel, double>? ProcessViewportAnchorRestoreRequested;
+    private readonly Services.Presentation.IViewerPresentationHost _presentationHost;
+    private string? _presentationContentFailure;
+    public object PresentationContent
+    {
+        get
+        {
+            if (_presentationContentFailure != null) return _presentationContentFailure;
+            try { return _presentationHost.Content; }
+            catch (Exception ex)
+            {
+                _presentationContentFailure = $"Viewer presentation content failed: {ex.Message}";
+                _presentationHost.Dispose();
+                if (_viewerSharedActions != null) PropertyChanged -= _viewerSharedActions.SourcePropertyChanged;
+                StatusMessage = _presentationContentFailure;
+                return _presentationContentFailure;
+            }
+        }
+    }
+    partial void OnStatusMessageChanged(string value) => _activeProcessPresentation?.NotifySharedStatusChanged();
+    private ProcessPresentationViewModel? _activeProcessPresentation;
+    public ProcessPresentationViewModel ProcessPresentation => _activeProcessPresentation ?? throw new InvalidOperationException("No Processes presentation is active.");
+    private static readonly IRelayCommand UnavailablePresentationCommand = new RelayCommand(() => { }, () => false);
+    public event Action<ProcessRowViewModel>? ProcessRowNavigationRequested { add => ProcessPresentation.ProcessRowNavigationRequested += value; remove => ProcessPresentation.ProcessRowNavigationRequested -= value; }
+    public event Func<ViewerProcessViewportAnchor?>? ProcessViewportAnchorCaptureRequested { add => ProcessPresentation.ProcessViewportAnchorCaptureRequested += value; remove => ProcessPresentation.ProcessViewportAnchorCaptureRequested -= value; }
+    public event Action<ProcessRowViewModel, double>? ProcessViewportAnchorRestoreRequested { add => ProcessPresentation.ProcessViewportAnchorRestoreRequested += value; remove => ProcessPresentation.ProcessViewportAnchorRestoreRequested -= value; }
+    private const string ProcessBookmarkKind = ProcessPresentationViewModel.ProcessBookmarkKind;
+    private const string NoProcessScopedSelectionKey = ProcessPresentationViewModel.NoProcessScopedSelectionKey;
+    private FeatureTabSet _empty_explorerTabSet = default!;
+    private ref FeatureTabSet _explorerTabSet => ref (_activeProcessPresentation is { } p ? ref p._explorerTabSet : ref _empty_explorerTabSet);
+    private ViewerNavigationCoordinator _empty_viewerNavigationCoordinator = default!;
+    private ref ViewerNavigationCoordinator _viewerNavigationCoordinator => ref (_activeProcessPresentation is { } p ? ref p._viewerNavigationCoordinator : ref _empty_viewerNavigationCoordinator);
+    private SqliteStagingQueryService? _sqliteStagingQueryService;
+    private ProcessListingService? _processListingService;
+    private long _empty_processListingQueryGeneration = default!;
+    private ref long _processListingQueryGeneration => ref (_activeProcessPresentation is { } p ? ref p._processListingQueryGeneration : ref _empty_processListingQueryGeneration);
+    private long _empty_snapshotPresentationInteractionGeneration = default!;
+    private ref long _snapshotPresentationInteractionGeneration => ref (_activeProcessPresentation is { } p ? ref p._snapshotPresentationInteractionGeneration : ref _empty_snapshotPresentationInteractionGeneration);
+    private bool _empty_isPublishingSnapshotPresentation = default!;
+    private ref bool _isPublishingSnapshotPresentation => ref (_activeProcessPresentation is { } p ? ref p._isPublishingSnapshotPresentation : ref _empty_isPublishingSnapshotPresentation);
+    private int _activeDbRefreshCount => _activeProcessPresentation?._activeDbRefreshCount ?? 0;
+    private ExplorerScope _empty_activeExplorerScope = default!;
+    private ref ExplorerScope _activeExplorerScope => ref (_activeProcessPresentation is { } p ? ref p._activeExplorerScope : ref _empty_activeExplorerScope);
+    private ModulesAndHandlesFeatureModule? ModulesAndHandlesFeature { get => _activeProcessPresentation?.ModulesAndHandlesFeature!; }
+    private EventTelemetryFeatureModule? EventTelemetryFeature { get => _activeProcessPresentation?.EventTelemetryFeature!; }
+    private WindowsSecurityEventsFeatureModule? WindowsSecurityEventsFeature { get => _activeProcessPresentation?.WindowsSecurityEventsFeature!; }
+    private DumpsAndPeFeatureModule? DumpsAndPeFeature { get => _activeProcessPresentation?.DumpsAndPeFeature!; }
+    private NetworkAndZeekFeatureModule? NetworkAndZeekFeature { get => _activeProcessPresentation?.NetworkAndZeekFeature!; }
+    private AiFeatureModule? AiFeature { get => _activeProcessPresentation?.AiFeature!; }
+    private Dictionary<string, ProcessRowViewModel> _empty_processViewModels = default!;
+    private ref Dictionary<string, ProcessRowViewModel> _processViewModels => ref (_activeProcessPresentation is { } p ? ref p._processViewModels : ref _empty_processViewModels);
+    public ObservableCollection<ProcessRowViewModel> Processes { get => _activeProcessPresentation?.Processes!; set { if (_activeProcessPresentation is { } p) p.Processes = value; } }
+    public ICollectionView? ProcessesView { get => _activeProcessPresentation?.ProcessesView!; set { if (_activeProcessPresentation is { } p) p.ProcessesView = value; } }
+    public string ProcessListingStatus { get => _activeProcessPresentation?.ProcessListingStatus ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.ProcessListingStatus = value; } }
+    public bool IsProcessListingLoading { get => _activeProcessPresentation?.IsProcessListingLoading ?? false; set { if (_activeProcessPresentation is { } p) p.IsProcessListingLoading = value; } }
+    public ProcessRowViewModel? SelectedProcess { get => _activeProcessPresentation?.SelectedProcess!; set { if (_activeProcessPresentation is { } p) p.SelectedProcess = value; } }
+    public string FilterProcessName { get => _activeProcessPresentation?.FilterProcessName ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterProcessName = value; } }
+    public string FilterPid { get => _activeProcessPresentation?.FilterPid ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterPid = value; } }
+    public string FilterParentPid { get => _activeProcessPresentation?.FilterParentPid ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterParentPid = value; } }
+    public string FilterParentProcessName { get => _activeProcessPresentation?.FilterParentProcessName ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterParentProcessName = value; } }
+    public string FilterProcessPath { get => _activeProcessPresentation?.FilterProcessPath ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterProcessPath = value; } }
+    public string FilterCommandLine { get => _activeProcessPresentation?.FilterCommandLine ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterCommandLine = value; } }
+    public string FilterUserName { get => _activeProcessPresentation?.FilterUserName ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterUserName = value; } }
+    public string FilterSessionId { get => _activeProcessPresentation?.FilterSessionId ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterSessionId = value; } }
+    public string FilterArchitecture { get => _activeProcessPresentation?.FilterArchitecture ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterArchitecture = value; } }
+    public string FilterStartTime { get => _activeProcessPresentation?.FilterStartTime ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterStartTime = value; } }
+    public string FilterEndTime { get => _activeProcessPresentation?.FilterEndTime ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterEndTime = value; } }
+    public string FilterStatus { get => _activeProcessPresentation?.FilterStatus ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterStatus = value; } }
+    public string FilterCpuUsage { get => _activeProcessPresentation?.FilterCpuUsage ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterCpuUsage = value; } }
+    public string FilterMemoryUsage { get => _activeProcessPresentation?.FilterMemoryUsage ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterMemoryUsage = value; } }
+    public string FilterCompanyName { get => _activeProcessPresentation?.FilterCompanyName ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterCompanyName = value; } }
+    public string FilterFileDescription { get => _activeProcessPresentation?.FilterFileDescription ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterFileDescription = value; } }
+    public string FilterSha256Hash { get => _activeProcessPresentation?.FilterSha256Hash ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.FilterSha256Hash = value; } }
+    private string _empty_currentSortColumn = default!;
+    private ref string _currentSortColumn => ref (_activeProcessPresentation is { } p ? ref p._currentSortColumn : ref _empty_currentSortColumn);
+    private bool _empty_sortAscending = default!;
+    private ref bool _sortAscending => ref (_activeProcessPresentation is { } p ? ref p._sortAscending : ref _empty_sortAscending);
+    [ObservableProperty]
+    private string statusMessage = "Initializing...";
+    public ViewerDetailsTabKey SelectedDetailsTabKey { get => _activeProcessPresentation?.SelectedDetailsTabKey ?? default; set { if (_activeProcessPresentation is { } p) p.SelectedDetailsTabKey = value; } }
+    public int TotalProcessCount { get => _activeProcessPresentation?.TotalProcessCount ?? 0; set { if (_activeProcessPresentation is { } p) p.TotalProcessCount = value; } }
+    public int RunningProcessCount { get => _activeProcessPresentation?.RunningProcessCount ?? 0; set { if (_activeProcessPresentation is { } p) p.RunningProcessCount = value; } }
+    public int ExitedProcessCount { get => _activeProcessPresentation?.ExitedProcessCount ?? 0; set { if (_activeProcessPresentation is { } p) p.ExitedProcessCount = value; } }
+    public ProcessPropertiesViewModel ProcessPropertiesViewModel { get => _activeProcessPresentation?.ProcessPropertiesViewModel!; private set { if (_activeProcessPresentation is { } p) p.ProcessPropertiesViewModel = value; } }
+    public ProcessDescriptionViewModel ProcessDescriptionViewModel { get => _activeProcessPresentation?.ProcessDescriptionViewModel!; private set { if (_activeProcessPresentation is { } p) p.ProcessDescriptionViewModel = value; } }
+    public ProcessNotesViewModel NotesViewModel { get => _activeProcessPresentation?.NotesViewModel!; private set { if (_activeProcessPresentation is { } p) p.NotesViewModel = value; } }
+    public ModulesViewModel ModulesViewModel { get => _activeProcessPresentation?.ModulesViewModel!; }
+    public HandlesViewModel HandlesViewModel { get => _activeProcessPresentation?.HandlesViewModel!; }
+    public EventsViewModel EventsViewModel { get => _activeProcessPresentation?.EventsViewModel!; }
+    public EventsViewModel EtwProviderEventsViewModel { get => _activeProcessPresentation?.EtwProviderEventsViewModel!; }
+    public EventsViewModel WindowsAuditLogViewModel { get => _activeProcessPresentation?.WindowsAuditLogViewModel!; }
+    public EventsViewModel PowerShellLogViewModel { get => _activeProcessPresentation?.PowerShellLogViewModel!; }
+    public EventsViewModel WindowsOtherLogViewModel { get => _activeProcessPresentation?.WindowsOtherLogViewModel!; }
+    public EventsViewModel SysmonEventsViewModel { get => _activeProcessPresentation?.SysmonEventsViewModel!; }
+    public MemoryDumpsViewModel MemoryDumpsViewModel { get => _activeProcessPresentation?.MemoryDumpsViewModel!; }
+    public PeAnalysisViewModel PeAnalysisViewModel { get => _activeProcessPresentation?.PeAnalysisViewModel!; }
+    public ProcessStatisticsViewModel ProcessStatisticsViewModel { get => _activeProcessPresentation?.ProcessStatisticsViewModel!; private set { if (_activeProcessPresentation is { } p) p.ProcessStatisticsViewModel = value; } }
+    public MemoryInvestigationViewModel MemoryInvestigationViewModel { get => _activeProcessPresentation?.MemoryInvestigationViewModel!; }
+    public NetworkCapturesViewModel NetworkCapturesViewModel { get => _activeProcessPresentation?.NetworkCapturesViewModel!; }
+    public FilesystemArtifactsViewModel FilesystemArtifactsViewModel { get => _activeProcessPresentation?.FilesystemArtifactsViewModel!; }
+    public SystemActivityViewModel SystemActivityViewModel { get => _activeProcessPresentation?.SystemActivityViewModel!; }
+    public ExplorerViewModel ExplorerViewModel { get => _activeProcessPresentation?.ExplorerViewModel!; private set { if (_activeProcessPresentation is { } p) p.ExplorerViewModel = value; } }
+    public InspectorPaneViewModel InspectorPaneViewModel { get => _presentationHost?.ActiveDetailsPresentation!; private set { if (_activeProcessPresentation is { } p) p.InspectorPaneViewModel = value; } }
+    public ProcessRiskDetailsViewModel? ProcessRiskDetailsViewModel { get => _activeProcessPresentation?.ProcessRiskDetailsViewModel!; private set { if (_activeProcessPresentation is { } p) p.ProcessRiskDetailsViewModel = value; } }
+    public AiInvestigationViewModel AiInvestigationViewModel { get => _activeProcessPresentation?.AiInvestigationViewModel!; }
+    public AiDetailsInvestigationViewModel AiDetailsInvestigationViewModel { get => _activeProcessPresentation?.AiDetailsInvestigationViewModel!; }
+    public AiChatViewModel AiChatViewModel { get => _activeProcessPresentation?.AiChatViewModel!; }
+    public IReadOnlyList<FeatureTabDescriptor> ExplorerTabs { get => _activeProcessPresentation?.ExplorerTabs ?? []; }
+    public IReadOnlyList<FeatureTabDescriptor> DataTabs { get => _activeProcessPresentation?.DataTabs ?? []; }
+    public IReadOnlyList<FeatureTabDescriptor> AppInfoExtensionTabs { get => _activeProcessPresentation?.AppInfoExtensionTabs!; private set { if (_activeProcessPresentation is { } p) p.AppInfoExtensionTabs = value; } }
+    public FeatureTabDescriptor? SelectedDataTab { get => _activeProcessPresentation?.SelectedDataTab!; set { if (_activeProcessPresentation is { } p) p.SelectedDataTab = value; } }
+    public FeatureTabDescriptor? SelectedExplorerTab { get => _activeProcessPresentation?.SelectedExplorerTab!; set { if (_activeProcessPresentation is { } p) p.SelectedExplorerTab = value; } }
+    public ExplorerAiSection SelectedExplorerAiSection { get => _activeProcessPresentation?.SelectedExplorerAiSection ?? default; set { if (_activeProcessPresentation is { } p) p.SelectedExplorerAiSection = value; } }
+    public bool IsNetworkDataTabVisible { get => _activeProcessPresentation?.IsNetworkDataTabVisible ?? false; set { if (_activeProcessPresentation is { } p) p.IsNetworkDataTabVisible = value; } }
+    public bool IsFilesystemDataTabVisible { get => _activeProcessPresentation?.IsFilesystemDataTabVisible ?? false; set { if (_activeProcessPresentation is { } p) p.IsFilesystemDataTabVisible = value; } }
+    public bool IsSelectedProcessBookmarked { get => _activeProcessPresentation?.IsSelectedProcessBookmarked ?? false; set { if (_activeProcessPresentation is { } p) p.IsSelectedProcessBookmarked = value; } }
+    public string BookmarkSelectedProcessLabel { get => _activeProcessPresentation?.BookmarkSelectedProcessLabel ?? string.Empty; }
+    public string ScopedSelectionStatus { get => _activeProcessPresentation?.ScopedSelectionStatus ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.ScopedSelectionStatus = value; } }
+    public string ScopedSelectionDetail { get => _activeProcessPresentation?.ScopedSelectionDetail ?? string.Empty; set { if (_activeProcessPresentation is { } p) p.ScopedSelectionDetail = value; } }
+    public IRelayCommand ClearFiltersCommand => _activeProcessPresentation?.ClearFiltersCommand ?? UnavailablePresentationCommand;
+    public IRelayCommand IncludeCurrentExplorerScopeCommand => _activeProcessPresentation?.IncludeCurrentExplorerScopeCommand ?? UnavailablePresentationCommand;
+    public IRelayCommand ExcludeCurrentExplorerScopeCommand => _activeProcessPresentation?.ExcludeCurrentExplorerScopeCommand ?? UnavailablePresentationCommand;
+    public IRelayCommand ToggleExplorerGreenScopeCommand => _activeProcessPresentation?.ToggleExplorerGreenScopeCommand ?? UnavailablePresentationCommand;
+    public IRelayCommand IncludeSelectedProcessCommand => _activeProcessPresentation?.IncludeSelectedProcessCommand ?? UnavailablePresentationCommand;
+    public IRelayCommand ExcludeSelectedProcessCommand => _activeProcessPresentation?.ExcludeSelectedProcessCommand ?? UnavailablePresentationCommand;
+    public IRelayCommand ClearScopedSelectionCommand => _activeProcessPresentation?.ClearScopedSelectionCommand ?? UnavailablePresentationCommand;
+    public IRelayCommand ToggleSelectedProcessBookmarkCommand => _activeProcessPresentation?.ToggleSelectedProcessBookmarkCommand ?? UnavailablePresentationCommand;
+    private const int VirtualProcessPageSize = ProcessPresentationViewModel.VirtualProcessPageSize;
+    private const int VirtualProcessCachePages = ProcessPresentationViewModel.VirtualProcessCachePages;
 
-    private const string ProcessBookmarkKind = "Process";
-    private const string NoProcessScopedSelectionKey = "__procinsider_no_process_scope__";
     private const string UnknownProcessOwnerKey = "unknown";
     private const string UnknownProcessOwnerDisplayName = "Unknown / unresolved owner";
     private const string UnknownAgentCommandOutcomeDiagnostic =
@@ -96,16 +222,12 @@ public partial class MainViewModel : ViewModelBase,
     // Services
     private readonly FeatureAccessService _featureAccess;
     private readonly FeatureActivationRegistry _featureModules;
+    private FeatureActivationRegistry _presentationModules => _activeProcessPresentation?._featureModules ?? _emptyPresentationModules;
+    private readonly FeatureActivationRegistry _emptyPresentationModules;
     private readonly ViewerFeatureRegistry _viewerFeatures;
-    private readonly FeatureTabSet _explorerTabSet;
-    private readonly FeatureTabSet _dataTabSet;
-    private readonly ViewerNavigationCoordinator _viewerNavigationCoordinator;
     private readonly InfrastructureCaseWorkspaceFeatureDependencies? _infrastructureCaseWorkspaceDependencies;
     private InfrastructureCaseWorkspaceViewModel? _infrastructureWorkspace;
-    private readonly SelectedProcessFanOutCoordinator _selectedProcessFanOutCoordinator;
     private readonly ExplorerCountRefreshCoordinator _explorerCountRefreshCoordinator = new();
-    private bool _isApplyingViewerNavigationState;
-    private readonly ProcessFilterService _filterService;
     private readonly IViewerExternalProcessService _externalProcessService;
     private AnnotationDatabaseService? _annotationStore;
     private readonly ApplicationCatalogService? _applicationCatalog;
@@ -114,6 +236,7 @@ public partial class MainViewModel : ViewModelBase,
     private readonly Func<IReadOnlyList<AgentPairingDiscoveryRecord>> _discoverLocalAgentPairings;
     private LocalAgentRecoveryCoordinator? _localAgentRecoveryCoordinator;
     private LocalAgentControlCoordinator? _localAgentControlCoordinator;
+    private readonly LocalAgentAutomaticRecoveryWorkflow _localAgentAutomaticRecovery = new();
     private readonly AgentCaptureWorkflowCoordinator _agentCaptureWorkflowCoordinator;
     private readonly ViewerAgentCaptureActionService _agentCaptureActionService;
     private readonly Lazy<ViewerHostMonitoringActionService> _hostMonitoringActionService;
@@ -126,19 +249,12 @@ public partial class MainViewModel : ViewModelBase,
     private readonly ViewerSnapshotFollowCoordinator _snapshotFollowCoordinator;
     private InvestigationSessionPaths _sessionPaths;
     private CapturePackageInfo? _activeCapturePackageInfo;
-    private SqliteStagingQueryService? _sqliteStagingQueryService;
-    private ProcessListingService? _processListingService;
-    private VirtualizedProcessCollection? _virtualizedProcessListing;
-    private CancellationTokenSource? _processListingRefreshCts;
     private CancellationTokenSource? _agentLateExitObservationCts;
     private Task? _agentLateExitObservationTask;
     private long _agentLateExitObservationGeneration;
     private bool _isLocalAgentSetupInProgress;
     private int _hostMonitoringActionInProgress;
-    private long _processListingQueryGeneration;
-    private long _snapshotPresentationInteractionGeneration;
     private long _initialSnapshotRefreshWorkspaceGeneration = -1;
-    private bool _isPublishingSnapshotPresentation;
     private readonly TelemetryProjectionService _telemetryProjectionService;
     private bool _isLoadingSysmonSettings;
     private AgentShutdownTarget? _lastVerifiedAgentShutdownTarget;
@@ -153,40 +269,11 @@ public partial class MainViewModel : ViewModelBase,
     private Guid? _activeVolatilityAnalysisJobId;
     private Guid? _activeSqliteBenchmarkJobId;
     private readonly DispatcherTimer _snapshotAgeTimer;
-    private int _activeDbRefreshCount;
     private int _activeExplorerRefreshCount;
     private bool _hasActiveQueryDatabase;
     private long _explorerCountInputGeneration;
-
-    // Debounce timer for DB-backed process grid refreshes (e.g. on every keystroke).
-    private DispatcherTimer? _dbRefreshDebounceTimer;
-    private ExplorerScope _activeExplorerScope = new()
-    {
-        Kind = ExplorerScopeKind.AllProcesses,
-        Title = "All Processes",
-        Description = "All staged and live process records."
-    };
-    private readonly Dictionary<string, ExplorerScope> _includedScopes = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, ExplorerScope> _excludedScopes = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _includedProcessKeys = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _excludedProcessKeys = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, string> _includedProcessLabels = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, string> _excludedProcessLabels = new(StringComparer.Ordinal);
-
-    private ModulesAndHandlesFeatureModule? ModulesAndHandlesFeature =>
-        _featureModules.GetOrActivate<ModulesAndHandlesFeatureModule>(FeatureIds.ModulesAndHandles);
-    private EventTelemetryFeatureModule? EventTelemetryFeature =>
-        _featureModules.GetOrActivate<EventTelemetryFeatureModule>(FeatureIds.EventTelemetry);
-    private WindowsSecurityEventsFeatureModule? WindowsSecurityEventsFeature =>
-        _featureModules.GetOrActivate<WindowsSecurityEventsFeatureModule>(FeatureIds.WindowsSecurityEvents);
     private AgentFeatureModule? AgentFeature =>
         _featureModules.GetOrActivate<AgentFeatureModule>(FeatureIds.AgentsAndCapture);
-    private DumpsAndPeFeatureModule? DumpsAndPeFeature =>
-        _featureModules.GetOrActivate<DumpsAndPeFeatureModule>(FeatureIds.DumpsAndPeAnalysis);
-    private NetworkAndZeekFeatureModule? NetworkAndZeekFeature =>
-        _featureModules.GetOrActivate<NetworkAndZeekFeatureModule>(FeatureIds.NetworkAndZeek);
-    private AiFeatureModule? AiFeature =>
-        _featureModules.GetOrActivate<AiFeatureModule>(FeatureIds.AiAssistance);
     private BaselineComparisonFeatureModule? BaselineComparisonFeature =>
         _featureModules.GetOrActivate<BaselineComparisonFeatureModule>(FeatureIds.BaselineComparison);
     private SearchFeatureModule? SearchFeature =>
@@ -213,84 +300,6 @@ public partial class MainViewModel : ViewModelBase,
     private AgentNamedPipeClient _agentRecoveryClient => AgentFeature?.AgentRecoveryClient!;
     private AgentNamedPipeClient _agentShutdownControlClient => AgentFeature?.AgentShutdownControlClient!;
     private DispatcherTimer _agentStatusTimer => AgentFeature?.StatusTimer!;
-
-    // Process data
-    private readonly Dictionary<string, ProcessRowViewModel> _processViewModels = new();
-
-    [ObservableProperty]
-    private ObservableCollection<ProcessRowViewModel> processes = new();
-
-    [ObservableProperty]
-    private ICollectionView? processesView;
-
-    [ObservableProperty]
-    private string processListingStatus = "Process listing is not loaded.";
-
-    [ObservableProperty]
-    private bool isProcessListingLoading;
-
-    [ObservableProperty]
-    private ProcessRowViewModel? selectedProcess;
-
-    // Filter text for each column
-    [ObservableProperty]
-    private string filterProcessName = string.Empty;
-
-    [ObservableProperty]
-    private string filterPid = string.Empty;
-
-    [ObservableProperty]
-    private string filterParentPid = string.Empty;
-
-    [ObservableProperty]
-    private string filterParentProcessName = string.Empty;
-
-    [ObservableProperty]
-    private string filterProcessPath = string.Empty;
-
-    [ObservableProperty]
-    private string filterCommandLine = string.Empty;
-
-    [ObservableProperty]
-    private string filterUserName = string.Empty;
-
-    [ObservableProperty]
-    private string filterSessionId = string.Empty;
-
-    [ObservableProperty]
-    private string filterArchitecture = string.Empty;
-
-    [ObservableProperty]
-    private string filterStartTime = string.Empty;
-
-    [ObservableProperty]
-    private string filterEndTime = string.Empty;
-
-    [ObservableProperty]
-    private string filterStatus = string.Empty;
-
-    [ObservableProperty]
-    private string filterCpuUsage = string.Empty;
-
-    [ObservableProperty]
-    private string filterMemoryUsage = string.Empty;
-
-    [ObservableProperty]
-    private string filterCompanyName = string.Empty;
-
-    [ObservableProperty]
-    private string filterFileDescription = string.Empty;
-
-    [ObservableProperty]
-    private string filterSha256Hash = string.Empty;
-
-    // Sorting state
-    private string _currentSortColumn = "Tree";
-    private bool _sortAscending = true;
-
-    // Status
-    [ObservableProperty]
-    private string statusMessage = "Initializing...";
 
     [ObservableProperty]
     private string activeSessionFolder = string.Empty;
@@ -340,9 +349,6 @@ public partial class MainViewModel : ViewModelBase,
     [ObservableProperty]
     private string snapshotFollowStatusDetail = "Manual snapshot mode is pinned.";
 
-    [ObservableProperty]
-    private ViewerDetailsTabKey selectedDetailsTabKey = ViewerDetailsTabKey.Object;
-
     private string _snapshotPresentationContextNotice = string.Empty;
 
     private string AgentStatusMessage { get; set; } = "Agent: not connected";
@@ -354,6 +360,8 @@ public partial class MainViewModel : ViewModelBase,
 
     [ObservableProperty]
     private bool isAgentViewerConnected;
+
+    public bool CanOpenConnectedAgentMenus => IsAgentViewerConnected && IsAgentConnected;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ConnectedAgentStatusMessage))]
@@ -400,7 +408,8 @@ public partial class MainViewModel : ViewModelBase,
     private enum LocalAgentRecoveryOrigin
     {
         Startup,
-        Manual
+        Manual,
+        Automatic
     }
 
     [ObservableProperty]
@@ -448,15 +457,6 @@ public partial class MainViewModel : ViewModelBase,
 
     [ObservableProperty]
     private int refreshIntervalSeconds = 10;
-
-    [ObservableProperty]
-    private int totalProcessCount;
-
-    [ObservableProperty]
-    private int runningProcessCount;
-
-    [ObservableProperty]
-    private int exitedProcessCount;
 
     [ObservableProperty]
     private DateTime lastRefreshTime;
@@ -573,89 +573,34 @@ public partial class MainViewModel : ViewModelBase,
 
     public ObservableCollection<ConfigProfileDefinition> EventLogPolicyProfiles { get; } = new();
 
+    public BuiltInProfileMenuGroup SecurityAuditProfilesMenu { get; } = new(ConfigProfileKind.WindowsSecurityAuditPolicy);
+    public BuiltInProfileMenuGroup SecurityEventLogProfilesMenu { get; } = new(ConfigProfileKind.WindowsSecurityEventLogs);
+    public BuiltInProfileMenuGroup SysmonProfilesMenu { get; } = new(ConfigProfileKind.Sysmon);
+    public BuiltInProfileMenuGroup WindowsOtherProfilesMenu { get; } = new(ConfigProfileKind.EventLogs);
+    public BuiltInProfileMenuGroup PowerShellProfilesMenu { get; } = new(ConfigProfileKind.PowerShellAuditing);
+    public BuiltInProfileMenuGroup EtwProfilesMenu { get; } = new(ConfigProfileKind.Etw);
+
     [ObservableProperty]
     private bool hasEventLogPolicyProfiles;
 
-    // Child view models
-    public ProcessPropertiesViewModel ProcessPropertiesViewModel { get; }
-    public ProcessDescriptionViewModel ProcessDescriptionViewModel { get; }
-    public ProcessNotesViewModel NotesViewModel { get; }
-    public ModulesViewModel ModulesViewModel => ModulesAndHandlesFeature?.ModulesViewModel!;
-    public HandlesViewModel HandlesViewModel => ModulesAndHandlesFeature?.HandlesViewModel!;
-    public EventsViewModel EventsViewModel => EventTelemetryFeature?.RuntimeEventsViewModel!;
-    public EventsViewModel EtwProviderEventsViewModel => EventTelemetryFeature?.EtwEventsViewModel!;
-    public EventsViewModel WindowsAuditLogViewModel => WindowsSecurityEventsFeature?.ViewModel!;
-
     [RelayCommand]
-    private void EditWindowsSecurityDetailsDefinitions()
+    private void EditWindowsSecurityEventProfiles()
     {
         if (FeaturePublication.WindowsSecurityEvents)
             WindowsSecurityEventsFeature?.DetailsWorkflow.ShowEditor(System.Windows.Application.Current?.MainWindow);
     }
-    public EventsViewModel PowerShellLogViewModel => EventTelemetryFeature?.PowerShellEventsViewModel!;
-    public EventsViewModel WindowsOtherLogViewModel => EventTelemetryFeature?.OtherWindowsEventsViewModel!;
-    public EventsViewModel SysmonEventsViewModel => EventTelemetryFeature?.SysmonEventsViewModel!;
-    public MemoryDumpsViewModel MemoryDumpsViewModel => DumpsAndPeFeature?.MemoryDumpsViewModel!;
-    public PeAnalysisViewModel PeAnalysisViewModel => DumpsAndPeFeature?.PeAnalysisViewModel!;
-    public ProcessStatisticsViewModel ProcessStatisticsViewModel { get; }
-    public MemoryInvestigationViewModel MemoryInvestigationViewModel =>
-        _featureModules.GetOrActivate<MemoryInvestigationViewModel>(FeatureIds.SystemMemoryAndVolatility)!;
-    public NetworkCapturesViewModel NetworkCapturesViewModel => NetworkAndZeekFeature?.ViewModel!;
-    public FilesystemArtifactsViewModel FilesystemArtifactsViewModel =>
-        _featureModules.GetOrActivate<FilesystemArtifactsViewModel>(FeatureIds.FilesystemArtifacts)!;
-    public SystemActivityViewModel SystemActivityViewModel => EventTelemetryFeature?.SystemActivityViewModel!;
     public SearchViewModel SearchViewModel => SearchFeature?.ViewModel!;
     public SigmaViewModel SigmaViewModel =>
         _featureModules.GetOrActivate<SigmaViewModel>(FeatureIds.SearchAndSigma)!;
     public AgentsViewModel AgentsViewModel => AgentFeature?.AgentsViewModel!;
-    public ExplorerViewModel ExplorerViewModel { get; }
-    public InspectorPaneViewModel InspectorPaneViewModel { get; }
-    public ProcessRiskDetailsViewModel? ProcessRiskDetailsViewModel { get; }
-    public AiInvestigationViewModel AiInvestigationViewModel => AiFeature?.InvestigationViewModel!;
-    public AiDetailsInvestigationViewModel AiDetailsInvestigationViewModel => AiFeature?.DetailsViewModel!;
-    public AiChatViewModel AiChatViewModel => AiFeature?.ChatViewModel!;
     public SnapshotComparisonViewModel SnapshotComparisonViewModel => BaselineComparisonFeature?.ViewModel!;
     public FeaturePublicationViewModel FeaturePublication { get; }
-
-    public IReadOnlyList<FeatureTabDescriptor> ExplorerTabs => _viewerNavigationCoordinator.ExplorerTabs;
-    public IReadOnlyList<FeatureTabDescriptor> DataTabs => _viewerNavigationCoordinator.DataTabs;
-    public IReadOnlyList<FeatureTabDescriptor> AppInfoExtensionTabs { get; private set; } =
-        Array.Empty<FeatureTabDescriptor>();
 
     public InfrastructureCaseWorkspaceViewModel? InfrastructureWorkspace => _infrastructureWorkspace;
 
     public bool IsInfrastructureWorkspaceActive => _infrastructureWorkspace?.IsWorkspaceReady == true;
 
     public bool IsStandaloneWorkspaceActive => !IsInfrastructureWorkspaceActive;
-
-    [ObservableProperty]
-    private FeatureTabDescriptor? selectedDataTab;
-
-    [ObservableProperty]
-    private FeatureTabDescriptor? selectedExplorerTab;
-
-    [ObservableProperty]
-    private ExplorerAiSection selectedExplorerAiSection = ExplorerAiSection.Chat;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DataTabs))]
-    private bool isNetworkDataTabVisible;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DataTabs))]
-    private bool isFilesystemDataTabVisible;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(BookmarkSelectedProcessLabel))]
-    private bool isSelectedProcessBookmarked;
-
-    public string BookmarkSelectedProcessLabel => IsSelectedProcessBookmarked ? "Remove Bookmark" : "Bookmark";
-
-    [ObservableProperty]
-    private string scopedSelectionStatus = "Green scopes: none active; all evidence visible.";
-
-    [ObservableProperty]
-    private string scopedSelectionDetail = "No green scope or exclusion filters are active.";
 
     public bool IsLiveCaptureEnabled =>
         FeaturePublication.EventTelemetry &&
@@ -716,7 +661,7 @@ public partial class MainViewModel : ViewModelBase,
         _infrastructureCaseWorkspaceDependencies = infrastructureCaseWorkspaceDependencies;
 
         // Initialize services
-        _filterService = new ProcessFilterService();
+
         _externalProcessService = externalProcessService ?? new ViewerExternalProcessService();
         _localAgentProcessLifecycle = localAgentProcessLifecycle ?? new LocalAgentProcessLifecycleService();
         _discoverLocalAgentPairings = discoverLocalAgentPairings ?? (() => AgentPairingStore.Discover());
@@ -897,15 +842,6 @@ public partial class MainViewModel : ViewModelBase,
             CaptureOpenContext.AgentWritableLive,
             _activeCapturePackageInfo?.CompatibilityMetadata,
             _sessionPaths.SessionId);
-        _sqliteStagingQueryService = null;
-        _processListingService = null;
-
-        // Initialize child view models
-        ProcessPropertiesViewModel = new ProcessPropertiesViewModel();
-        InspectorPaneViewModel = new InspectorPaneViewModel();
-        ProcessRiskDetailsViewModel = _featureAccess.IsPublished(FeatureIds.ProcessRiskScore)
-            ? new ProcessRiskDetailsViewModel()
-            : null;
         var viewerFeatureDefinitions = new List<IViewerFeatureDefinition>
         {
             BaselineComparisonFeatureModule.CreateDefinition(
@@ -926,79 +862,58 @@ public partial class MainViewModel : ViewModelBase,
             FeatureIds.SearchAndSigma,
             FeatureIds.InfrastructureCaseWorkspaces
         };
-        AddCompiledPrivateViewerFeatureDefinitions(
-            viewerFeatureDefinitions,
-            requiredViewerFeatureIds);
-        _viewerFeatures = new ViewerFeatureRegistry(
+_viewerFeatures = new ViewerFeatureRegistry(
             _featureAccess.Catalog,
             viewerFeatureDefinitions,
             requiredViewerFeatureIds);
         RegisterOptionalFeatureModules();
-        NsrlLookupViewModel? nsrlLookupViewModel = null;
-        if (_featureAccess.IsPublished(FeatureIds.KnownFileReferenceData))
+        _emptyPresentationModules = new FeatureActivationRegistry(_featureAccess);
+        var presentationServices = new Services.Presentation.ProcessPresentationServices
         {
-            var knownFileLookupSettings = new KnownFileLookupSettingsService();
-            nsrlLookupViewModel = new NsrlLookupViewModel(
-                knownFileLookupSettings,
-                new HashLookupRestProviderFactory(),
-                () =>
-                {
-                    var lifecycleControl = new Services.KnownFiles.NsrlControlPipeClient();
-                    return new NsrlReferenceDataViewModel(
-                        new Services.KnownFiles.KnownFileServerLifecycleService(lifecycleControl),
-                        new Services.KnownFiles.NsrlControlPipeClient(),
-                        message => MessageBox.Show(
-                            message,
-                            "Managed NSRL Reference Data",
-                            MessageBoxButton.YesNo,
-                            MessageBoxImage.Warning) == MessageBoxResult.Yes);
-                });
+            Access = _featureAccess, SharedModules = _featureModules, SharedDefinitions = _viewerFeatures,
+            SharedActions = CreateViewerSharedActions(),
+            Projection = _telemetryProjectionService, Publication = FeaturePublication,
+            CaptureGeneration = () => _captureWorkspaceCoordinator.Generation, AnnotationStore = () => _annotationStore,
+            SessionPaths = () => _sessionPaths, ApplicationCatalog = _applicationCatalog,
+            GetStatus = () => StatusMessage, SetStatus = message => StatusMessage = message, Sigma = () => SigmaViewModel,
+            BuildExplorerScopeCounts = BuildExplorerScopeCountsFromMemory, RefreshExplorerCountsCallback = RefreshExplorerCountsForChangedInputsAsync,
+            LoadCorrelationEvidence = LoadCorrelationEvidenceResultsAsync, LoadExplorerChildren = LoadExplorerChildrenAsync,
+            IsActiveNetworkCapture = IsActiveNetworkCaptureRow, IsFinalizingNetworkCapture = IsFinalizingNetworkCaptureRow,
+            QueueSelectedDataEnrichment = p =>
+            {
+                if (ReferenceEquals(p, _activeProcessPresentation)) QueueSelectedDataTabEnrichmentIfNeeded();
+            },
+            SelectionChanged = _ => { QueueSelectedProcessDumpCommand.NotifyCanExecuteChanged(); AnalyzeSelectedProcessImageCommand.NotifyCanExecuteChanged(); AnalyzeSelectedDumpPeCommand.NotifyCanExecuteChanged(); },
+            PresentationStateChanged = _ => NotifyAgentCommandCanExecuteChanged(),
+            SelectedDataStateChanged = (sender, e) =>
+            {
+                OnMemoryDumpFeaturePropertyChanged(sender, e);
+                OnNetworkFeaturePropertyChanged(sender, e);
+                OnMemoryInvestigationFeaturePropertyChanged(sender, e);
+            },
+            NetworkRefreshed = ReconcileNetworkCaptureStateFromRows,
+            ConfigureContributions = context => ConfigureCompiledProcessPresentation(context)
+        };
+        Func<ProcessPresentationViewModel> createPresentation = () => new Services.Presentation.ProcessPresentationFactory().Create(presentationServices);
+        var hostRegistration = new Services.Presentation.ViewerPresentationHostRegistration();
+        ConfigureCompiledViewerPresentation(hostRegistration, createPresentation);
+        Services.Presentation.IViewerPresentationHost? activatedHost = null;
+        try
+        {
+            activatedHost = hostRegistration.Activate(() => new Services.Presentation.DefaultViewerPresentationHost(createPresentation()));
+            _presentationHost = activatedHost;
+            _activeProcessPresentation = _presentationHost.ActiveProcessPresentation;
         }
-        ProcessDescriptionViewModel = new ProcessDescriptionViewModel(
-            _annotationStore,
-            () => AiFeature?.Service,
-            _featureAccess,
-            _applicationCatalog,
-            new ApplicationComparisonEvidenceService(_telemetryProjectionService),
-            nsrlLookupViewModel,
-            aiEvidencePackBuilderFactory: () => AiFeature?.EvidencePackBuilder,
-            confirmReplace: message => MessageBox.Show(
-                message,
-                "Replace App Info Override",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning) == MessageBoxResult.Yes);
-        ProcessDescriptionViewModel.SetWorkspace(
-            _sessionPaths,
-            _captureWorkspaceCoordinator.Generation);
-        NotesViewModel = new ProcessNotesViewModel(_annotationStore);
-        NotesViewModel.NoteSaved += OnProcessNoteSaved;
-        ProcessStatisticsViewModel = new ProcessStatisticsViewModel(_telemetryProjectionService, InspectorPaneViewModel);
-        ExplorerViewModel = new ExplorerViewModel(OnExplorerScopeSelected, LoadExplorerChildrenAsync, _featureAccess);
-        _explorerTabSet = CreateExplorerTabSet();
-        _dataTabSet = CreateDataTabSet();
-        AppInfoExtensionTabs = new ReadOnlyCollection<FeatureTabDescriptor>(
-            _viewerFeatures.CreateTabDescriptors(
-                    FeatureTabSurface.AppInfo,
-                    _featureModules)
-                .Where(descriptor => _featureAccess.IsPublished(descriptor.FeatureId))
-                .ToArray());
-        _viewerNavigationCoordinator = new ViewerNavigationCoordinator(
-            _explorerTabSet,
-            _dataTabSet,
-            FeaturePublication.ReleaseId,
-            this);
-        _viewerNavigationCoordinator.StateChanged += OnViewerNavigationStateChanged;
-        ApplyViewerNavigationState(_viewerNavigationCoordinator.State);
-        _selectedProcessFanOutCoordinator = new SelectedProcessFanOutCoordinator(
-            _captureWorkspaceCoordinator.Generation,
-            this);
-        _selectedProcessFanOutCoordinator.StateChanged += OnSelectedProcessFanOutStateChanged;
-        _featureModules.Activated += OnFeatureModuleActivated;
-
-        // Set up collection view for filtering
-        ProcessesView = CollectionViewSource.GetDefaultView(Processes);
-        ProcessesView.Filter = FilterProcess;
-
+        catch (Exception ex)
+        {
+            activatedHost?.Dispose();
+            StatusMessage = $"Viewer presentation activation failed: {ex.Message}";
+            throw new InvalidOperationException(StatusMessage, ex);
+        }
+        if (_activeProcessPresentation != null) _activeProcessPresentation.PropertyChanged += OnProcessPresentationPropertyChanged;
+        _presentationHost.ActiveContextChanged += OnActivePresentationChanged;
+        if (_annotationStore != null) _presentationHost.BindCapture(new ViewerCaptureBinding(_captureWorkspaceCoordinator.Generation,
+            _sessionPaths, _annotationStore, _sqliteStagingQueryService, _processListingService));
         if (_featureAccess.IsPublished(FeatureIds.EventTelemetry) && EventTelemetryFeature != null)
         {
             LoadPowerShellAuditingSettings();
@@ -1009,6 +924,7 @@ public partial class MainViewModel : ViewModelBase,
         if (FeaturePublication.HostMonitoringConfiguration)
         {
             LoadSecurityMonitoringProfileManifests();
+            LoadBuiltInProfileMenus();
         }
 
         _snapshotAgeTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -1028,193 +944,22 @@ public partial class MainViewModel : ViewModelBase,
 
     private void RegisterOptionalFeatureModules()
     {
-        _featureModules.Register(
-            FeatureIds.ModulesAndHandles,
-            () => new ModulesAndHandlesFeatureModule(
-                _telemetryProjectionService,
-                InspectorPaneViewModel,
-                OnSelectedArtifactCollectionChanged,
-                OnSelectedArtifactCaptureStatusChanged));
-        _featureModules.Register(
-            FeatureIds.EventTelemetry,
-            () => new EventTelemetryFeatureModule(
-                _telemetryProjectionService,
-                InspectorPaneViewModel,
-                BackfillPowerShellEventsForProcess,
-                BackfillOtherWindowsEventsForProcess,
-                BackfillSysmonEventsForProcess));
-        _featureModules.Register(
-            FeatureIds.RuntimeEvents,
-            () => new RuntimeEventsFeatureModule(
-                _telemetryProjectionService,
-                InspectorPaneViewModel));
-        _featureModules.Register(
-            FeatureIds.EtwEvents,
-            () => new EtwEventsFeatureModule(
-                _telemetryProjectionService,
-                InspectorPaneViewModel));
-        _featureModules.Register(
-            FeatureIds.WindowsSecurityEvents,
-            () => new WindowsSecurityEventsFeatureModule(
-                _telemetryProjectionService,
-                InspectorPaneViewModel,
-                BackfillSecurityEventsForProcess));
-        _featureModules.Register(
-            FeatureIds.PowerShellEvents,
-            () => new PowerShellEventsFeatureModule(
-                _telemetryProjectionService,
-                InspectorPaneViewModel,
-                BackfillPowerShellEventsForProcess));
-        _featureModules.Register(
-            FeatureIds.WindowsOtherEvents,
-            () => new WindowsOtherEventsFeatureModule(
-                _telemetryProjectionService,
-                InspectorPaneViewModel,
-                BackfillOtherWindowsEventsForProcess));
-        _featureModules.Register(
-            FeatureIds.SysmonEvents,
-            () => new SysmonEventsFeatureModule(
-                _telemetryProjectionService,
-                InspectorPaneViewModel,
-                BackfillSysmonEventsForProcess));
-        _featureModules.Register(
-            FeatureIds.AgentsAndCapture,
-            () => new AgentFeatureModule(
-                OnAgentFeaturePropertyChanged,
-                OnAgentStatusTimerTick,
-                _featureAccess.Catalog.ReleaseId,
-                _sessionPaths));
+        var nativeEventProfiles = new Features.NativeEventProfiles.NativeEventProfileStore(
+            Services.SessionPathService.GetNativeEventProfilesPath());
+        _featureModules.Register(FeatureIds.AgentsAndCapture, () => new AgentFeatureModule(OnAgentFeaturePropertyChanged, OnAgentStatusTimerTick, _featureAccess.Catalog.ReleaseId, _sessionPaths));
         _featureModules.Register(FeatureIds.SearchAndSigma, () => new SigmaRuleParser());
-        _featureModules.Register(
-            FeatureIds.SearchAndSigma,
-            CreateSigmaViewModel,
-            DeactivateSigmaViewModel);
-        _featureModules.Register(
-            FeatureIds.DumpsAndPeAnalysis,
-            () => new DumpsAndPeFeatureModule(
-                _telemetryProjectionService,
-                InspectorPaneViewModel,
-                OnMemoryDumpFeaturePropertyChanged));
-        _featureModules.Register(
-            FeatureIds.NetworkAndZeek,
-            () => new NetworkAndZeekFeatureModule(
-                _telemetryProjectionService,
-                InspectorPaneViewModel,
-                IsActiveNetworkCaptureRow,
-                IsFinalizingNetworkCaptureRow,
-                OnNetworkFeaturePropertyChanged,
-                OnNetworkFeatureRefreshed));
-        _featureModules.Register(
-            FeatureIds.SystemMemoryAndVolatility,
-            CreateMemoryInvestigationViewModel,
-            DeactivateMemoryInvestigationViewModel);
-        _featureModules.Register(
-            FeatureIds.FilesystemArtifacts,
-            () => new FilesystemArtifactsViewModel(_telemetryProjectionService, InspectorPaneViewModel),
-            viewModel => viewModel.Clear());
+        _featureModules.Register(FeatureIds.SearchAndSigma, CreateSigmaViewModel, DeactivateSigmaViewModel);
         _viewerFeatures.RegisterActivations(_featureModules);
-        _featureModules.Register(
-            FeatureIds.AiAssistance,
-            () => new AiFeatureModule(
-                _sessionPaths,
-                _telemetryProjectionService,
-                _annotationStore,
-                _applicationCatalog,
-                InspectorPaneViewModel,
-                _featureAccess));
-        _featureModules.Register(
-            FeatureIds.SecurityMonitoringConfiguration,
-            () => new SecurityMonitoringFeatureModule());
+        _featureModules.Register(FeatureIds.SecurityMonitoringConfiguration, () => new SecurityMonitoringFeatureModule());
+        _featureModules.Register(FeatureIds.WindowsSecurityEvents, () => new Services.Presentation.WindowsSecurityPresentationServices(nativeEventProfiles));
+        _featureModules.Register(FeatureIds.EventTelemetry, () => new Services.Presentation.EventTelemetryPresentationServices(nativeEventProfiles));
+        _featureModules.Register(FeatureIds.AiAssistance, () => new AiInvestigationService(_sessionPaths.AiSettingsPath, _sessionPaths.AiSecretPath));
     }
 
-    private FeatureTabSet CreateExplorerTabSet()
-    {
-        List<FeatureTabDescriptor> descriptors =
-        [
-            new(
-                ExplorerTabKeys.Explore,
-                "Explore",
-                FeatureIds.ProcessListing,
-                0,
-                () => ExplorerViewModel),
-            new(
-                ExplorerTabKeys.Agents,
-                "Agents",
-                FeatureIds.AgentsAndCapture,
-                100,
-                () => AgentsViewModel),
-            new(
-                ExplorerTabKeys.Sigma,
-                "Sigma",
-                FeatureIds.SearchAndSigma,
-                300,
-                () => SigmaViewModel,
-                showCount: true),
-            new(
-                ExplorerTabKeys.Ai,
-                "AI",
-                FeatureIds.AiAssistance,
-                400,
-                () => AiFeature == null ? null : this),
-            new(
-                ExplorerTabKeys.Network,
-                "Network",
-                FeatureIds.NetworkAndZeek,
-                500,
-                () => NetworkCapturesViewModel,
-                showCount: true),
-            new(
-                ExplorerTabKeys.Memory,
-                "Memory",
-                FeatureIds.SystemMemoryAndVolatility,
-                600,
-                () => MemoryInvestigationViewModel,
-                showCount: true)
-        ];
-        descriptors.AddRange(_viewerFeatures.CreateTabDescriptors(
-            FeatureTabSurface.Explorer,
-            _featureModules));
 
-        return new FeatureTabSet(
-            _featureAccess.Catalog,
-            FeatureTabSurface.Explorer,
-            descriptors,
-            ExplorerTabKeys.Explore);
-    }
 
-    private FeatureTabSet CreateDataTabSet()
-    {
-        List<FeatureTabDescriptor> descriptors =
-        [
-            new(DataTabKeys.AppInfo, "App Info", FeatureIds.SelectedProcessDetails, 0, () => new Views.Features.SelectedProcess.DataProcessAppInfoView { DataContext = this }),
-            new(DataTabKeys.Notes, "📝 Notes", FeatureIds.SelectedProcessDetails, 100, () => new Views.Features.SelectedProcess.DataProcessNotesView { DataContext = NotesViewModel }),
-            new(DataTabKeys.Modules, "Loaded Modules", FeatureIds.ModulesAndHandles, 400, () => new Views.Features.Artifacts.DataModulesView { DataContext = ModulesViewModel }, showCount: true),
-            new(DataTabKeys.Handles, "Handles", FeatureIds.ModulesAndHandles, 500, () => new Views.Features.Artifacts.DataHandlesView { DataContext = HandlesViewModel }, showCount: true),
-            new(DataTabKeys.MemoryDumps, "Dumps", FeatureIds.DumpsAndPeAnalysis, 600, () => new Views.Features.Artifacts.DataMemoryDumpsView { DataContext = MemoryDumpsViewModel }, showCount: true),
-            new(DataTabKeys.PeAnalysis, "PE Analysis", FeatureIds.DumpsAndPeAnalysis, 700, () => new Views.Features.Artifacts.DataPeAnalysisView { DataContext = PeAnalysisViewModel }, showCount: true),
-            new(DataTabKeys.SystemMemory, "System Memory", FeatureIds.SystemMemoryAndVolatility, 800, () => new Views.Features.Memory.DataSystemMemoryView { DataContext = MemoryInvestigationViewModel }, showCount: true),
-            new(DataTabKeys.Network, "Network Captures", FeatureIds.NetworkAndZeek, 900, () => new Views.Features.Network.DataNetworkCapturesView { DataContext = NetworkCapturesViewModel }, showCount: true),
-            new(DataTabKeys.Filesystem, "Filesystem Artifacts", FeatureIds.FilesystemArtifacts, 1000, () => new Views.Features.Filesystem.DataFilesystemArtifactsView { DataContext = FilesystemArtifactsViewModel }, showCount: true),
-            new(DataTabKeys.SystemActivity, "System Activity", FeatureIds.EventTelemetry, 1100, () => new Views.Features.Events.DataSystemActivityView { DataContext = SystemActivityViewModel }, showCount: true),
-            new(DataTabKeys.RuntimeEvents, "Runtime Events", FeatureIds.EventTelemetry, 1200, () => new Views.Features.Events.DataRuntimeEventsView { DataContext = EventsViewModel }, showCount: true),
-            new(DataTabKeys.EtwEvents, "ETW Providers", FeatureIds.EventTelemetry, 1300, () => new Views.Features.Events.DataEtwEventListView { DataContext = EtwProviderEventsViewModel }, showCount: true),
-            new(DataTabKeys.SecurityEvents, "Windows Audit Log", FeatureIds.WindowsSecurityEvents, 1400, () => new Views.Features.Events.DataWindowsSecurityEventsView { DataContext = WindowsAuditLogViewModel }, showCount: true),
-            new(DataTabKeys.PowerShellEvents, "PowerShell Logs", FeatureIds.EventTelemetry, 1500, () => new Views.Features.Events.DataEventListView { DataContext = PowerShellLogViewModel }, showCount: true),
-            new(DataTabKeys.WindowsOtherEvents, "Windows Logs (Other)", FeatureIds.EventTelemetry, 1600, () => new Views.Features.Events.DataEventListView { DataContext = WindowsOtherLogViewModel }, showCount: true),
-            new(DataTabKeys.SysmonEvents, "Sysmon", FeatureIds.EventTelemetry, 1700, () => new Views.Features.Events.DataEventListView { DataContext = SysmonEventsViewModel }, showCount: true),
-            new(DataTabKeys.Ai, "AI", FeatureIds.AiAssistance, 1800, () => new Views.Features.Ai.DataAiInvestigationView { DataContext = AiInvestigationViewModel })
-        ];
-        descriptors.AddRange(_viewerFeatures.CreateTabDescriptors(
-            FeatureTabSurface.Data,
-            _featureModules));
 
-        return new FeatureTabSet(
-            _featureAccess.Catalog,
-            FeatureTabSurface.Data,
-            descriptors,
-            DataTabKeys.AppInfo,
-            allowEmpty: true);
-    }
+
 
     private SearchFeatureModule CreateSearchFeatureModule()
     {
@@ -1317,7 +1062,7 @@ public partial class MainViewModel : ViewModelBase,
         }
     }
 
-    public bool IsFeatureActivated(FeatureId featureId) => _featureModules.IsActivated(featureId);
+    public bool IsFeatureActivated(FeatureId featureId) => _featureModules.IsActivated(featureId) || _presentationModules.IsActivated(featureId);
 
     private MemoryInvestigationViewModel CreateMemoryInvestigationViewModel()
     {
@@ -1345,12 +1090,235 @@ public partial class MainViewModel : ViewModelBase,
 
     private async void OnAgentStatusTimerTick(object? sender, EventArgs e)
     {
-        if (!IsAgentViewerConnected && !IsLocalAgentRecoveryInProgress)
+        try
         {
-            RefreshDetectedLocalAgentPresence(projectNewDetection: true);
+            if (!IsAgentViewerConnected && !IsLocalAgentRecoveryInProgress &&
+                GetLocalAgent() == null)
+            {
+                RefreshDetectedLocalAgentPresence(projectNewDetection: true);
+            }
+
+            await TryAutomaticallyReconnectLocalAgentAsync();
+            await PollAgentStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            AgentStatusMessage = "Agent: recovery unavailable";
+            AgentJobStatusMessage = $"Agent recovery/polling failed: {ex.Message}";
+        }
+    }
+
+    private async Task TryAutomaticallyReconnectLocalAgentAsync()
+    {
+        if (!FeaturePublication.AgentsAndCapture ||
+            _captureWorkspaceCoordinator.Mode != CaptureWorkspaceMode.LiveCapture ||
+            _isLocalAgentSetupInProgress ||
+            IsAgentShutdownInProgress ||
+            IsAgentLateExitObservationActive ||
+            GetLocalAgent() is not { } localAgent ||
+            localAgent.PairingState is
+                AgentPairingState.Revoked or
+                AgentPairingState.Corrupt or
+                AgentPairingState.WrongUser or
+                AgentPairingState.WrongSession or
+                AgentPairingState.WrongRelease)
+        {
+            _localAgentAutomaticRecovery.Reset();
+            return;
         }
 
-        await PollAgentStatusAsync();
+        if (IsLocalAgentRecoveryInProgress)
+        {
+            return;
+        }
+
+        if (_localAgentAutomaticRecovery.IsPromptOpen)
+        {
+            return;
+        }
+
+        if (IsAgentViewerConnected && IsAgentConnected)
+        {
+            _localAgentAutomaticRecovery.Reset();
+            return;
+        }
+
+        var workspaceGeneration = _captureWorkspaceCoordinator.Generation;
+        var recoveryCoordinator = GetLocalAgentRecoveryCoordinator();
+        await _localAgentAutomaticRecovery.TryReconnectAsync(
+            DateTime.UtcNow,
+            () => Task.Run(recoveryCoordinator.Discover),
+            MatchesActiveLocalAgentLease,
+            TryPromptForVerifiedAgentRecoveryAsync,
+            () => RecoverRunningLocalAgentAsync(LocalAgentRecoveryOrigin.Automatic),
+            () => IsAgentViewerConnected && IsAgentConnected,
+            () => workspaceGeneration == _captureWorkspaceCoordinator.Generation &&
+                _captureWorkspaceCoordinator.Mode == CaptureWorkspaceMode.LiveCapture &&
+                GetLocalAgent() is { } current &&
+                current.AgentId == localAgent.AgentId &&
+                current.PairingState is not (
+                    AgentPairingState.Revoked or
+                    AgentPairingState.Corrupt or
+                    AgentPairingState.WrongUser or
+                    AgentPairingState.WrongSession or
+                    AgentPairingState.WrongRelease));
+    }
+
+    private bool MatchesActiveLocalAgentLease(AgentPairingLeaseMetadata lease) =>
+        lease.WorkspaceMode == CaptureWorkspaceMode.LiveCapture &&
+        !lease.CaptureSealed &&
+        string.Equals(lease.SessionId, _sessionPaths.SessionId, StringComparison.Ordinal) &&
+        string.Equals(
+            lease.DatabaseIdentity,
+            SessionPathService.NormalizeLiveDatabaseIdentity(_sessionPaths.LiveDatabasePath),
+            StringComparison.OrdinalIgnoreCase);
+
+    private async Task<bool> TryPromptForVerifiedAgentRecoveryAsync(
+        LocalAgentDiscoveryResult discovery)
+    {
+        if (!TryGetCachedAgentShutdownTarget(out var cached))
+        {
+            return false;
+        }
+
+        var target = new LocalAgentVerifiedShutdownTarget(
+            cached.ProcessId,
+            cached.StartedAtUtc,
+            cached.SessionId,
+            cached.DatabasePath);
+        if (!_localAgentAutomaticRecovery.TryBeginPrompt(
+            discovery,
+            target,
+            _sessionPaths.SessionId,
+            SessionPathService.NormalizeLiveDatabaseIdentity(_sessionPaths.LiveDatabasePath),
+            IsAgentConnected,
+            out var reason))
+        {
+            return false;
+        }
+
+        var matchingExit = reason == LocalAgentRecoveryPromptReason.VerifiedExit;
+        var matchingStall = reason == LocalAgentRecoveryPromptReason.SustainedUnresponsive;
+
+        try
+        {
+            var condition = matchingExit
+                ? $"The exact local Agent process (PID {cached.ProcessId}) has exited."
+                : $"The exact local Agent process (PID {cached.ProcessId}) is running, but authenticated health and its independent lease heartbeat have both been unavailable for at least one minute.";
+            var action = matchingExit
+                ? "Start a replacement Agent for this live capture? Windows may ask for elevation, depending on this machine's UAC policy."
+                : "Try to stop this exact Agent, then start a replacement? A forced stop may lose events still buffered in memory. Windows may ask for elevation after the old process exits, depending on this machine's UAC policy.";
+            var choice = MessageBox.Show(
+                Application.Current?.MainWindow,
+                $"{condition}\n\n{action}\n\nEvents missed while the Agent is absent cannot be reconstructed by this action. The new Agent will start idle; restart capture from the Agents workspace if needed.",
+                "Restore local Agent",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (choice != MessageBoxResult.Yes)
+            {
+                _localAgentAutomaticRecovery.RememberDecline(target);
+                StatusMessage = "Agent recovery was declined. The current evidence and workspace remain available.";
+                return true;
+            }
+
+            await RestartVerifiedLocalAgentAsync(cached, matchingStall);
+            return true;
+        }
+        finally
+        {
+            _localAgentAutomaticRecovery.EndPrompt();
+        }
+    }
+
+    private async Task RestartVerifiedLocalAgentAsync(AgentShutdownTarget target, bool stalled)
+    {
+        if (!TryGetCachedAgentShutdownTarget(out var current) ||
+            !Equals(current, target) ||
+            !TryBeginLocalAgentSetup("Restore local Agent"))
+        {
+            return;
+        }
+
+        try
+        {
+            var workspaceGeneration = _captureWorkspaceCoordinator.Generation;
+            var agent = GetLocalAgent();
+            if (agent == null)
+            {
+                return;
+            }
+
+            // The modal consent dialog pumps WPF messages. Health may recover
+            // while it is open, so approval alone cannot authorize a stop.
+            var freshDiscovery = await Task.Run(
+                GetLocalAgentRecoveryCoordinator().Discover);
+            var consentStillValid = _localAgentAutomaticRecovery.IsConsentStillValid(
+                freshDiscovery,
+                new LocalAgentVerifiedShutdownTarget(
+                    target.ProcessId,
+                    target.StartedAtUtc,
+                    target.SessionId,
+                    target.DatabasePath),
+                _sessionPaths.SessionId,
+                SessionPathService.NormalizeLiveDatabaseIdentity(_sessionPaths.LiveDatabasePath),
+                IsAgentConnected,
+                stalled
+                    ? LocalAgentRecoveryPromptReason.SustainedUnresponsive
+                    : LocalAgentRecoveryPromptReason.VerifiedExit);
+            var contextChanged =
+                workspaceGeneration != _captureWorkspaceCoordinator.Generation ||
+                !TryGetCachedAgentShutdownTarget(out current) ||
+                !Equals(current, target);
+            if (!consentStillValid || contextChanged)
+            {
+                if (contextChanged)
+                {
+                    _localAgentAutomaticRecovery.InvalidatePrompt();
+                }
+                StatusMessage = "Agent conditions changed during the recovery prompt. No process was stopped or started; automatic reconnection will continue.";
+                return;
+            }
+
+            var memoryMegabytes = agent.AgentMemoryLimitMegabytes;
+            var captureOptions = agent.CaptureOptions.ToArray();
+            if (stalled)
+            {
+                var stopped = await StopConnectedAgentAsync(
+                    agent,
+                    "Analyst approved restart after sustained IPC and lease-heartbeat loss.",
+                    requireViewerConnection: false,
+                    allowVerifiedProcessFallback: true);
+                if (!stopped)
+                {
+                    return;
+                }
+
+                agent = AgentsViewModel.AddOrUpdateLocalAgent();
+                agent.AgentMemoryLimitMegabytes = memoryMegabytes;
+                agent.ApplyCaptureOptionSelections(captureOptions);
+            }
+
+            var binding = await StartSelectedLocalAgentAsync(agent, initiatedByAdd: false);
+            if (binding == null ||
+                workspaceGeneration != _captureWorkspaceCoordinator.Generation ||
+                _captureWorkspaceCoordinator.Mode != CaptureWorkspaceMode.LiveCapture ||
+                !string.Equals(target.SessionId, _sessionPaths.SessionId, StringComparison.Ordinal) ||
+                !ViewerAgentCommandPathsEqual(target.DatabasePath, _sessionPaths.LiveDatabasePath) ||
+                !await AttachVerifiedLocalAgentSetupBindingAsync(agent, binding))
+            {
+                return;
+            }
+
+            _localAgentAutomaticRecovery.Reset(clearDeclinedTarget: true);
+            _localAgentAutomaticRecovery.InvalidatePrompt();
+            StatusMessage =
+                "The replacement Agent is securely connected and idle. Any capture gap remains visible; restart configured capture from the Agents workspace if needed.";
+        }
+        finally
+        {
+            EndLocalAgentSetup();
+        }
     }
 
     private void OnAgentCaptureWorkflowStateChanged(
@@ -1361,7 +1329,7 @@ public partial class MainViewModel : ViewModelBase,
         {
             IsAgentConnected = e.State.IsReachable;
             IsAgentViewerConnected = e.State.IsViewerAttached;
-            ConnectedAgentCount = AgentsViewModel.IsInfrastructureProjectionActive
+            ConnectedAgentCount = AgentsViewModel?.IsInfrastructureProjectionActive == true
                 ? AgentsViewModel.InfrastructureConnectedAgentCount
                 : e.State.AuthenticatedConnectedAgentCount;
             ApplyAgentCaptureControlProjection(e.State.Control);
@@ -1510,19 +1478,19 @@ public partial class MainViewModel : ViewModelBase,
             eventFeature.SystemActivityViewModel.Clear();
         }
 
-        ExplorerViewModel.ResetCounts();
+        _activeProcessPresentation?.ExplorerViewModel.ResetCounts();
         ResetExplorerTabCounts();
-        if (_featureModules.TryGetActivated<NetworkAndZeekFeatureModule>(FeatureIds.NetworkAndZeek, out var network))
+        if (_presentationModules.TryGetActivated<NetworkAndZeekFeatureModule>(FeatureIds.NetworkAndZeek, out var network))
         {
             network.ViewModel.Clear();
         }
 
-        if (_featureModules.TryGetActivated<FilesystemArtifactsViewModel>(FeatureIds.FilesystemArtifacts, out var filesystem))
+        if (_presentationModules.TryGetActivated<FilesystemArtifactsViewModel>(FeatureIds.FilesystemArtifacts, out var filesystem))
         {
             filesystem.Clear();
         }
 
-        if (_featureModules.TryGetActivated<MemoryInvestigationViewModel>(FeatureIds.SystemMemoryAndVolatility, out var memory))
+        if (_presentationModules.TryGetActivated<MemoryInvestigationViewModel>(FeatureIds.SystemMemoryAndVolatility, out var memory))
         {
             memory.Clear();
         }
@@ -1544,12 +1512,12 @@ public partial class MainViewModel : ViewModelBase,
             CreateSnapshotFollowWorkspace(
                 _captureWorkspaceCoordinator.State,
                 isShuttingDown: true));
-        ProcessDescriptionViewModel.Shutdown();
-        _viewerNavigationCoordinator.StateChanged -= OnViewerNavigationStateChanged;
-        _selectedProcessFanOutCoordinator.StateChanged -= OnSelectedProcessFanOutStateChanged;
+
+
+
         _agentCaptureWorkflowCoordinator.StateChanged -= OnAgentCaptureWorkflowStateChanged;
         _artifactEnrichmentWorkflowCoordinator.StateChanged -= OnArtifactEnrichmentWorkflowStateChanged;
-        _featureModules.Activated -= OnFeatureModuleActivated;
+
         if (_infrastructureWorkspace != null)
         {
             _infrastructureWorkspace.PropertyChanged -= OnInfrastructureWorkspacePropertyChanged;
@@ -1561,9 +1529,9 @@ public partial class MainViewModel : ViewModelBase,
         _captureWorkspaceCoordinator.StateChanged -= OnWorkspaceLifecycleStateChanged;
         _liveSnapshotRefreshCoordinator.StateChanged -= OnLiveSnapshotRefreshStateChanged;
         _snapshotFollowCoordinator.StateChanged -= OnSnapshotFollowStateChanged;
-        NotesViewModel.NoteSaved -= OnProcessNoteSaved;
-        _viewerNavigationCoordinator.Dispose();
-        _selectedProcessFanOutCoordinator.Dispose();
+
+
+
         _explorerCountRefreshCoordinator.Dispose();
         _agentCaptureWorkflowCoordinator.Dispose();
         _agentCaptureActionService.Dispose();
@@ -1577,6 +1545,11 @@ public partial class MainViewModel : ViewModelBase,
         _localAgentControlCoordinator?.Dispose();
         _localAgentRecoveryCoordinator?.Dispose();
         _localAgentProcessLifecycle.Dispose();
+        if (_activeProcessPresentation != null) _activeProcessPresentation.PropertyChanged -= OnProcessPresentationPropertyChanged;
+        _presentationHost.ActiveContextChanged -= OnActivePresentationChanged;
+        _presentationHost.Dispose();
+        if (_viewerSharedActions != null) PropertyChanged -= _viewerSharedActions.SourcePropertyChanged;
+        _emptyPresentationModules.Dispose();
         _featureModules.Dispose();
         _captureWorkspaceCoordinator.Dispose();
         _snapshotFollowCoordinator.Dispose();
@@ -2077,6 +2050,7 @@ public partial class MainViewModel : ViewModelBase,
         }
 
         AgentsViewModel.MarkAgentViewerConnected(agent, attached.Response);
+        _localAgentAutomaticRecovery.InvalidatePrompt();
         UpdateAgentStatus(attached.Response, observeWorkflow: false);
         ClearLocalAgentStartDiscoveryConflict();
         IsLocalAgentProcessDetected = true;
@@ -2232,12 +2206,12 @@ public partial class MainViewModel : ViewModelBase,
         dialog.ShowDialog();
     }
 
-    private void ShowAgentMonitoringStatusDialog(AgentRegistryEntryViewModel agent)
+    private void ShowAgentMonitoringStatusDialog(AgentRegistryEntryViewModel agent, string area = "Monitoring")
     {
         var dialog = new ProcInsider.AgentMonitoringStatusDialog(agent)
         {
             Owner = GetDialogOwner(),
-            Title = $"Monitoring Status - {agent.DisplayName}"
+            Title = $"{area} Status - {agent.DisplayName}"
         };
 
         dialog.ShowDialog();
@@ -2256,9 +2230,9 @@ public partial class MainViewModel : ViewModelBase,
 
     private async Task<bool> RecoverRunningLocalAgentAsync(LocalAgentRecoveryOrigin origin)
     {
-        if (IsLocalAgentRecoveryInProgress || IsAgentViewerConnected)
+        if (IsLocalAgentRecoveryInProgress || (IsAgentViewerConnected && IsAgentConnected))
         {
-            return IsAgentViewerConnected;
+            return IsAgentViewerConnected && IsAgentConnected;
         }
 
         IsLocalAgentRecoveryInProgress = true;
@@ -2301,6 +2275,20 @@ public partial class MainViewModel : ViewModelBase,
                 return true;
             }
 
+            if (origin == LocalAgentRecoveryOrigin.Automatic)
+            {
+                if (_captureWorkspaceCoordinator.Mode != CaptureWorkspaceMode.LiveCapture ||
+                    !string.Equals(_sessionPaths.SessionId, binding.SessionPaths.SessionId, StringComparison.Ordinal) ||
+                    !ViewerAgentCommandPathsEqual(
+                        _sessionPaths.LiveDatabasePath,
+                        binding.SessionPaths.LiveDatabasePath))
+                {
+                    return false;
+                }
+
+                return await ProjectRecoveredLocalAgentBindingAsync(binding, origin);
+            }
+
             await BeginStagingLoadOperationAsync("Activating the authenticated local-agent workspace...");
             try
             {
@@ -2334,30 +2322,7 @@ public partial class MainViewModel : ViewModelBase,
                     return true;
                 }
 
-                var agent = AgentsViewModel.AddOrUpdateLocalAgent();
-                AgentsViewModel.ApplyLocalPairing(binding.ProtectedPairing);
-                var attached = _agentCaptureWorkflowCoordinator.AttachVerified(
-                    agent.AgentId,
-                    binding.AuthenticatedHealthResponse);
-                if (!attached.Succeeded || attached.Response == null || attached.Assessment?.Accepted != true)
-                {
-                    AgentsViewModel.MarkAgentViewerDisconnected(
-                        agent,
-                        $"Recovery attachment failed: {FirstNonEmpty(attached.State.LastError, attached.Outcome.ToString())}");
-                    StatusMessage = "The authenticated local-agent workspace was activated, but the prevalidated binding could not be projected as a viewer attachment.";
-                    return true;
-                }
-
-                AgentsViewModel.MarkAgentViewerConnected(agent, attached.Response);
-                UpdateAgentStatus(attached.Response, observeWorkflow: false);
-                await LoadConnectedAgentMonitoringConfigurationAsync(agent);
-                ClearLocalAgentStartDiscoveryConflict();
-                IsLocalAgentProcessDetected = true;
-                NotifyAgentCommandCanExecuteChanged();
-                StatusMessage = origin == LocalAgentRecoveryOrigin.Startup
-                    ? "The running local agent was securely recovered, its exact live workspace was reopened, and the viewer attached automatically. No process was started and capture or host configuration was not changed."
-                    : "The exact live workspace was reopened and the viewer securely reconnected to the existing paired agent without starting another process. Capture and host configuration were not changed.";
-                return true;
+                return await ProjectRecoveredLocalAgentBindingAsync(binding, origin);
             }
             catch (Exception ex)
             {
@@ -2373,6 +2338,43 @@ public partial class MainViewModel : ViewModelBase,
         {
             IsLocalAgentRecoveryInProgress = false;
         }
+    }
+
+    private async Task<bool> ProjectRecoveredLocalAgentBindingAsync(
+        LocalAgentRecoveredBinding binding,
+        LocalAgentRecoveryOrigin origin)
+    {
+        var agent = AgentsViewModel.AddOrUpdateLocalAgent();
+        AgentsViewModel.ApplyLocalPairing(binding.ProtectedPairing);
+        var attached = _agentCaptureWorkflowCoordinator.AttachVerified(
+            agent.AgentId,
+            binding.AuthenticatedHealthResponse);
+        if (!attached.Succeeded || attached.Response == null || attached.Assessment?.Accepted != true)
+        {
+            AgentsViewModel.MarkAgentViewerDisconnected(
+                agent,
+                $"Recovery attachment failed: {FirstNonEmpty(attached.State.LastError, attached.Outcome.ToString())}");
+            StatusMessage = "The authenticated local-agent binding could not be projected as a viewer attachment.";
+            return false;
+        }
+
+        AgentsViewModel.MarkAgentViewerConnected(agent, attached.Response);
+        UpdateAgentStatus(attached.Response, observeWorkflow: false);
+        await LoadConnectedAgentMonitoringConfigurationAsync(agent);
+        _localAgentAutomaticRecovery.InvalidatePrompt();
+        ClearLocalAgentStartDiscoveryConflict();
+        IsLocalAgentProcessDetected = true;
+        NotifyAgentCommandCanExecuteChanged();
+        StatusMessage = origin switch
+        {
+            LocalAgentRecoveryOrigin.Startup =>
+                "The running local agent was securely recovered, its exact live workspace was reopened, and the viewer attached automatically. No process was started and capture or host configuration were not changed.",
+            LocalAgentRecoveryOrigin.Automatic =>
+                "The viewer securely reconnected to the running local agent for this live workspace. Capture and host configuration were not changed.",
+            _ =>
+                "The exact live workspace was reopened and the viewer securely reconnected to the existing paired agent without starting another process. Capture and host configuration were not changed."
+        };
+        return true;
     }
 
     [RelayCommand(CanExecute = nameof(CanManageAgentPairing))]
@@ -2453,6 +2455,8 @@ public partial class MainViewModel : ViewModelBase,
         }
 
         _agentCaptureWorkflowCoordinator.Disconnect("The local-agent pairing was explicitly revoked.");
+        _lastVerifiedAgentShutdownTarget = null;
+        _localAgentAutomaticRecovery.Reset(clearDeclinedTarget: true);
         AgentsViewModel.MarkAgentViewerDisconnected(agent, "The local-agent pairing was explicitly revoked.");
         AgentsViewModel.ApplyLocalPairing(new AgentPairingStoreResult(
             AgentPairingState.Revoked,
@@ -2601,9 +2605,40 @@ public partial class MainViewModel : ViewModelBase,
 
     [RelayCommand]
     private async Task CheckAgentMonitoringConfigurationAsync(AgentRegistryEntryViewModel? agent)
+        => await CheckMonitoringAreaAsync(agent,
+            FeaturePublication.WindowsSecurityEvents ? "Security" : "Host", null, requireSecurity: false);
+
+    [RelayCommand]
+    private async Task CheckSecurityMonitoringAsync()
+        => await CheckMonitoringAreaAsync(null, "Security", null, requireSecurity: true);
+
+    [RelayCommand]
+    private async Task CheckSysmonMonitoringAsync()
+        => await CheckMonitoringAreaAsync(null, "Sysmon", AgentConfigurationAreaKind.Sysmon);
+
+    [RelayCommand]
+    private async Task CheckEtwMonitoringAsync()
+        => await CheckMonitoringAreaAsync(null, "ETW", AgentConfigurationAreaKind.Etw);
+
+    [RelayCommand]
+    private async Task CheckPowerShellMonitoringAsync()
+        => await CheckMonitoringAreaAsync(null, "PowerShell", AgentConfigurationAreaKind.PowerShellAuditing);
+
+    [RelayCommand]
+    private async Task CheckWindowsMonitoringAsync()
+        => await CheckMonitoringAreaAsync(null, "Windows", AgentConfigurationAreaKind.WindowsEventLogs);
+
+    private async Task CheckMonitoringAreaAsync(
+        AgentRegistryEntryViewModel? agent,
+        string areaName,
+        AgentConfigurationAreaKind? area,
+        bool requireSecurity = false)
     {
         agent ??= GetLocalAgent();
-        if (!CanRunAgentConfigurationCommand(agent, AgentConfigurationTargetKind.HostMonitoring, "configuration checks"))
+        if (!CanRunAgentConfigurationCommand(
+                agent, AgentConfigurationTargetKind.HostMonitoring, "configuration checks",
+                requireSecurity ? FeatureIds.WindowsSecurityEvents :
+                area.HasValue ? FeatureIds.SecurityMonitoringConfiguration : null))
         {
             ShowMonitoringCheckDiagnostic(StatusMessage);
             return;
@@ -2617,16 +2652,35 @@ public partial class MainViewModel : ViewModelBase,
         }
 
         var showStatusDialog = false;
-        var target = CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: true);
+        var target = CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: true,
+            useLegacyEventTelemetryScope: area.HasValue);
+        if (area.HasValue)
+            target = target with { ConfigurationAreas = [area.Value] };
         string? diagnostic = null;
         try
         {
             AgentsViewModel.ApplyMonitoringActionProgress(
                 targetAgent,
-                "Checking Windows Security monitoring...",
-                "The authenticated Agent is reading effective audit policy, command-line policy, Security log settings, and watcher health.");
+                $"Checking {areaName} monitoring...",
+                $"The authenticated Agent is reading {areaName} monitoring prerequisites and status.");
             StatusMessage = targetAgent.MonitoringStatusSummary;
-            var result = await _hostMonitoringActionService.Value.CheckSavedConfigurationAsync(target);
+            ViewerHostMonitoringActionResult result;
+            if (area is { } selectedArea)
+            {
+                // The saved non-Security draft is an aggregate. Read that draft through its
+                // existing scope, then send a read-only check for the requested area alone.
+                var saved = await _hostMonitoringActionService.Value.GetConfigurationAsync(
+                    target with { ConfigurationAreas = [] });
+                result = saved.Succeeded && saved.Response?.HostMonitoringConfiguration is { } configuration
+                    ? await _hostMonitoringActionService.Value.CheckConfigurationAsync(
+                        target,
+                        configuration with { ConfigurationAreas = [selectedArea], ConfigurationHash = string.Empty })
+                    : saved;
+            }
+            else
+            {
+                result = await _hostMonitoringActionService.Value.CheckSavedConfigurationAsync(target);
+            }
             // Do not publish a completion into a different investigation or retain its row in a dialog.
             if (target.WorkspaceGeneration != _captureWorkspaceCoordinator.Generation ||
                 result.Outcome is ViewerHostMonitoringActionOutcome.Superseded or ViewerHostMonitoringActionOutcome.Canceled)
@@ -2658,7 +2712,7 @@ public partial class MainViewModel : ViewModelBase,
 
         if (showStatusDialog)
         {
-            ShowAgentMonitoringStatusDialog(targetAgent);
+            ShowAgentMonitoringStatusDialog(targetAgent, areaName);
         }
         else
         {
@@ -2696,7 +2750,7 @@ public partial class MainViewModel : ViewModelBase,
             var settings = ShowHostMonitoringConfigurationDialog(
                 targetAgent,
                 "Apply changes to this computer",
-                "Change config of my computer",
+                "Set monitoring through Agent",
                 targetAgent.HostMonitoringConfiguration,
                 requiresComputerChangeAcknowledgement: true);
             if (settings == null)
@@ -2720,6 +2774,94 @@ public partial class MainViewModel : ViewModelBase,
         {
             StatusMessage = "Audit settings were not confirmed as applied: " + ex.Message;
             MessageBox.Show(GetDialogOwner(), StatusMessage, "Apply audit settings", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            EndHostMonitoringAction();
+        }
+    }
+
+    [RelayCommand]
+    private async Task ConfigureAgentEventTelemetryMonitoringAsync(AgentRegistryEntryViewModel? agent)
+    {
+        agent ??= GetLocalAgent();
+        if (!CanRunAgentConfigurationCommand(
+                agent,
+                AgentConfigurationTargetKind.HostMonitoring,
+                "Sysmon and event telemetry configuration",
+                FeatureIds.SecurityMonitoringConfiguration))
+        {
+            return;
+        }
+
+        if (!TryBeginHostMonitoringAction())
+        {
+            return;
+        }
+
+        try
+        {
+            var targetAgent = agent!;
+            var target = CreateHostMonitoringActionTarget(
+                targetAgent,
+                requireViewerConnection: true,
+                useLegacyEventTelemetryScope: true);
+            var current = await _hostMonitoringActionService.Value.GetConfigurationAsync(
+                target);
+            if (!current.Succeeded || current.Response?.HostMonitoringConfiguration == null)
+            {
+                StatusMessage = FirstNonEmpty(
+                    current.Diagnostic,
+                    "The Agent did not return its saved Sysmon and event telemetry configuration.");
+                MessageBox.Show(
+                    GetDialogOwner(),
+                    StatusMessage,
+                    "Configure Sysmon and event telemetry",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            _hostMonitoringActionService.Value.RequireCurrentTarget(target);
+            var settings = ShowHostMonitoringConfigurationDialog(
+                targetAgent,
+                "Apply changes to this computer",
+                "Configure Sysmon and event telemetry",
+                current.Response.HostMonitoringConfiguration,
+                requiresComputerChangeAcknowledgement: true,
+                useLegacyEventTelemetryScope: true);
+            if (settings == null)
+            {
+                StatusMessage = "Sysmon and event telemetry configuration canceled.";
+                return;
+            }
+
+            _hostMonitoringActionService.Value.RequireCurrentTarget(target);
+            if (!await SaveAgentMonitoringConfigurationAsync(
+                    targetAgent,
+                    target,
+                    settings: settings,
+                    useLegacyEventTelemetryScope: true))
+            {
+                return;
+            }
+
+            _hostMonitoringActionService.Value.RequireCurrentTarget(target);
+            await DeploySavedAgentMonitoringConfigurationAsync(
+                targetAgent,
+                target,
+                useLegacyEventTelemetryScope: true,
+                showAreaFeedback: true);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = "Sysmon and event telemetry settings were not confirmed as applied: " + ex.Message;
+            MessageBox.Show(
+                GetDialogOwner(),
+                StatusMessage,
+                "Configure Sysmon and event telemetry",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
         finally
         {
@@ -2752,15 +2894,19 @@ public partial class MainViewModel : ViewModelBase,
     }
 
     private async Task<bool> DeploySavedAgentMonitoringConfigurationAsync(
-        AgentRegistryEntryViewModel targetAgent)
+        AgentRegistryEntryViewModel targetAgent,
+        ViewerHostMonitoringActionTarget? target = null,
+        bool useLegacyEventTelemetryScope = false,
+        bool showAreaFeedback = false)
     {
-        if (!HasSavedMonitoringConfiguration(targetAgent))
+        if (!useLegacyEventTelemetryScope && !HasSavedMonitoringConfiguration(targetAgent))
         {
             StatusMessage = "Save or configure monitoring before deploying it through the agent.";
             return false;
         }
 
-        if (!ConfirmComputerConfigurationChange(restoring: false))
+        if (!ConfirmComputerConfigurationChange(restoring: false,
+                useLegacyEventTelemetryScope: useLegacyEventTelemetryScope))
         {
             StatusMessage = "Computer configuration change canceled.";
             return false;
@@ -2768,10 +2914,15 @@ public partial class MainViewModel : ViewModelBase,
 
         AgentsViewModel.ApplyMonitoringActionProgress(
             targetAgent,
-            "Applying Windows Security monitoring...",
-            "The authenticated elevated Agent is preserving or reusing the first active original baseline before applying the selected policy and Security log settings.");
+            useLegacyEventTelemetryScope ? "Applying Sysmon and event telemetry monitoring..." : "Applying Windows Security monitoring...",
+            useLegacyEventTelemetryScope
+                ? "The elevated Agent is replacing active Sysmon rules with the selected profile and applying the selected event telemetry settings. Previous Sysmon rules will not be restored."
+                : "The authenticated elevated Agent is preserving or reusing the first active original baseline before applying the selected policy and Security log settings.");
         var result = await _hostMonitoringActionService.Value.DeploySavedConfigurationAsync(
-            CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: true));
+            target ?? CreateHostMonitoringActionTarget(
+                targetAgent,
+                requireViewerConnection: true,
+                useLegacyEventTelemetryScope: useLegacyEventTelemetryScope));
         if (!result.Succeeded)
         {
             StatusMessage = result.Diagnostic;
@@ -2779,21 +2930,44 @@ public partial class MainViewModel : ViewModelBase,
 
         var response = result.Response;
         ApplyMonitoringDeploymentResponse(targetAgent, response);
+        if (showAreaFeedback)
+        {
+            var deployment = response?.MonitoringDeployment;
+            var areaDetails = deployment?.AreaResults.Length > 0
+                ? string.Join(Environment.NewLine, deployment.AreaResults.Select(area =>
+                    $"{area.Area}: {area.Status} — {area.Message}" +
+                    (string.IsNullOrWhiteSpace(area.TechnicalDetail) ? "" : $" {area.TechnicalDetail}")))
+                : "No per-area deployment results were returned.";
+            var summary = deployment == null
+                ? FirstNonEmpty(result.Diagnostic, "The Agent did not return a deployment result.")
+                : $"Overall: {deployment.Status}";
+            MessageBox.Show(GetDialogOwner(), $"{summary}{Environment.NewLine}{Environment.NewLine}{areaDetails}",
+                "Configure Sysmon and event telemetry", MessageBoxButton.OK,
+                result.Succeeded && deployment?.Status == AgentConfigurationOperationStatus.Success
+                    ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
         return result.Succeeded &&
                response?.MonitoringDeployment?.Status == AgentConfigurationOperationStatus.Success;
     }
 
-    private static bool ConfirmComputerConfigurationChange(bool restoring)
+    private static bool ConfirmComputerConfigurationChange(bool restoring,
+        bool useLegacyEventTelemetryScope = false)
     {
-        var action = restoring ? "Restore recorded original settings" : "Apply the selected audit and logging settings";
-        var recovery = restoring
-            ? "Only settings with a recorded baseline can be restored. Later intentional changes may be replaced; unsupported or changed objects require manual review."
-            : "The Agent preserves the original supported settings before applying changes. Deployment does not start capture.";
+        var action = useLegacyEventTelemetryScope
+            ? restoring ? "Revert Sysmon and event telemetry monitoring" : "Apply the selected Sysmon and event telemetry settings"
+            : restoring ? "Restore recorded original settings" : "Apply the selected audit and logging settings";
+        var recovery = useLegacyEventTelemetryScope
+            ? restoring
+                ? "Sysmon will be reset to factory defaults: active rules are removed and Sysmon network monitoring is disabled. Previous custom rules will not be restored. Other event telemetry settings are reverted where supported."
+                : "The selected Sysmon profile replaces active rules. Previous custom Sysmon rules are not saved or automatically restored. Deployment does not start capture."
+            : restoring
+                ? "Only settings with a recorded baseline can be restored. Later intentional changes may be replaced; unsupported or changed objects require manual review."
+                : "The Agent preserves the original supported settings before applying changes. Deployment does not start capture.";
         return MessageBox.Show(
             GetDialogOwner(),
             $"{action} on {Environment.MachineName}?\n\n" +
             HostMonitoringConfigurationViewModel.ComputerConfigurationWarning + "\n\n" + recovery,
-            "Change config of my computer",
+            "Set monitoring through Agent",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No) == MessageBoxResult.Yes;
@@ -2857,7 +3031,7 @@ public partial class MainViewModel : ViewModelBase,
             if (MessageBox.Show(GetDialogOwner(),
                 $"Restore the selected settings on {Environment.MachineName}?\n\nBackup: {chosen.FolderPath}\n\n" +
                 "The current selected settings will be saved before restoration. " + HostMonitoringConfigurationViewModel.ComputerConfigurationWarning,
-                "Restore saved config", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+                "Restore saved Security config", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
             { StatusMessage = "Restoration canceled; Windows settings were not changed."; return; }
             var result = await workflow.RestoreAsync(target, chosen, settings.SelectedAreas);
             _hostMonitoringActionService.Value.RequireCurrentSettingsTarget(target);
@@ -2866,21 +3040,68 @@ public partial class MainViewModel : ViewModelBase,
             StatusMessage = result.Summary;
             AgentsViewModel.ApplyMonitoringActionProgress(agent!, result.Summary, result.Details);
             MessageBox.Show(GetDialogOwner(), result.Summary + "\n\n" + result.Details,
-                "Restore saved config", MessageBoxButton.OK, result.Succeeded ? MessageBoxImage.Information : MessageBoxImage.Warning);
+                "Restore saved Security config", MessageBoxButton.OK, result.Succeeded ? MessageBoxImage.Information : MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {
             StatusMessage = "Saved configuration restoration failed: " + ex.Message;
-            MessageBox.Show(GetDialogOwner(), StatusMessage, "Restore saved config", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(GetDialogOwner(), StatusMessage, "Restore saved Security config", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally { EndHostMonitoringAction(); }
     }
 
     [RelayCommand(CanExecute = nameof(CanReverseAgentMonitoringDeployment))]
-    private async Task ReverseAgentMonitoringDeploymentAsync(AgentRegistryEntryViewModel? agent)
+    private Task ReverseAgentMonitoringDeploymentAsync(AgentRegistryEntryViewModel? agent) =>
+        ReverseAgentMonitoringDeploymentCoreAsync(agent, useLegacyEventTelemetryScope: false);
+
+    [RelayCommand]
+    private Task ReverseAgentEventTelemetryMonitoringDeploymentAsync(AgentRegistryEntryViewModel? agent) =>
+        ReverseAgentMonitoringDeploymentCoreAsync(agent, useLegacyEventTelemetryScope: true);
+
+    [RelayCommand]
+    private async Task RestoreSysmonFactoryDefaultsAsync()
+    {
+        var agent = GetLocalAgent();
+        if (!CanRunAgentConfigurationCommand(agent, AgentConfigurationTargetKind.HostMonitoring,
+                "restore Sysmon monitoring to factory defaults", FeatureIds.SecurityMonitoringConfiguration) ||
+            !TryBeginHostMonitoringAction())
+            return;
+        try
+        {
+            if (MessageBox.Show(GetDialogOwner(),
+                    "Restore Sysmon monitoring to factory defaults? This removes the active Sysmon rules and disables Sysmon network monitoring. The previous configuration will not be reapplied.",
+                    "Restore Sysmon monitoring to factory defaults",
+                    MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+                return;
+            AgentsViewModel.ApplyMonitoringActionProgress(agent!,
+                "Restoring Sysmon monitoring to factory defaults...",
+                "The elevated Agent is running sysmon -c -- and checking the resulting configuration.");
+            var result = await _hostMonitoringActionService.Value.ResetSysmonToFactoryDefaultsAsync(
+                CreateHostMonitoringActionTarget(agent!, requireViewerConnection: true,
+                    useLegacyEventTelemetryScope: true));
+            ApplyMonitoringDeploymentResponse(agent!, result.Response);
+            var area = result.Response?.MonitoringDeployment?.AreaResults.SingleOrDefault();
+            var message = area == null ? result.Diagnostic :
+                area.Message + Environment.NewLine + Environment.NewLine + area.TechnicalDetail;
+            StatusMessage = message;
+            MessageBox.Show(GetDialogOwner(), message,
+                "Restore Sysmon monitoring to factory defaults", MessageBoxButton.OK,
+                area?.Status == AgentConfigurationOperationStatus.Success
+                    ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        finally { EndHostMonitoringAction(); }
+    }
+
+    private async Task ReverseAgentMonitoringDeploymentCoreAsync(
+        AgentRegistryEntryViewModel? agent,
+        bool useLegacyEventTelemetryScope)
     {
         agent ??= GetLocalAgent();
-        if (!CanRunAgentConfigurationCommand(agent, AgentConfigurationTargetKind.HostMonitoring, "monitoring reverse deployment"))
+        if (!CanRunAgentConfigurationCommand(
+                agent,
+                AgentConfigurationTargetKind.HostMonitoring,
+                "monitoring reverse deployment",
+                useLegacyEventTelemetryScope ? FeatureIds.SecurityMonitoringConfiguration : null))
         {
             return;
         }
@@ -2893,7 +3114,8 @@ public partial class MainViewModel : ViewModelBase,
         try
         {
             var targetAgent = agent!;
-            if (!ConfirmComputerConfigurationChange(restoring: true))
+            if (!ConfirmComputerConfigurationChange(restoring: true,
+                    useLegacyEventTelemetryScope: useLegacyEventTelemetryScope))
             {
                 StatusMessage = "Monitoring reverse deployment canceled.";
                 return;
@@ -2901,16 +3123,37 @@ public partial class MainViewModel : ViewModelBase,
 
             AgentsViewModel.ApplyMonitoringActionProgress(
                 targetAgent,
-                "Reverting Windows Security monitoring...",
-                "The authenticated elevated Agent is restoring only settings covered by the recorded original baseline.");
+                useLegacyEventTelemetryScope
+                    ? "Reverting Sysmon and event telemetry monitoring..."
+                    : "Reverting Windows Security monitoring...",
+                useLegacyEventTelemetryScope
+                    ? "The elevated Agent resets Sysmon to factory defaults when its applied state is unchanged; previous custom rules are not reapplied. Other supported telemetry settings are reverted."
+                    : "The authenticated elevated Agent is restoring only settings covered by the recorded original baseline.");
             var result = await _hostMonitoringActionService.Value.ReverseSavedDeploymentAsync(
-                CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection: true));
+                CreateHostMonitoringActionTarget(
+                    targetAgent,
+                    requireViewerConnection: true,
+                    useLegacyEventTelemetryScope: useLegacyEventTelemetryScope));
             if (!result.Succeeded)
             {
                 StatusMessage = result.Diagnostic;
             }
 
             ApplyMonitoringDeploymentResponse(targetAgent, result.Response);
+            if (useLegacyEventTelemetryScope)
+            {
+                var deployment = result.Response?.MonitoringDeployment;
+                var areaDetails = deployment?.AreaResults.Length > 0
+                    ? string.Join(Environment.NewLine, deployment.AreaResults.Select(area =>
+                        $"{area.Area}: {area.Status} — {area.Message}" +
+                        (string.IsNullOrWhiteSpace(area.TechnicalDetail) ? "" : $" {area.TechnicalDetail}")))
+                    : FirstNonEmpty(result.Diagnostic, "No per-area restoration results were returned.");
+                MessageBox.Show(GetDialogOwner(),
+                    $"Overall: {deployment?.Status.ToString() ?? "Unavailable"}{Environment.NewLine}{Environment.NewLine}{areaDetails}",
+                    "Restore Sysmon and event telemetry", MessageBoxButton.OK,
+                    result.Succeeded && deployment?.Status == AgentConfigurationOperationStatus.Success
+                        ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            }
         }
         finally
         {
@@ -3285,12 +3528,13 @@ public partial class MainViewModel : ViewModelBase,
 
     private async Task<bool> SaveAgentMonitoringConfigurationAsync(
         AgentRegistryEntryViewModel targetAgent,
-        bool requireViewerConnection,
-        HostMonitoringConfigurationViewModel? settings = null)
+        ViewerHostMonitoringActionTarget target,
+        HostMonitoringConfigurationViewModel? settings = null,
+        bool useLegacyEventTelemetryScope = false)
     {
-        var draft = CreateHostMonitoringConfigurationDraft(targetAgent, settings);
+        var draft = CreateHostMonitoringConfigurationDraft(targetAgent, settings, useLegacyEventTelemetryScope);
         var result = await _hostMonitoringActionService.Value.SaveConfigurationAsync(
-            CreateHostMonitoringActionTarget(targetAgent, requireViewerConnection),
+            target,
             draft);
         if (!result.Succeeded)
         {
@@ -3298,14 +3542,21 @@ public partial class MainViewModel : ViewModelBase,
         }
 
         var response = result.Response;
-        ApplyHostMonitoringConfigurationResponse(targetAgent, response);
+        if (!useLegacyEventTelemetryScope)
+        {
+            ApplyHostMonitoringConfigurationResponse(targetAgent, response);
+        }
         return response?.HostMonitoringConfiguration != null;
     }
 
-    private bool CanRunAgentConfigurationCommand(AgentRegistryEntryViewModel? agent, AgentConfigurationTargetKind targetKind, string actionName)
+    private bool CanRunAgentConfigurationCommand(
+        AgentRegistryEntryViewModel? agent,
+        AgentConfigurationTargetKind targetKind,
+        string actionName,
+        FeatureId? hostMonitoringFeatureId = null)
     {
         var featureId = targetKind == AgentConfigurationTargetKind.HostMonitoring
-            ? GetHostMonitoringFeatureId()
+            ? hostMonitoringFeatureId ?? GetHostMonitoringFeatureId()
             : FeatureIds.AgentsAndCapture;
         if (!RequireFeaturePublished(featureId, actionName))
         {
@@ -3602,7 +3853,8 @@ public partial class MainViewModel : ViewModelBase,
 
     private ViewerHostMonitoringActionTarget CreateHostMonitoringActionTarget(
         AgentRegistryEntryViewModel agent,
-        bool requireViewerConnection) =>
+        bool requireViewerConnection,
+        bool useLegacyEventTelemetryScope = false) =>
         new(
             agent.AgentId,
             FirstNonEmpty(agent.HostId, Environment.MachineName),
@@ -3610,7 +3862,7 @@ public partial class MainViewModel : ViewModelBase,
             _sessionPaths.SessionRoot,
             _captureWorkspaceCoordinator.Generation,
             requireViewerConnection,
-            GetHostMonitoringConfigurationAreas());
+            GetHostMonitoringConfigurationAreas(useLegacyEventTelemetryScope));
 
     private bool IsAnyTrackedCaptureActive(bool includeStopping)
     {
@@ -3720,51 +3972,18 @@ public partial class MainViewModel : ViewModelBase,
     }
 
     public bool TryNavigateToExplorerTab(FeatureTabKey tabKey, string actionName)
-        => _viewerNavigationCoordinator.NavigateToExplorerTab(tabKey, actionName).Succeeded;
+        => _presentationHost?.NavigateToExplorerTab(tabKey, actionName) ?? false;
 
     public bool TryNavigateToDataTab(FeatureTabKey tabKey, string actionName)
-        => _viewerNavigationCoordinator.NavigateToDataTab(tabKey, actionName).Succeeded;
+        => _presentationHost?.NavigateToDataTab(tabKey, actionName) ?? false;
 
     private void OnViewerNavigationStateChanged(
         object? sender,
         ViewerNavigationStateChangedEventArgs e)
-        => ApplyViewerNavigationState(e.State);
+        => _activeProcessPresentation?.OnViewerNavigationStateChanged(sender, e);
 
     private void ApplyViewerNavigationState(ViewerNavigationState state)
-    {
-        var dataSelectionChanged = !ReferenceEquals(SelectedDataTab, state.DataSelection);
-        _isApplyingViewerNavigationState = true;
-        try
-        {
-            IsNetworkDataTabVisible = state.IncludeNetworkData;
-            IsFilesystemDataTabVisible = state.IncludeFilesystemData;
-            if (!ReferenceEquals(SelectedExplorerTab, state.ExplorerSelection))
-            {
-                SelectedExplorerTab = state.ExplorerSelection;
-            }
-
-            if (!ReferenceEquals(SelectedDataTab, state.DataSelection))
-            {
-                SelectedDataTab = state.DataSelection;
-            }
-        }
-        finally
-        {
-            _isApplyingViewerNavigationState = false;
-        }
-
-        OnPropertyChanged(nameof(ExplorerTabs));
-        OnPropertyChanged(nameof(DataTabs));
-        if (!string.IsNullOrWhiteSpace(state.StatusMessage))
-        {
-            StatusMessage = state.StatusMessage;
-        }
-
-        if (dataSelectionChanged)
-        {
-            QueueSelectedDataTabEnrichmentIfNeeded();
-        }
-    }
+        => _activeProcessPresentation?.ApplyViewerNavigationState(state);
 
     private bool CanRunDeployedAgentCommand(AgentRegistryEntryViewModel? agent)
     {
@@ -4091,204 +4310,27 @@ public partial class MainViewModel : ViewModelBase,
         await RefreshViewFromStagingAsync();
     }
 
-    /// <summary>
-    /// Updates the process list efficiently.
-    /// </summary>
     private void UpdateProcessList(
         List<ProcessInfo> allProcesses,
         IReadOnlyDictionary<string, ProcessSourceEventCounts>? eventCountsByProcess = null,
         IReadOnlyDictionary<string, int>? moduleCountsByProcess = null,
         IReadOnlyDictionary<string, int>? handleCountsByProcess = null)
-    {
-        var selectedKey = SelectedProcess?.ProcessKey;
-        var selectedProcessId = SelectedProcess?.ProcessId ?? 0;
-        var selectedProcessName = SelectedProcess?.ProcessName;
-        const bool refreshEventCounts = true;
-        var currentKeys = new HashSet<string>();
-        eventCountsByProcess ??= _telemetryProjectionService.GetEventCountsByProcess();
-        moduleCountsByProcess ??= _telemetryProjectionService.GetModuleCountsByProcess();
-        handleCountsByProcess ??= _telemetryProjectionService.GetHandleCountsByProcess();
-
-        // Apply tree-aware ordering when the Tree column is active. Other column sorts are
-        // handled by the ICollectionView so live row counters can be sorted too.
-        var sortedProcesses = _filterService.SortProcesses(allProcesses, _currentSortColumn, _sortAscending);
-
-        var orderedRows = new List<ProcessRowViewModel>(sortedProcesses.Count);
-
-        // Update or add processes
-        foreach (var proc in sortedProcesses)
-        {
-            var key = proc.GetUniqueKey();
-            currentKeys.Add(key);
-
-            if (_processViewModels.TryGetValue(key, out var existingVm))
-            {
-                // Update existing
-                existingVm.UpdateFrom(proc);
-                UpdateProcessRowCounts(existingVm, includeEventCounts: refreshEventCounts, eventCountsByProcess, moduleCountsByProcess, handleCountsByProcess);
-                orderedRows.Add(existingVm);
-
-                if (ReferenceEquals(existingVm, SelectedProcess))
-                {
-                    ProcessPropertiesViewModel.LoadProcess(existingVm);
-                }
-            }
-            else
-            {
-                // Add new
-                var vm = new ProcessRowViewModel(proc);
-                UpdateProcessRowCounts(vm, includeEventCounts: true, eventCountsByProcess, moduleCountsByProcess, handleCountsByProcess);
-                _processViewModels[key] = vm;
-                orderedRows.Add(vm);
-            }
-        }
-
-        // Remove processes that no longer exist (shouldn't happen, but safety check)
-        var toRemove = _processViewModels.Keys.Where(k => !currentKeys.Contains(k)).ToList();
-        foreach (var key in toRemove)
-        {
-            _processViewModels.Remove(key);
-        }
-
-        ReplaceProcessRows(orderedRows);
-
-        // Update counts
-        TotalProcessCount = allProcesses.Count;
-        RunningProcessCount = allProcesses.Count(p => p.Status == ProcessStatus.Running);
-        ExitedProcessCount = allProcesses.Count(p => p.Status == ProcessStatus.Exited);
-        ExplorerViewModel.RefreshCounts(BuildExplorerScopeCountsFromMemory(allProcesses));
-
-        RestoreSelectedProcess(selectedKey, selectedProcessId, selectedProcessName);
-    }
+        => _activeProcessPresentation?.UpdateProcessList(allProcesses, eventCountsByProcess, moduleCountsByProcess, handleCountsByProcess);
 
     private List<ProcessInfo> GetProjectedProcesses()
-    {
-        return _telemetryProjectionService
-            .GetProcessList(new ProcessProjectionQuery
-            {
-                IncludeExited = true,
-                MaxCount = 10000
-            })
-            .ToList();
-    }
+        => _activeProcessPresentation?.GetProjectedProcesses() ?? [];
 
     private void ReplaceProcessRows(List<ProcessRowViewModel> orderedRows)
-    {
-        Processes = new ObservableCollection<ProcessRowViewModel>(orderedRows);
-        ProcessesView = CollectionViewSource.GetDefaultView(Processes);
-        ProcessesView.Filter = FilterProcess;
+        => _activeProcessPresentation?.ReplaceProcessRows(orderedRows);
 
-        if (!string.Equals(_currentSortColumn, "Tree", StringComparison.OrdinalIgnoreCase))
-        {
-            ProcessesView.SortDescriptions.Add(new SortDescription(
-                _currentSortColumn,
-                _sortAscending ? ListSortDirection.Ascending : ListSortDirection.Descending));
-        }
-
-        ProcessesView.Refresh();
-    }
-
-    /// <summary>
-    /// Filter predicate for the collection view.
-    /// </summary>
-    private bool FilterProcess(object obj) => FilterProcess(obj, null);
+    private bool FilterProcess(object obj)
+        => _activeProcessPresentation?.FilterProcess(obj) ?? false;
 
     private bool FilterProcess(object obj, string? excludedHeader)
-    {
-        if (obj is not ProcessRowViewModel vm)
-            return false;
+        => _activeProcessPresentation?.FilterProcess(obj, excludedHeader) ?? false;
 
-        // Check each filter
-        if (!ColumnTextFilter.Matches(vm.ProcessName, FilterProcessName))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.ProcessId.ToString(), FilterPid))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.ParentProcessId.ToString(), FilterParentPid))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.ParentProcessName, FilterParentProcessName))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.ProcessPath, FilterProcessPath))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.CommandLine, FilterCommandLine))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.UserName, FilterUserName))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.SessionId.ToString(), FilterSessionId))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.Architecture, FilterArchitecture))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.StartTimeDisplay, FilterStartTime))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.EndTimeDisplay, FilterEndTime))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.StatusDisplay, FilterStatus))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.CpuUsage, FilterCpuUsage))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.MemoryUsage, FilterMemoryUsage))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.CompanyName, FilterCompanyName))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.FileDescription, FilterFileDescription))
-            return false;
-
-        if (!ColumnTextFilter.Matches(vm.Sha256Hash, FilterSha256Hash))
-            return false;
-
-        return IsProcessInActiveExplorerScope(vm) && IsProcessInScopedSelection(vm) && MatchesHeaderFilters(vm, excludedHeader);
-    }
-
-    /// <summary>
-    /// Clears Listing column filters without changing Explorer scope or green/exclude selection.
-    /// </summary>
-    [RelayCommand]
     public void ClearFilters()
-    {
-        if (_headerFilters != null) foreach (var filter in _headerFilters.Values) filter.Reset(false);
-        if (_processListingService == null) ProcessesView?.Refresh();
-        FilterProcessName = string.Empty;
-        FilterPid = string.Empty;
-        FilterParentPid = string.Empty;
-        FilterParentProcessName = string.Empty;
-        FilterProcessPath = string.Empty;
-        FilterCommandLine = string.Empty;
-        FilterUserName = string.Empty;
-        FilterSessionId = string.Empty;
-        FilterArchitecture = string.Empty;
-        FilterStartTime = string.Empty;
-        FilterEndTime = string.Empty;
-        FilterStatus = string.Empty;
-        FilterCpuUsage = string.Empty;
-        FilterMemoryUsage = string.Empty;
-        FilterCompanyName = string.Empty;
-        FilterFileDescription = string.Empty;
-        FilterSha256Hash = string.Empty;
-
-        // On the DB path a single ScheduleDbRefresh covers all cleared fields.
-        // On the fallback path ProcessesView?.Refresh() is already triggered by
-        // each OnFilter*Changed partial above; no extra call needed here.
-        if (_processListingService != null)
-        {
-            ScheduleDbRefresh();
-        }
-
-        StatusMessage = "Cleared Listing column filters. Explorer green selection was unchanged.";
-    }
+        => _activeProcessPresentation?.ClearFilters();
 
     /// <summary>
     /// Reloads PowerShell auditing settings from the registry.
@@ -4312,873 +4354,162 @@ public partial class MainViewModel : ViewModelBase,
         if (!RequireFeaturePublished(FeatureIds.SecurityMonitoringConfiguration, "Refresh Sysmon status")) return;
         var settings = LoadSysmonSettings();
         LoadSecurityMonitoringProfileManifests();
+        LoadBuiltInProfileMenus();
         StatusMessage = settings.IsServiceStateAvailable
             ? "Refreshed Security Monitoring profiles, Sysmon integration, and read-only machine status."
             : $"Sysmon service state is unavailable; existing installed/running values were preserved. {settings.ServiceStatusDetail} {settings.ServiceError}".Trim();
     }
 
     private void RestoreSelectedProcess(string? selectedKey, int selectedProcessId, string? selectedProcessName)
-    {
-        if (string.IsNullOrWhiteSpace(selectedKey) && selectedProcessId <= 0)
-        {
-            return;
-        }
-
-        var restored = !string.IsNullOrWhiteSpace(selectedKey)
-            ? Processes.FirstOrDefault(process => process.ProcessKey == selectedKey)
-            : null;
-
-        restored ??= Processes
-            .Where(process => process.ProcessId == selectedProcessId)
-            .Where(process => string.IsNullOrWhiteSpace(selectedProcessName) ||
-                string.Equals(process.ProcessName, selectedProcessName, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(process => process.ProcessInfo.StartTime ?? DateTime.MinValue)
-            .FirstOrDefault();
-
-        if (restored == null || ReferenceEquals(restored, SelectedProcess))
-        {
-            return;
-        }
-
-        SelectedProcess = restored;
-    }
+        => _activeProcessPresentation?.RestoreSelectedProcess(selectedKey, selectedProcessId, selectedProcessName);
 
     private void NavigateToSearchResult(TelemetrySearchResult result)
-    {
-        if (string.Equals(result.Kind, "Correlation", StringComparison.OrdinalIgnoreCase))
-        {
-            LoadCorrelationResultIntoInspector(result);
-            return;
-        }
-
-        if ((string.Equals(result.Kind, "Sigma", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(result.Kind, "Event", StringComparison.OrdinalIgnoreCase)) &&
-            result.CorrelationState is EvidenceCorrelationState.Unresolved or EvidenceCorrelationState.Ambiguous &&
-            string.IsNullOrWhiteSpace(result.ProcessEntityId))
-        {
-            LoadCorrelationResultIntoInspector(result);
-            return;
-        }
-
-        if (TryNavigateToIndependentArtifactResult(result))
-        {
-            return;
-        }
-
-        _ = _viewerNavigationCoordinator.NavigateToProcessResultAsync(result);
-    }
+        => _presentationHost?.NavigateToSearchResult(result);
 
     private bool TryNavigateToIndependentArtifactResult(TelemetrySearchResult result)
-    {
-        InspectorPayload? payload = null;
-        var kind = result.Kind;
-        if (string.Equals(kind, "NetworkCapture", StringComparison.OrdinalIgnoreCase))
-        {
-            var record = _telemetryProjectionService.GetNetworkCaptures(10000)
-                .FirstOrDefault(item => string.Equals(item.CaptureId, result.RecordKey, StringComparison.Ordinal));
-            payload = record == null ? null : new NetworkCaptureRowViewModel(record).ToInspectorPayload();
-            TryNavigateToExplorerTab(ExplorerTabKeys.Network, "Open network capture search result");
-        }
-        else if (string.Equals(kind, "Zeek", StringComparison.OrdinalIgnoreCase))
-        {
-            var record = _telemetryProjectionService.GetZeekNetworkArtifacts(10000)
-                .FirstOrDefault(item => string.Equals(item.ArtifactId, result.RecordKey, StringComparison.Ordinal));
-            payload = record == null ? null : new ZeekNetworkArtifactRowViewModel(record).ToInspectorPayload();
-            TryNavigateToExplorerTab(ExplorerTabKeys.Network, "Open Zeek search result");
-        }
-        else if (string.Equals(kind, "FilesystemArtifact", StringComparison.OrdinalIgnoreCase))
-        {
-            var record = _telemetryProjectionService.GetFilesystemArtifacts(10000)
-                .FirstOrDefault(item => string.Equals(item.ArtifactId, result.RecordKey, StringComparison.Ordinal));
-            payload = record == null ? null : new FilesystemArtifactRowViewModel(record).ToInspectorPayload();
-            TryNavigateToDataTab(DataTabKeys.Filesystem, "Open filesystem search result");
-        }
-        else if (string.Equals(kind, "MemoryImage", StringComparison.OrdinalIgnoreCase))
-        {
-            var record = _telemetryProjectionService.GetMemoryImages(10000)
-                .FirstOrDefault(item => string.Equals(item.ImageId, result.RecordKey, StringComparison.Ordinal));
-            payload = record == null ? null : new MemoryImageRowViewModel(record).ToInspectorPayload();
-            TryNavigateToExplorerTab(ExplorerTabKeys.Memory, "Open memory image search result");
-        }
-        else if (string.Equals(kind, "VolatilityRun", StringComparison.OrdinalIgnoreCase))
-        {
-            var record = _telemetryProjectionService.GetVolatilityPluginRuns(maxCount: 10000)
-                .FirstOrDefault(item => string.Equals(item.RunId, result.RecordKey, StringComparison.Ordinal));
-            payload = record == null ? null : new VolatilityPluginRunRowViewModel(record).ToInspectorPayload();
-            TryNavigateToExplorerTab(ExplorerTabKeys.Memory, "Open Volatility run search result");
-        }
-        else if (string.Equals(kind, "MemoryProcess", StringComparison.OrdinalIgnoreCase))
-        {
-            var record = _telemetryProjectionService.GetMemoryProcesses(maxCount: 10000)
-                .FirstOrDefault(item => string.Equals(item.ArtifactId, result.RecordKey, StringComparison.Ordinal));
-            payload = record == null ? null : new MemoryProcessRowViewModel(record).ToInspectorPayload();
-            TryNavigateToExplorerTab(ExplorerTabKeys.Memory, "Open memory process search result");
-        }
-        else
-        {
-            return false;
-        }
-
-        if (payload == null)
-        {
-            StatusMessage = $"The {kind} search result is no longer present in staged evidence. Refresh and try again.";
-            return true;
-        }
-
-        InspectorPaneViewModel.Load(payload);
-        StatusMessage = $"Opened {kind} evidence from search: {result.Title}.";
-        return true;
-    }
+        => _activeProcessPresentation?.TryNavigateToIndependentArtifactResult(result) ?? false;
 
     private ViewerLegacyProcessNavigationResult NavigateToSearchResultLegacy(TelemetrySearchResult result)
-    {
-        if (Processes.Count == 0)
-        {
-            UpdateProcessList(GetProjectedProcesses());
-        }
+        => _activeProcessPresentation?.NavigateToSearchResultLegacy(result) ?? new ViewerLegacyProcessNavigationResult(false, "No process presentation is active.");
 
-        var target = FindVisibleProcessRow(result) ?? AddSearchResultProcessRow(result);
-        if (target == null)
-        {
-            return new ViewerLegacyProcessNavigationResult(
-                false,
-                $"Search result process is not visible: {result.ProcessName} (PID {result.ProcessId}). Refresh staged data and try again.");
-        }
+     ViewerProcessNavigationContext? IViewerNavigationRuntime.GetCurrentProcessNavigationContext()
+        => ((IViewerNavigationRuntime?)_activeProcessPresentation)?.GetCurrentProcessNavigationContext();
 
-        var clearedFilters = false;
-        if (ProcessesView?.Contains(target) == false)
-        {
-            ClearFilters();
-            clearedFilters = true;
-        }
-
-        SelectedProcess = target;
-        _virtualizedProcessListing?.PreserveSelection(target);
-        ProcessesView?.MoveCurrentTo(target);
-        ProcessRowNavigationRequested?.Invoke(target);
-        var statusMessage = clearedFilters
-            ? $"Cleared filters and selected {target.ProcessName} (PID {target.ProcessId}) from search result."
-            : $"Selected {target.ProcessName} (PID {target.ProcessId}) from search result.";
-        return new ViewerLegacyProcessNavigationResult(
-            true,
-            statusMessage,
-            target,
-            clearedFilters);
-    }
-
-    ViewerProcessNavigationContext? IViewerNavigationRuntime.GetCurrentProcessNavigationContext()
-    {
-        var listingService = _processListingService;
-        var collection = _virtualizedProcessListing;
-        if (listingService == null || collection == null)
-        {
-            return null;
-        }
-
-        return new ViewerProcessNavigationContext(
-            listingService,
-            collection,
-            _captureWorkspaceCoordinator.Generation,
-            Volatile.Read(ref _processListingQueryGeneration));
-    }
-
-    bool IViewerNavigationRuntime.IsCurrentProcessNavigationContext(
+     bool IViewerNavigationRuntime.IsCurrentProcessNavigationContext(
         ViewerProcessNavigationContext context)
-        => ReferenceEquals(context.Listing, _processListingService) &&
-           ReferenceEquals(context.Collection, _virtualizedProcessListing) &&
-           context.WorkspaceGeneration == _captureWorkspaceCoordinator.Generation &&
-           context.QueryGeneration == Volatile.Read(ref _processListingQueryGeneration) &&
-           context.QueryGeneration == context.Collection.QueryGeneration &&
-           context.WorkspaceGeneration == context.Collection.WorkspaceGeneration;
+        => ((IViewerNavigationRuntime?)_activeProcessPresentation)?.IsCurrentProcessNavigationContext(context) ?? false;
 
-    ProcessListingQuery IViewerNavigationRuntime.BuildCurrentProcessListingQuery()
-        => BuildCurrentListingQuery();
+     ProcessListingQuery IViewerNavigationRuntime.BuildCurrentProcessListingQuery()
+        => ((IViewerNavigationRuntime?)_activeProcessPresentation)?.BuildCurrentProcessListingQuery() ?? new ProcessListingQuery();
 
-    ProcessRowViewModel? IViewerNavigationRuntime.FindVisibleProcessRow(TelemetrySearchResult result)
-        => FindVisibleProcessRow(result);
+     ProcessRowViewModel? IViewerNavigationRuntime.FindVisibleProcessRow(TelemetrySearchResult result)
+        => ((IViewerNavigationRuntime?)_activeProcessPresentation)?.FindVisibleProcessRow(result);
 
-    async Task<ViewerProcessNavigationContext?> IViewerNavigationRuntime.ClearFiltersAndRebindProcessListingAsync(
+     Task<ViewerProcessNavigationContext?> IViewerNavigationRuntime.ClearFiltersAndRebindProcessListingAsync(
         CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher != null && !dispatcher.CheckAccess())
-        {
-            dispatcher.Invoke(ClearFilters);
-        }
-        else
-        {
-            ClearFilters();
-        }
+        => ((IViewerNavigationRuntime?)_activeProcessPresentation)?.ClearFiltersAndRebindProcessListingAsync(cancellationToken) ?? Task.FromResult<ViewerProcessNavigationContext?>(null);
 
-        _dbRefreshDebounceTimer?.Stop();
-        await ExecuteDbRefreshAsync();
-        cancellationToken.ThrowIfCancellationRequested();
-        return ((IViewerNavigationRuntime)this).GetCurrentProcessNavigationContext();
-    }
-
-    void IViewerNavigationRuntime.ApplyProcessNavigationSelection(
+     void IViewerNavigationRuntime.ApplyProcessNavigationSelection(
         ViewerProcessNavigationContext context,
         ProcessRowViewModel row)
-    {
-        void Apply()
-        {
-            if (!((IViewerNavigationRuntime)this).IsCurrentProcessNavigationContext(context))
-            {
-                return;
-            }
+        => ((IViewerNavigationRuntime?)_activeProcessPresentation)?.ApplyProcessNavigationSelection(context, row);
 
-            SelectedProcess = row;
-            context.Collection.PreserveSelection(row);
-            ProcessesView?.MoveCurrentTo(row);
-            ProcessRowNavigationRequested?.Invoke(row);
-        }
-
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher != null && !dispatcher.CheckAccess())
-        {
-            dispatcher.Invoke(Apply);
-        }
-        else
-        {
-            Apply();
-        }
-    }
-
-    ViewerLegacyProcessNavigationResult IViewerNavigationRuntime.NavigateLegacyProcessResult(
+     ViewerLegacyProcessNavigationResult IViewerNavigationRuntime.NavigateLegacyProcessResult(
         TelemetrySearchResult result)
-        => NavigateToSearchResultLegacy(result);
+        => ((IViewerNavigationRuntime?)_activeProcessPresentation)?.NavigateLegacyProcessResult(result) ?? new ViewerLegacyProcessNavigationResult(false, "No process presentation is active.");
 
     private void LoadCorrelationResultIntoInspector(TelemetrySearchResult result)
-    {
-        InspectorPaneViewModel.Load(new InspectorPayload
-        {
-            ArtifactKind = InspectorArtifactKind.CorrelationEvidence,
-            TargetKind = result.EvidenceKind,
-            TargetId = result.RecordKey,
-            ArtifactId = result.RecordKey,
-            ProcessId = result.ProcessId,
-            ProcessName = result.ProcessName,
-            Header = result.Title,
-            Subtitle = result.CorrelationDiagnostics,
-            EmptyStateMessage = "Select correlation evidence to inspect its decision diagnostics.",
-            Properties = new List<PropertyItemViewModel>
-            {
-                new("Evidence", "Reference", result.RecordKey),
-                new("Evidence", "Kind", result.EvidenceKind),
-                new("Evidence", "Source", result.Source),
-                new("Correlation", "State", result.CorrelationState?.ToString() ?? "Unresolved"),
-                new("Correlation", "Method", result.CorrelationMethod),
-                new("Correlation", "Candidate Count", result.CorrelationCandidateCount.ToString(CultureInfo.InvariantCulture)),
-                new("Correlation", "Resolver Version", result.ResolverVersion),
-                new("Process Hint", "PID", result.ProcessId > 0 ? result.ProcessId.ToString(CultureInfo.InvariantCulture) : string.Empty),
-                new("Process Hint", "Name", result.ProcessName)
-            },
-            RawText = result.CorrelationDiagnostics
-        });
-        StatusMessage = $"Correlation evidence: {result.CorrelationState?.ToString() ?? "Unresolved"}; {result.CorrelationCandidateCount} candidate(s).";
-    }
+        => _activeProcessPresentation?.LoadCorrelationResultIntoInspector(result);
 
     private void OnExplorerScopeSelected(ExplorerScope scope)
-    {
-        MarkSnapshotPresentationInteraction();
-        var requiredFeature = FeatureNavigationPolicy.GetFeatureForExplorerScope(scope);
-        if (requiredFeature.HasValue &&
-            !RequireFeaturePublished(requiredFeature.Value, $"Explorer scope '{scope.Title}'"))
-        {
-            _viewerNavigationCoordinator.SelectSafeFallbacks(StatusMessage);
-            return;
-        }
-
-        _activeExplorerScope = scope;
-        var isNetworkScope = IsNetworkScope(scope);
-        var isFilesystemScope = IsFilesystemScope(scope);
-        _viewerNavigationCoordinator.NavigateForExplorerScope(
-            scope,
-            isNetworkScope,
-            isFilesystemScope);
-        ProcessStatisticsViewModel.ApplyActiveScope(scope);
-
-        SelectedProcess = null;
-        RefreshDataForExplorerScope(scope);
-        InspectorPaneViewModel.Clear(
-            "Select a row in Data to inspect its additional properties.");
-
-        if (_processListingService != null)
-        {
-            ScheduleDbRefresh();
-        }
-        else
-        {
-            ProcessesView?.Refresh();
-        }
-
-        StatusMessage = $"Explorer scope: {scope.Title}.";
-    }
-
+        => _activeProcessPresentation?.OnExplorerScopeSelected(scope);
 
     private void RefreshDataForExplorerScope(ExplorerScope scope)
-    {
-        switch (scope.Kind)
-        {
-            case ExplorerScopeKind.NetworkRoot:
-            case ExplorerScopeKind.NetworkCaptures:
-            case ExplorerScopeKind.NetworkCapture:
-            case ExplorerScopeKind.ZeekArtifacts:
-                NetworkAndZeekFeature?.ViewModel.RefreshNetworkCaptures();
-                break;
-            case ExplorerScopeKind.FilesystemRoot:
-            case ExplorerScopeKind.FilesystemEvidenceRoots:
-            case ExplorerScopeKind.FilesystemArtifacts:
-            case ExplorerScopeKind.FilesystemFolder:
-                _featureModules.GetOrActivate<FilesystemArtifactsViewModel>(FeatureIds.FilesystemArtifacts)
-                    ?.RefreshArtifacts(scope);
-                break;
-            case ExplorerScopeKind.SystemActivityRoot:
-            case ExplorerScopeKind.ActivityAuthentication:
-            case ExplorerScopeKind.ActivitySuccessfulLogons:
-            case ExplorerScopeKind.ActivityFailedLogons:
-            case ExplorerScopeKind.ActivityRemoteInteractive:
-            case ExplorerScopeKind.ActivityExplicitCredentialUse:
-            case ExplorerScopeKind.ActivityPrivilegedLogons:
-            case ExplorerScopeKind.ActivityAccounts:
-            case ExplorerScopeKind.ActivityCreatedUsers:
-            case ExplorerScopeKind.ActivityDisabledDeletedUsers:
-            case ExplorerScopeKind.ActivityPasswordChanges:
-            case ExplorerScopeKind.ActivityGroups:
-            case ExplorerScopeKind.ActivityLocalAdministratorsChanges:
-            case ExplorerScopeKind.ActivitySecurityGroupMembershipChanges:
-            case ExplorerScopeKind.ActivityPolicyAudit:
-            case ExplorerScopeKind.ActivityAuditPolicyChanged:
-            case ExplorerScopeKind.ActivityLogIntegrity:
-            case ExplorerScopeKind.ActivitySecurityLogCleared:
-            case ExplorerScopeKind.ActivityServicesTasks:
-            case ExplorerScopeKind.ActivityServicesInstalled:
-            case ExplorerScopeKind.ActivityScheduledTasksChanged:
-            case ExplorerScopeKind.UsersRoot:
-            case ExplorerScopeKind.UserAccount:
-                EventTelemetryFeature?.SystemActivityViewModel.RefreshActivities(scope);
-                break;
-            case ExplorerScopeKind.SearchResults:
-                if (_featureModules.TryGetActivated<SearchFeatureModule>(FeatureIds.SearchAndSigma, out var search))
-                {
-                    search.ViewModel.SearchCommand.NotifyCanExecuteChanged();
-                }
-                break;
-            case ExplorerScopeKind.SigmaFindings:
-                if (_featureModules.TryGetActivated<SigmaViewModel>(FeatureIds.SearchAndSigma, out var sigma))
-                {
-                    sigma.RunRuleCommand.NotifyCanExecuteChanged();
-                }
-                break;
-            case ExplorerScopeKind.UnresolvedEvidence:
-            case ExplorerScopeKind.AmbiguousEvidence:
-            case ExplorerScopeKind.CorrelationEvidenceGroup:
-                _ = LoadCorrelationEvidenceResultsAsync(scope);
-                break;
-        }
-    }
+        => _activeProcessPresentation?.RefreshDataForExplorerScope(scope);
 
-    [RelayCommand]
     private void IncludeCurrentExplorerScope()
-    {
-        var scopes = GetCurrentExplorerScopeSet().ToList();
-        if (scopes.Count == 0)
-        {
-            StatusMessage = "Select an evidence scope before changing green selection.";
-            return;
-        }
+        => _activeProcessPresentation?.IncludeCurrentExplorerScope();
 
-        foreach (var scope in scopes)
-        {
-            _excludedScopes.Remove(scope.StableId);
-            _includedScopes[scope.StableId] = scope;
-        }
-
-        RefreshScopedSelection($"Green-selected {FormatScopeActionCount(scopes.Count)}.");
-    }
-
-    [RelayCommand]
     private void ExcludeCurrentExplorerScope()
-    {
-        var scopes = GetCurrentExplorerScopeSet().ToList();
-        if (scopes.Count == 0)
-        {
-            StatusMessage = "Select an evidence scope before changing green selection.";
-            return;
-        }
+        => _activeProcessPresentation?.ExcludeCurrentExplorerScope();
 
-        foreach (var scope in scopes)
-        {
-            _includedScopes.Remove(scope.StableId);
-            _excludedScopes[scope.StableId] = scope;
-        }
-
-        RefreshScopedSelection($"Excluded {FormatScopeActionCount(scopes.Count)}.");
-    }
-
-    [RelayCommand]
     private void ToggleExplorerGreenScope(ExplorerNodeViewModel? node)
-    {
-        if (node is not { IsPlaceholder: false } || !IsSelectableExplorerScope(node.Scope))
-        {
-            return;
-        }
-
-        var scopes = GetNodeAndLoadedDescendantScopes(node).ToArray();
-        if (scopes.Length == 0)
-        {
-            return;
-        }
-
-        var removeGreen = node.SelectionState == ExplorerScopeSelectionState.GreenIncluded;
-        var hasIncludedAncestor = removeGreen && HasGreenIncludedAncestor(node);
-        foreach (var scope in scopes)
-        {
-            if (removeGreen)
-            {
-                _includedScopes.Remove(scope.StableId);
-                if (hasIncludedAncestor)
-                {
-                    _excludedScopes[scope.StableId] = scope;
-                }
-                else
-                {
-                    _excludedScopes.Remove(scope.StableId);
-                }
-            }
-            else
-            {
-                _excludedScopes.Remove(scope.StableId);
-                _includedScopes[scope.StableId] = scope;
-            }
-        }
-
-        RefreshScopedSelection(removeGreen
-            ? $"Removed green selection from {FormatScopeActionCount(scopes.Length)}."
-            : $"Green-selected {FormatScopeActionCount(scopes.Length)}.");
-    }
+        => _activeProcessPresentation?.ToggleExplorerGreenScope(node);
 
     private static IEnumerable<ExplorerScope> GetNodeAndLoadedDescendantScopes(ExplorerNodeViewModel node)
-    {
-        foreach (var current in FlattenExplorerNode(node))
-        {
-            if (current is { IsPlaceholder: false } && IsSelectableExplorerScope(current.Scope))
-            {
-                yield return current.Scope;
-            }
-        }
-    }
+        => ProcessPresentationViewModel.GetNodeAndLoadedDescendantScopes(node);
 
     private static IEnumerable<ExplorerNodeViewModel> FlattenExplorerNode(ExplorerNodeViewModel node)
-    {
-        yield return node;
-        foreach (var child in node.Children)
-        {
-            foreach (var descendant in FlattenExplorerNode(child))
-            {
-                yield return descendant;
-            }
-        }
-    }
+        => ProcessPresentationViewModel.FlattenExplorerNode(node);
 
     private bool HasGreenIncludedAncestor(ExplorerNodeViewModel target)
-    {
-        foreach (var root in ExplorerViewModel.RootNodes)
-        {
-            if (HasGreenIncludedAncestor(root, target, inheritedIncluded: false))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+        => _activeProcessPresentation?.HasGreenIncludedAncestor(target) ?? false;
 
     private bool HasGreenIncludedAncestor(
         ExplorerNodeViewModel current,
         ExplorerNodeViewModel target,
         bool inheritedIncluded)
-    {
-        if (ReferenceEquals(current, target))
-        {
-            return inheritedIncluded;
-        }
+        => _activeProcessPresentation?.HasGreenIncludedAncestor(current, target, inheritedIncluded) ?? false;
 
-        var scopeId = current.Scope.StableId;
-        var currentIncluded = inheritedIncluded ||
-                              (_includedScopes.ContainsKey(scopeId) && !_excludedScopes.ContainsKey(scopeId));
-        if (_excludedScopes.ContainsKey(scopeId))
-        {
-            currentIncluded = false;
-        }
-
-        foreach (var child in current.Children)
-        {
-            if (HasGreenIncludedAncestor(child, target, currentIncluded))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    [RelayCommand(CanExecute = nameof(CanChangeSelectedProcessScope))]
     private void IncludeSelectedProcess()
-    {
-        if (SelectedProcess == null)
-        {
-            return;
-        }
+        => _activeProcessPresentation?.IncludeSelectedProcess();
 
-        var label = FormatProcessLabel(SelectedProcess);
-        _excludedProcessKeys.Remove(SelectedProcess.ProcessKey);
-        _excludedProcessLabels.Remove(SelectedProcess.ProcessKey);
-        _includedProcessKeys.Add(SelectedProcess.ProcessKey);
-        _includedProcessLabels[SelectedProcess.ProcessKey] = label;
-        RefreshScopedSelection($"Included {label}.");
-    }
-
-    [RelayCommand(CanExecute = nameof(CanChangeSelectedProcessScope))]
     private void ExcludeSelectedProcess()
-    {
-        if (SelectedProcess == null)
-        {
-            return;
-        }
+        => _activeProcessPresentation?.ExcludeSelectedProcess();
 
-        var label = FormatProcessLabel(SelectedProcess);
-        _includedProcessKeys.Remove(SelectedProcess.ProcessKey);
-        _includedProcessLabels.Remove(SelectedProcess.ProcessKey);
-        _excludedProcessKeys.Add(SelectedProcess.ProcessKey);
-        _excludedProcessLabels[SelectedProcess.ProcessKey] = label;
-        RefreshScopedSelection($"Excluded {label}.");
-    }
-
-    [RelayCommand(CanExecute = nameof(CanClearScopedSelection))]
     private void ClearScopedSelection()
-    {
-        _includedScopes.Clear();
-        _excludedScopes.Clear();
-        _includedProcessKeys.Clear();
-        _excludedProcessKeys.Clear();
-        _includedProcessLabels.Clear();
-        _excludedProcessLabels.Clear();
-        RefreshScopedSelection("Cleared include/exclude selection.");
-    }
+        => _activeProcessPresentation?.ClearScopedSelection();
 
     private IEnumerable<ExplorerScope> GetCurrentExplorerScopeSet()
-    {
-        var scopes = ExplorerViewModel.SelectedScopes
-            .Where(scope => IsSelectableExplorerScope(scope))
-            .GroupBy(scope => scope.StableId, StringComparer.Ordinal)
-            .Select(group => group.First())
-            .ToList();
-
-        if (scopes.Count == 0 && IsSelectableExplorerScope(_activeExplorerScope))
-        {
-            scopes.Add(_activeExplorerScope);
-        }
-
-        return scopes;
-    }
+        => _activeProcessPresentation?.GetCurrentExplorerScopeSet() ?? [];
 
     private static bool IsSelectableExplorerScope(ExplorerScope scope)
-    {
-        return scope.Kind != ExplorerScopeKind.Placeholder &&
-               scope.Kind != ExplorerScopeKind.Branch;
-    }
+        => ProcessPresentationViewModel.IsSelectableExplorerScope(scope);
 
     private bool CanChangeSelectedProcessScope()
-    {
-        return SelectedProcess != null && !string.IsNullOrWhiteSpace(SelectedProcess.ProcessKey);
-    }
+        => _activeProcessPresentation?.CanChangeSelectedProcessScope() ?? false;
 
     private bool CanClearScopedSelection()
-    {
-        return HasScopedSelection();
-    }
+        => _activeProcessPresentation?.CanClearScopedSelection() ?? false;
 
     private void RefreshScopedSelection(string statusMessage)
-    {
-        ApplyScopedSelectionStateToViews();
-        UpdateScopedSelectionStatus();
-        ClearScopedSelectionCommand.NotifyCanExecuteChanged();
-
-        if (_processListingService != null)
-        {
-            ScheduleDbRefresh();
-        }
-        else
-        {
-            ProcessesView?.Refresh();
-            if (SelectedProcess != null && !FilterProcess(SelectedProcess))
-            {
-                SelectedProcess = null;
-            }
-        }
-
-        StatusMessage = statusMessage;
-    }
+        => _activeProcessPresentation?.RefreshScopedSelection(statusMessage);
 
     private void UpdateScopedSelectionStatus()
-    {
-        if (!HasScopedSelection())
-        {
-            ScopedSelectionStatus = "Green scopes: none active; all evidence visible.";
-            ScopedSelectionDetail = "No green scope or exclusion filters are active.";
-            return;
-        }
-
-        var greenCount = _includedScopes.Count + _includedProcessKeys.Count;
-        var excludeCount = _excludedScopes.Count + _excludedProcessKeys.Count;
-        ScopedSelectionStatus = $"Green scopes: {greenCount} active, {excludeCount} excluded.";
-        ScopedSelectionDetail = BuildScopedSelectionDetail();
-    }
+        => _activeProcessPresentation?.UpdateScopedSelectionStatus();
 
     private bool HasScopedSelection()
-    {
-        return _includedScopes.Count > 0 ||
-               _excludedScopes.Count > 0 ||
-               _includedProcessKeys.Count > 0 ||
-               _excludedProcessKeys.Count > 0;
-    }
+        => _activeProcessPresentation?.HasScopedSelection() ?? false;
 
     private void ClearScopedSelectionState()
-    {
-        _includedScopes.Clear();
-        _excludedScopes.Clear();
-        _includedProcessKeys.Clear();
-        _excludedProcessKeys.Clear();
-        _includedProcessLabels.Clear();
-        _excludedProcessLabels.Clear();
-        ApplyScopedSelectionStateToViews();
-        UpdateScopedSelectionStatus();
-        ClearScopedSelectionCommand.NotifyCanExecuteChanged();
-    }
+        => _activeProcessPresentation?.ClearScopedSelectionState();
 
     private void ApplyScopedSelectionStateToViews()
-    {
-        var includedScopes = _includedScopes.Values.ToList();
-        var excludedScopes = _excludedScopes.Values.ToList();
-        var hasGreenSelection = _includedScopes.Count > 0 || _includedProcessKeys.Count > 0;
-
-        ExplorerViewModel.ApplyScopeSelectionState(_includedScopes.Keys, _excludedScopes.Keys);
-        ProcessStatisticsViewModel.ApplyScopedSelection(
-            includedScopes,
-            excludedScopes,
-            _includedProcessKeys,
-            _excludedProcessKeys,
-            hasGreenSelection);
-        if (_featureModules.TryGetActivated<FilesystemArtifactsViewModel>(FeatureIds.FilesystemArtifacts, out var filesystem))
-        {
-            filesystem.ApplyScopedSelection(includedScopes, excludedScopes, hasGreenSelection);
-        }
-
-        if (_featureModules.TryGetActivated<NetworkAndZeekFeatureModule>(FeatureIds.NetworkAndZeek, out var network))
-        {
-            network.ViewModel.ApplyScopedSelection(includedScopes, excludedScopes, hasGreenSelection);
-        }
-
-        if (_featureModules.TryGetActivated<EventTelemetryFeatureModule>(FeatureIds.EventTelemetry, out var events))
-        {
-            events.SystemActivityViewModel.ApplyScopedSelection(includedScopes, excludedScopes, hasGreenSelection);
-        }
-    }
+        => _activeProcessPresentation?.ApplyScopedSelectionStateToViews();
 
     private string BuildScopedSelectionDetail()
-    {
-        var included = BuildScopedSelectionItems(_includedScopes.Values, _includedProcessLabels.Values);
-        var excluded = BuildScopedSelectionItems(_excludedScopes.Values, _excludedProcessLabels.Values);
-
-        return $"Green-selected: {FormatScopedSelectionList(included)}. Excluded: {FormatScopedSelectionList(excluded)}.";
-    }
+        => _activeProcessPresentation?.BuildScopedSelectionDetail() ?? string.Empty;
 
     private static IEnumerable<string> BuildScopedSelectionItems(
         IEnumerable<ExplorerScope> scopes,
         IEnumerable<string> processLabels)
-    {
-        foreach (var scope in scopes.OrderBy(scope => scope.Title, StringComparer.OrdinalIgnoreCase))
-        {
-            yield return $"scope {scope.Title}";
-        }
-
-        foreach (var label in processLabels.OrderBy(label => label, StringComparer.OrdinalIgnoreCase))
-        {
-            yield return label;
-        }
-    }
+        => ProcessPresentationViewModel.BuildScopedSelectionItems(scopes, processLabels);
 
     private static string FormatScopedSelectionList(IEnumerable<string> items)
-    {
-        var list = items.ToList();
-        return list.Count == 0 ? "none" : string.Join("; ", list);
-    }
+        => ProcessPresentationViewModel.FormatScopedSelectionList(items);
 
     private static string FormatCount(int count, string noun)
-    {
-        return count == 1 ? $"1 {noun}" : $"{count} {noun}s";
-    }
+        => ProcessPresentationViewModel.FormatCount(count, noun);
 
     private static string FormatScopeActionCount(int count)
-    {
-        return count == 1 ? "1 Explorer scope" : $"{count} Explorer scopes";
-    }
+        => ProcessPresentationViewModel.FormatScopeActionCount(count);
 
     private static string FormatProcessLabel(ProcessRowViewModel process)
-    {
-        return $"{process.ProcessName} (PID {process.ProcessId})";
-    }
+        => ProcessPresentationViewModel.FormatProcessLabel(process);
 
     private static ExplorerScope CreateAllProcessesScope()
-    {
-        return new ExplorerScope
-        {
-            Kind = ExplorerScopeKind.AllProcesses,
-            ScopeId = "process:all",
-            Title = "All Processes",
-            Description = "All staged and live process records."
-        };
-    }
+        => ProcessPresentationViewModel.CreateAllProcessesScope();
 
-    private static FeatureTabKey GetDataTabForScope(ExplorerScope scope) =>
-        DataTabNavigationPolicy.GetTabKey(scope);
+    private static FeatureTabKey GetDataTabForScope(ExplorerScope scope)
+        => ProcessPresentationViewModel.GetDataTabForScope(scope);
 
     private static bool IsNetworkScope(ExplorerScope scope)
-    {
-        return scope.Kind is ExplorerScopeKind.NetworkRoot or
-            ExplorerScopeKind.NetworkCaptures or
-            ExplorerScopeKind.NetworkCapture or
-            ExplorerScopeKind.ZeekArtifacts;
-    }
+        => ProcessPresentationViewModel.IsNetworkScope(scope);
 
     private static bool IsFilesystemScope(ExplorerScope scope)
-    {
-        return scope.Kind is ExplorerScopeKind.FilesystemRoot or
-            ExplorerScopeKind.FilesystemEvidenceRoots or
-            ExplorerScopeKind.FilesystemArtifacts or
-            ExplorerScopeKind.FilesystemFolder;
-    }
+        => ProcessPresentationViewModel.IsFilesystemScope(scope);
 
     private static bool IsSystemActivityScope(ExplorerScope scope)
-    {
-        return scope.Kind is ExplorerScopeKind.SystemActivityRoot or
-            ExplorerScopeKind.ActivityAuthentication or
-            ExplorerScopeKind.ActivitySuccessfulLogons or
-            ExplorerScopeKind.ActivityFailedLogons or
-            ExplorerScopeKind.ActivityRemoteInteractive or
-            ExplorerScopeKind.ActivityExplicitCredentialUse or
-            ExplorerScopeKind.ActivityPrivilegedLogons or
-            ExplorerScopeKind.ActivityAccounts or
-            ExplorerScopeKind.ActivityCreatedUsers or
-            ExplorerScopeKind.ActivityDisabledDeletedUsers or
-            ExplorerScopeKind.ActivityPasswordChanges or
-            ExplorerScopeKind.ActivityGroups or
-            ExplorerScopeKind.ActivityLocalAdministratorsChanges or
-            ExplorerScopeKind.ActivitySecurityGroupMembershipChanges or
-            ExplorerScopeKind.ActivityPolicyAudit or
-            ExplorerScopeKind.ActivityAuditPolicyChanged or
-            ExplorerScopeKind.ActivityLogIntegrity or
-            ExplorerScopeKind.ActivitySecurityLogCleared or
-            ExplorerScopeKind.ActivityServicesTasks or
-            ExplorerScopeKind.ActivityServicesInstalled or
-            ExplorerScopeKind.ActivityScheduledTasksChanged or
-            ExplorerScopeKind.UsersRoot or
-            ExplorerScopeKind.UserAccount;
-    }
+        => ProcessPresentationViewModel.IsSystemActivityScope(scope);
 
     private bool IsProcessInActiveExplorerScope(ProcessRowViewModel process)
-    {
-        return DoesProcessMatchScope(process, _activeExplorerScope);
-    }
+        => _activeProcessPresentation?.IsProcessInActiveExplorerScope(process) ?? false;
 
     private bool IsProcessInScopedSelection(ProcessRowViewModel process)
-    {
-        var includedScopes = GetProcessListingIncludedScopes();
-        var hasAnyGreenSelection = _includedProcessKeys.Count > 0 ||
-                                   _includedScopes.Count > 0 ||
-                                   ExplorerViewModel.VisibleIncludedScopes.Count > 0;
-        if (hasAnyGreenSelection)
-        {
-            if (_includedProcessKeys.Count == 0 && includedScopes.Count == 0)
-            {
-                return false;
-            }
-
-            if (_includedProcessKeys.Count > 0 && !_includedProcessKeys.Contains(process.ProcessKey))
-            {
-                return false;
-            }
-
-            foreach (var scopeGroup in includedScopes.GroupBy(GetScopedSelectionGroupKey))
-            {
-                if (!scopeGroup.Any(scope => DoesProcessMatchScope(process, scope)))
-                {
-                    return false;
-                }
-            }
-        }
-
-        if (_excludedProcessKeys.Contains(process.ProcessKey))
-        {
-            return false;
-        }
-
-        return !GetProcessListingExcludedScopes()
-            .Any(scope => DoesProcessMatchScope(process, scope));
-    }
+        => _activeProcessPresentation?.IsProcessInScopedSelection(process) ?? false;
 
     private bool DoesProcessMatchScope(ProcessRowViewModel process, ExplorerScope scope)
-    {
-        if (!MatchesIdentityScope(process, scope))
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrWhiteSpace(scope.ProcessKey) &&
-            !IsProcessInSubtree(process.ProcessKey, scope.ProcessKey))
-        {
-            return false;
-        }
-
-        if (scope.Status.HasValue && process.ProcessInfo.Status != scope.Status.Value)
-        {
-            return false;
-        }
-
-        if (scope.ArtifactScope == ExplorerArtifactScope.Modules && process.ModuleCount <= 0)
-        {
-            return false;
-        }
-
-        if (scope.ArtifactScope == ExplorerArtifactScope.Handles && process.HandleCount <= 0)
-        {
-            return false;
-        }
-
-        if (scope.Kind == ExplorerScopeKind.Bookmarked && !IsProcessBookmarked(process.ProcessKey))
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrWhiteSpace(scope.OwnerKey) &&
-            !string.Equals(NormalizeProcessOwnerKey(process.UserName), scope.OwnerKey, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return scope.EventSource switch
-        {
-            "Runtime" => process.RuntimeEventCount > 0,
-            "ETW" => process.EtwEventCount > 0,
-            "Security" => process.SecurityEventCount > 0,
-            "PowerShell" => process.PowerShellEventCount > 0,
-            "WindowsOther" => process.OtherWindowsEventCount > 0,
-            "Sysmon" => process.SysmonEventCount > 0,
-            _ => true
-        };
-    }
+        => _activeProcessPresentation?.DoesProcessMatchScope(process, scope) ?? false;
 
     private async Task RefreshExplorerCountsAsync(
         ExplorerCountRefreshTrigger trigger,
@@ -5194,7 +4525,7 @@ public partial class MainViewModel : ViewModelBase,
         {
             if (!_hasActiveQueryDatabase)
             {
-                ExplorerViewModel.ResetCounts();
+                _activeProcessPresentation?.ExplorerViewModel.ResetCounts();
                 ResetExplorerTabCounts();
                 return;
             }
@@ -5243,12 +4574,12 @@ public partial class MainViewModel : ViewModelBase,
                     return;
                 }
 
-                ApplyExplorerCounts(AddAnalysisCounts(payload.Counts));
-                ExplorerViewModel.RefreshEvidenceRoots(payload.EvidenceRoots);
+                _presentationHost.ApplyExplorerMetadata(payload with { Counts = AddAnalysisCounts(payload.Counts) });
+
                 return;
             }
 
-            ExplorerViewModel.ResetCounts();
+            _activeProcessPresentation?.ExplorerViewModel.ResetCounts();
             ResetExplorerTabCounts();
         }
         catch (Exception ex)
@@ -5291,7 +4622,7 @@ public partial class MainViewModel : ViewModelBase,
                 out var payload) &&
             payload != null)
         {
-            ApplyExplorerCounts(AddAnalysisCounts(payload.Counts));
+            _presentationHost.ApplyExplorerMetadata(payload with { Counts = AddAnalysisCounts(payload.Counts) });
         }
     }
 
@@ -5303,7 +4634,7 @@ public partial class MainViewModel : ViewModelBase,
 
     private void ApplyExplorerCounts(ExplorerScopeCounts counts)
     {
-        ExplorerViewModel.RefreshCounts(counts);
+        _activeProcessPresentation?.ExplorerViewModel.RefreshCounts(counts);
         UpdateExplorerTabCount(ExplorerTabKeys.Search, counts.SearchResultCount);
         UpdateExplorerTabCount(ExplorerTabKeys.Sigma, counts.SigmaFindingCount);
         UpdateExplorerTabCount(ExplorerTabKeys.Network, counts.NetworkCaptureCount);
@@ -5317,7 +4648,7 @@ public partial class MainViewModel : ViewModelBase,
         UpdateExplorerTabCount(ExplorerTabKeys.Sigma, 0);
         UpdateExplorerTabCount(ExplorerTabKeys.Network, 0);
         UpdateExplorerTabCount(ExplorerTabKeys.Memory, 0);
-        foreach (var descriptor in _dataTabSet.Items.Where(descriptor => descriptor.Count.HasValue))
+        foreach (var descriptor in DataTabs.Where(descriptor => descriptor.Count.HasValue))
         {
             descriptor.UpdateCount(0);
         }
@@ -5325,69 +4656,21 @@ public partial class MainViewModel : ViewModelBase,
 
     private void UpdateExplorerTabCount(FeatureTabKey key, int count)
     {
-        if (_explorerTabSet.TryGet(key, out var descriptor))
+        if (_activeProcessPresentation != null && _explorerTabSet.TryGet(key, out var descriptor))
         {
             descriptor?.UpdateCount(count);
         }
     }
 
     private void UpdateDataTabCount(FeatureTabKey key, int count)
-    {
-        if (_dataTabSet.TryGet(key, out var descriptor))
-        {
-            descriptor?.UpdateCount(count);
-        }
-    }
+        => _activeProcessPresentation?.UpdateDataTabCount(key, count);
 
     private void RefreshDataTabCounts()
-    {
-        if (_featureModules.TryGetActivated<ModulesAndHandlesFeatureModule>(FeatureIds.ModulesAndHandles, out var artifacts))
-        {
-            UpdateDataTabCount(DataTabKeys.Modules, artifacts.ModulesViewModel.Modules.Count);
-            UpdateDataTabCount(DataTabKeys.Handles, artifacts.HandlesViewModel.Handles.Count);
-        }
-
-        if (_featureModules.TryGetActivated<DumpsAndPeFeatureModule>(FeatureIds.DumpsAndPeAnalysis, out var dumpsAndPe))
-        {
-            UpdateDataTabCount(DataTabKeys.MemoryDumps, dumpsAndPe.MemoryDumpsViewModel.MemoryDumps.Count);
-            UpdateDataTabCount(DataTabKeys.PeAnalysis, dumpsAndPe.PeAnalysisViewModel.PeAnalyses.Count);
-        }
-
-        if (_featureModules.TryGetActivated<MemoryInvestigationViewModel>(FeatureIds.SystemMemoryAndVolatility, out var memory))
-        {
-            UpdateDataTabCount(DataTabKeys.SystemMemory, memory.MemoryImages.Count);
-        }
-
-        if (_featureModules.TryGetActivated<NetworkAndZeekFeatureModule>(FeatureIds.NetworkAndZeek, out var network))
-        {
-            UpdateDataTabCount(DataTabKeys.Network, network.ViewModel.NetworkCaptures.Count);
-        }
-
-        if (_featureModules.TryGetActivated<FilesystemArtifactsViewModel>(FeatureIds.FilesystemArtifacts, out var filesystem))
-        {
-            UpdateDataTabCount(DataTabKeys.Filesystem, filesystem.Artifacts.Count);
-        }
-
-        if (_featureModules.TryGetActivated<EventTelemetryFeatureModule>(FeatureIds.EventTelemetry, out var events))
-        {
-            UpdateDataTabCount(DataTabKeys.SystemActivity, events.SystemActivityViewModel.VisibleActivityCount);
-            UpdateDataTabCount(DataTabKeys.RuntimeEvents, events.RuntimeEventsViewModel.VisibleEventCount);
-            UpdateDataTabCount(DataTabKeys.EtwEvents, events.EtwEventsViewModel.VisibleEventCount);
-            UpdateDataTabCount(DataTabKeys.PowerShellEvents, events.PowerShellEventsViewModel.VisibleEventCount);
-            UpdateDataTabCount(DataTabKeys.WindowsOtherEvents, events.OtherWindowsEventsViewModel.VisibleEventCount);
-            UpdateDataTabCount(DataTabKeys.SysmonEvents, events.SysmonEventsViewModel.VisibleEventCount);
-        }
-
-        if (_featureModules.TryGetActivated<WindowsSecurityEventsFeatureModule>(
-                FeatureIds.WindowsSecurityEvents,
-                out var windowsSecurity))
-        {
-            UpdateDataTabCount(DataTabKeys.SecurityEvents, windowsSecurity.ViewModel.VisibleEventCount);
-        }
-    }
+        => _activeProcessPresentation?.RefreshDataTabCounts();
 
     private ExplorerScopeCounts BuildExplorerScopeCountsFromMemory(IReadOnlyList<ProcessInfo> processes)
     {
+        using var readScope = _telemetryProjectionService.BeginReadScope();
         var eventCounts = _telemetryProjectionService.GetEventCountsByProcess();
         var moduleCounts = _telemetryProjectionService.GetModuleCountsByProcess();
         var handleCounts = _telemetryProjectionService.GetHandleCountsByProcess();
@@ -5466,6 +4749,7 @@ public partial class MainViewModel : ViewModelBase,
 
     private async Task<IReadOnlyList<ExplorerNodeViewModel>> LoadExplorerChildrenAsync(ExplorerScope scope)
     {
+        using var readScope = _telemetryProjectionService.BeginReadScope();
         return scope.Kind switch
         {
             ExplorerScopeKind.ProcessExecutionRoot => await LoadProcessRootNodesAsync(scope),
@@ -5827,37 +5111,13 @@ public partial class MainViewModel : ViewModelBase,
     }
 
     private ProcessRowViewModel? FindFallbackParent(ProcessRowViewModel child)
-    {
-        if (child.ProcessInfo.ParentProcessId <= 0)
-        {
-            return null;
-        }
-
-        return _processViewModels.Values
-            .Where(parent => parent.ProcessId == child.ProcessInfo.ParentProcessId)
-            .Where(parent => !string.Equals(parent.ProcessKey, child.ProcessKey, StringComparison.Ordinal))
-            .Where(parent => HasSameEvidenceIdentity(child, parent))
-            .Where(parent => IsPlausibleParentStart(child, parent))
-            .OrderByDescending(parent => parent.ProcessInfo.StartTime ?? DateTime.MinValue)
-            .FirstOrDefault();
-    }
+        => _activeProcessPresentation?.FindFallbackParent(child);
 
     private static bool HasSameEvidenceIdentity(ProcessRowViewModel child, ProcessRowViewModel parent)
-    {
-        return string.Equals(child.ProcessInfo.CaseId, parent.ProcessInfo.CaseId, StringComparison.Ordinal) &&
-               string.Equals(child.ProcessInfo.EvidenceSessionId, parent.ProcessInfo.EvidenceSessionId, StringComparison.Ordinal) &&
-               string.Equals(child.ProcessInfo.CaptureId, parent.ProcessInfo.CaptureId, StringComparison.Ordinal) &&
-               string.Equals(child.ProcessInfo.SourceIdentityId, parent.ProcessInfo.SourceIdentityId, StringComparison.Ordinal) &&
-               string.Equals(child.ProcessInfo.HostId, parent.ProcessInfo.HostId, StringComparison.Ordinal) &&
-               string.Equals(child.ProcessInfo.ExecutionRootId, parent.ProcessInfo.ExecutionRootId, StringComparison.Ordinal);
-    }
+        => ProcessPresentationViewModel.HasSameEvidenceIdentity(child, parent);
 
     private static bool IsPlausibleParentStart(ProcessRowViewModel child, ProcessRowViewModel parent)
-    {
-        return child.ProcessInfo.StartTime == null ||
-               parent.ProcessInfo.StartTime == null ||
-               child.ProcessInfo.StartTime >= parent.ProcessInfo.StartTime;
-    }
+        => ProcessPresentationViewModel.IsPlausibleParentStart(child, parent);
 
     private async Task<IReadOnlyList<ExplorerNodeViewModel>> LoadFilesystemRootNodesAsync()
     {
@@ -6043,12 +5303,7 @@ public partial class MainViewModel : ViewModelBase,
     }
 
     private static string NormalizeProcessOwnerKey(string? userName)
-    {
-        var trimmed = userName?.Trim();
-        return IsUnknownProcessOwner(trimmed)
-            ? UnknownProcessOwnerKey
-            : trimmed!.ToLowerInvariant();
-    }
+        => ProcessPresentationViewModel.NormalizeProcessOwnerKey(userName);
 
     private static string GetProcessOwnerDisplayName(string? userName)
     {
@@ -6264,58 +5519,8 @@ public partial class MainViewModel : ViewModelBase,
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
-    [RelayCommand(CanExecute = nameof(CanToggleSelectedProcessBookmark))]
     private void ToggleSelectedProcessBookmark()
-    {
-        if (SelectedProcess == null || _annotationStore == null)
-        {
-            StatusMessage = "Select a staged process before changing bookmarks.";
-            return;
-        }
-
-        var row = SelectedProcess;
-        if (IsSelectedProcessBookmarked)
-        {
-            _annotationStore.DeleteBookmark(ProcessBookmarkKind, row.ProcessKey);
-            IsSelectedProcessBookmarked = false;
-            StatusMessage = $"Removed bookmark for {row.ProcessName} (PID {row.ProcessId}).";
-        }
-        else
-        {
-            var now = DateTime.UtcNow;
-            var target = CreateProcessAnnotationTarget(row);
-            var bookmark = new BookmarkRecord
-            {
-                BookmarkId = Guid.NewGuid().ToString("N"),
-                TargetKind = target.TargetKind,
-                TargetTable = target.TargetTable,
-                TargetId = target.TargetId,
-                ArtifactId = target.ArtifactId,
-                CaseId = target.CaseId,
-                EvidenceSessionId = target.EvidenceSessionId,
-                CaptureId = target.CaptureId,
-                SourceIdentityId = target.SourceIdentityId,
-                HostId = target.HostId,
-                ProcessKey = target.ProcessKey,
-                ProcessId = target.ProcessId,
-                ProcessName = target.ProcessName,
-                Label = target.Label,
-                DisplayPath = target.DisplayPath,
-                CreatedUtc = now,
-                UpdatedUtc = now
-            };
-            _annotationStore.UpsertBookmark(bookmark);
-            IsSelectedProcessBookmarked = true;
-            StatusMessage = $"Bookmarked {row.ProcessName} (PID {row.ProcessId}).";
-        }
-
-        _ = RefreshExplorerCountsForChangedInputsAsync(
-            ExplorerCountRefreshTrigger.AnnotationMutation);
-        if (_activeExplorerScope.Kind == ExplorerScopeKind.Bookmarked)
-        {
-            ScheduleDbRefresh();
-        }
-    }
+        => _activeProcessPresentation?.ToggleSelectedProcessBookmark();
 
     [RelayCommand(CanExecute = nameof(CanUseAiFeature))]
     private void OpenAiInvestigationTab()
@@ -6330,106 +5535,22 @@ public partial class MainViewModel : ViewModelBase,
     }
 
     private bool CanToggleSelectedProcessBookmark()
-    {
-        return SelectedProcess != null &&
-               _annotationStore != null &&
-               !string.IsNullOrWhiteSpace(SelectedProcess.ProcessKey);
-    }
+        => _activeProcessPresentation?.CanToggleSelectedProcessBookmark() ?? false;
 
     private void UpdateSelectedProcessBookmarkState()
-    {
-        IsSelectedProcessBookmarked = SelectedProcess != null && IsProcessBookmarked(SelectedProcess.ProcessKey);
-        ToggleSelectedProcessBookmarkCommand.NotifyCanExecuteChanged();
-    }
+        => _activeProcessPresentation?.UpdateSelectedProcessBookmarkState();
 
     private bool IsProcessBookmarked(string processKey)
-    {
-        if (_annotationStore == null || string.IsNullOrWhiteSpace(processKey))
-        {
-            return false;
-        }
-
-        try
-        {
-            return _annotationStore.IsBookmarked(ProcessBookmarkKind, processKey);
-        }
-        catch
-        {
-            return false;
-        }
-    }
+        => _activeProcessPresentation?.IsProcessBookmarked(processKey) ?? false;
 
     private static AnnotationTarget CreateProcessAnnotationTarget(ProcessRowViewModel row)
-    {
-        var process = row.ProcessInfo;
-        return new AnnotationTarget
-        {
-            TargetKind = ProcessBookmarkKind,
-            TargetTable = "Processes",
-            TargetId = row.ProcessKey,
-            ProcessKey = row.ProcessKey,
-            ProcessId = row.ProcessId,
-            ProcessName = row.ProcessName,
-            Label = $"{row.ProcessName} (PID {row.ProcessId})",
-            DisplayPath = row.ProcessPath,
-            CaseId = process.CaseId,
-            EvidenceSessionId = process.EvidenceSessionId,
-            CaptureId = process.CaptureId,
-            SourceIdentityId = process.SourceIdentityId,
-            HostId = process.HostId
-        };
-    }
+        => ProcessPresentationViewModel.CreateProcessAnnotationTarget(row);
 
     private ProcessRowViewModel? FindVisibleProcessRow(TelemetrySearchResult result)
-    {
-        var candidates = _virtualizedProcessListing?.GetLoadedRows() ?? Processes;
-        var target = !string.IsNullOrWhiteSpace(result.ProcessEntityId)
-            ? candidates.FirstOrDefault(process =>
-                string.Equals(process.ProcessInfo.ProcessEntityId, result.ProcessEntityId, StringComparison.Ordinal))
-            : null;
-
-        target ??= !string.IsNullOrWhiteSpace(result.ProcessKey)
-            ? candidates.FirstOrDefault(process => process.ProcessKey == result.ProcessKey)
-            : null;
-
-        target ??= candidates
-            .Where(process => process.ProcessId == result.ProcessId)
-            .Where(process => string.IsNullOrWhiteSpace(result.ProcessName) ||
-                string.Equals(process.ProcessName, result.ProcessName, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(process => process.ProcessInfo.StartTime ?? DateTime.MinValue)
-            .FirstOrDefault();
-
-        return target;
-    }
+        => _activeProcessPresentation?.FindVisibleProcessRow(result);
 
     private ProcessRowViewModel? AddSearchResultProcessRow(TelemetrySearchResult result)
-    {
-        var process = _telemetryProjectionService.GetProcessForSearchResult(result);
-        if (process == null)
-        {
-            return null;
-        }
-
-        var processKey = process.GetUniqueKey();
-        if (!_processViewModels.TryGetValue(processKey, out var row))
-        {
-            row = new ProcessRowViewModel(process);
-            UpdateProcessRowCounts(row, includeEventCounts: true);
-            _processViewModels[processKey] = row;
-        }
-
-        if (!Processes.Contains(row))
-        {
-            Processes.Add(row);
-            ProcessesView?.Refresh();
-        }
-
-        var stats = _telemetryProjectionService.GetStats();
-        TotalProcessCount = stats.ProcessCount;
-        RunningProcessCount = stats.RunningProcessCount;
-        ExitedProcessCount = stats.ExitedProcessCount;
-        return row;
-    }
+        => _activeProcessPresentation?.AddSearchResultProcessRow(result);
 
     private void UpdateProcessRowCounts(
         ProcessRowViewModel row,
@@ -6437,86 +5558,30 @@ public partial class MainViewModel : ViewModelBase,
         IReadOnlyDictionary<string, ProcessSourceEventCounts>? eventCountsByProcess = null,
         IReadOnlyDictionary<string, int>? moduleCountsByProcess = null,
         IReadOnlyDictionary<string, int>? handleCountsByProcess = null)
-    {
-        UpdateProcessRowArtifactCounts(row, moduleCountsByProcess, handleCountsByProcess);
-
-        if (includeEventCounts)
-        {
-            var counts = eventCountsByProcess != null && eventCountsByProcess.TryGetValue(row.ProcessKey, out var groupedCounts)
-                ? groupedCounts
-                : _telemetryProjectionService.GetEventCounts(row.ProcessKey, row.ProcessInfo.ProcessEntityId);
-
-            row.RuntimeEventCount = counts.RuntimeEventCount;
-            row.EtwEventCount = counts.EtwEventCount;
-            row.SecurityEventCount = counts.SecurityEventCount;
-            row.PowerShellEventCount = counts.PowerShellEventCount;
-            row.OtherWindowsEventCount = counts.OtherWindowsEventCount;
-            row.SysmonEventCount = counts.SysmonEventCount;
-        }
-    }
+        => _activeProcessPresentation?.UpdateProcessRowCounts(row, includeEventCounts, eventCountsByProcess, moduleCountsByProcess, handleCountsByProcess);
 
     private void UpdateProcessRowArtifactCounts(
         ProcessRowViewModel row,
         IReadOnlyDictionary<string, int>? moduleCountsByProcess = null,
         IReadOnlyDictionary<string, int>? handleCountsByProcess = null)
-    {
-        var stagedModuleCount = moduleCountsByProcess != null && moduleCountsByProcess.TryGetValue(row.ProcessKey, out var moduleCount)
-            ? moduleCount
-            : _telemetryProjectionService.GetArtifactCounts(row.ProcessKey, row.ProcessInfo.ProcessEntityId).ModuleCount;
-        var stagedHandleCount = handleCountsByProcess != null && handleCountsByProcess.TryGetValue(row.ProcessKey, out var handleCount)
-            ? handleCount
-            : _telemetryProjectionService.GetArtifactCounts(row.ProcessKey, row.ProcessInfo.ProcessEntityId).HandleCount;
-        row.ModuleCount = stagedModuleCount > 0 ? stagedModuleCount : Math.Max(row.ProcessInfo.ModuleCount, row.ProcessInfo.CachedModules.Count);
-        row.HandleCount = stagedHandleCount > 0 ? stagedHandleCount : Math.Max(row.ProcessInfo.HandleCount, row.ProcessInfo.CachedHandles.Count);
-        row.ProcessInfo.ModuleCount = row.ModuleCount;
-        row.ProcessInfo.HandleCount = row.HandleCount;
-    }
+        => _activeProcessPresentation?.UpdateProcessRowArtifactCounts(row, moduleCountsByProcess, handleCountsByProcess);
 
     private void UpdateSelectedProcessArtifactCounts()
-    {
-        if (SelectedProcess == null)
-        {
-            return;
-        }
-
-        SelectedProcess.ModuleCount = ModulesViewModel.Modules.Count;
-        SelectedProcess.HandleCount = HandlesViewModel.Handles.Count;
-        SelectedProcess.ProcessInfo.ModuleCount = SelectedProcess.ModuleCount;
-        SelectedProcess.ProcessInfo.HandleCount = SelectedProcess.HandleCount;
-        SelectedProcess.RefreshDisplay();
-    }
+        => _activeProcessPresentation?.UpdateSelectedProcessArtifactCounts();
 
     private void RefreshSelectedProcessRow()
-    {
-        if (SelectedProcess == null)
-        {
-            return;
-        }
-
-        SelectedProcess.ModuleCount = Math.Max(SelectedProcess.ProcessInfo.ModuleCount, ModulesViewModel.Modules.Count);
-        SelectedProcess.HandleCount = Math.Max(SelectedProcess.ProcessInfo.HandleCount, HandlesViewModel.Handles.Count);
-        SelectedProcess.RefreshDisplay();
-        ProcessPropertiesViewModel.LoadProcess(SelectedProcess);
-    }
+        => _activeProcessPresentation?.RefreshSelectedProcessRow();
 
     private bool TryGetVisibleProcessRow(string processKey, out ProcessRowViewModel row)
-    {
-        if (_processViewModels.TryGetValue(processKey, out row!))
-        {
-            return true;
-        }
-
-        row = Processes.FirstOrDefault(process =>
-            string.Equals(process.ProcessKey, processKey, StringComparison.Ordinal))!;
-        return row != null;
-    }
+        => ProcessPresentation.TryGetVisibleProcessRow(processKey, out row);
 
     /// <summary>
     /// Opens an existing PowerShell transcript folder without creating or widening it.
     /// </summary>
-    [RelayCommand(CanExecute = nameof(CanUseSecurityMonitoringFeature))]
+    [RelayCommand(CanExecute = nameof(CanOpenConnectedSecurityMonitoringMenu))]
     public void OpenTranscriptFolder()
     {
+        if (!RequireConnectedAgentMenu("opening the PowerShell transcript folder")) return;
         if (!RequireFeaturePublished(FeatureIds.SecurityMonitoringConfiguration, "Open PowerShell transcript folder")) return;
         try
         {
@@ -6532,9 +5597,10 @@ public partial class MainViewModel : ViewModelBase,
     /// <summary>
     /// Opens Windows Event Viewer.
     /// </summary>
-    [RelayCommand(CanExecute = nameof(CanUseEventTelemetryFeature))]
+    [RelayCommand(CanExecute = nameof(CanOpenConnectedEventTelemetryMenu))]
     public void OpenEventViewer()
     {
+        if (!RequireConnectedAgentMenu("opening Event Viewer")) return;
         if (!RequireFeaturePublished(FeatureIds.EventTelemetry, "Open Event Viewer")) return;
         try
         {
@@ -6553,6 +5619,7 @@ public partial class MainViewModel : ViewModelBase,
     [RelayCommand(CanExecute = nameof(CanOpenEventViewerLog))]
     public void OpenEventViewerLog(string? logName)
     {
+        if (!RequireConnectedAgentMenu("opening an Event Viewer log")) return;
         var featureId = IsWindowsSecurityEventLog(logName)
             ? FeatureIds.WindowsSecurityEvents
             : FeatureIds.EventTelemetry;
@@ -6575,9 +5642,22 @@ public partial class MainViewModel : ViewModelBase,
     }
 
     private bool CanOpenEventViewerLog(string? logName) =>
-        IsWindowsSecurityEventLog(logName)
+        CanOpenConnectedAgentMenus && (IsWindowsSecurityEventLog(logName)
             ? FeaturePublication.WindowsSecurityEvents
-            : FeaturePublication.EventTelemetry;
+            : FeaturePublication.EventTelemetry);
+
+    private bool CanOpenConnectedSecurityMonitoringMenu() =>
+        CanOpenConnectedAgentMenus && CanUseSecurityMonitoringFeature();
+
+    private bool CanOpenConnectedEventTelemetryMenu() =>
+        CanOpenConnectedAgentMenus && CanUseEventTelemetryFeature();
+
+    private bool RequireConnectedAgentMenu(string actionName)
+    {
+        if (CanOpenConnectedAgentMenus) return true;
+        StatusMessage = $"Connect to an agent before {actionName}.";
+        return false;
+    }
 
     private static bool IsWindowsSecurityEventLog(string? logName) =>
         string.Equals(logName, "Security", StringComparison.OrdinalIgnoreCase);
@@ -6677,11 +5757,47 @@ public partial class MainViewModel : ViewModelBase,
         OpenConfigProfile(profile, "Event Log Policy");
     }
 
+    [RelayCommand(CanExecute = nameof(CanOpenBuiltInProfileMenuEntry))]
+    private void OpenBuiltInProfileMenuEntry(BuiltInProfileMenuEntry? entry)
+    {
+        if (!RequireConnectedAgentMenu("opening a built-in monitoring profile")) return;
+        if (entry == null) return;
+        var group = GetBuiltInProfileMenuGroup(entry.Kind);
+        var featureId = entry.Kind is ConfigProfileKind.WindowsSecurityAuditPolicy or ConfigProfileKind.WindowsSecurityEventLogs
+            ? FeatureIds.WindowsSecurityEvents
+            : FeatureIds.SecurityMonitoringConfiguration;
+        if (group == null || !group.Entries.Contains(entry) ||
+            !RequireFeaturePublished(featureId, "Open built-in monitoring profile")) return;
+
+        try
+        {
+            var path = entry.Profile == null
+                ? _configProfileService.GetBundledProfileFolder(entry.Kind)
+                : _configProfileService.ResolveBundledProfileFilePath(entry.Profile);
+            if (string.IsNullOrWhiteSpace(path) ||
+                (entry.Profile == null ? !Directory.Exists(path) : !File.Exists(path)))
+                throw new FileNotFoundException("The bundled profile path is unavailable.", path);
+
+            var result = _externalProcessService.OpenShellTarget(path);
+            if (!result.Succeeded) throw new InvalidOperationException(result.Detail);
+            if (entry.Profile != null) RecordMonitoringProfileAction("open-built-in", entry.Profile, path);
+            StatusMessage = $"Opened {entry.Header}: {path}.";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to open {entry.Header}: {ex.Message}";
+        }
+    }
+
+    private bool CanOpenBuiltInProfileMenuEntry(BuiltInProfileMenuEntry? entry) =>
+        CanOpenConnectedAgentMenus && entry != null;
+
     /// <summary>
     /// Restores tree-aware process ordering.
     /// </summary>
     public void ResetTreeSort()
     {
+        if (_activeProcessPresentation == null) return;
         _currentSortColumn = "Tree";
         _sortAscending = true;
         ProcessesView?.SortDescriptions.Clear();
@@ -6699,6 +5815,7 @@ public partial class MainViewModel : ViewModelBase,
     [RelayCommand]
     public void ClearCurrentViewerState()
     {
+        if (_activeProcessPresentation == null) return;
         const string warning =
             "Clear the current viewer rows and selections?\n\n" +
             "This does not modify the active SQLite evidence, agent capture, archived package, annotations, Windows logs, or monitoring policy. Refresh from db reloads the active snapshot.";
@@ -6717,28 +5834,28 @@ public partial class MainViewModel : ViewModelBase,
         SelectedProcess = null;
         ProcessListingStatus = "Process listing was cleared; Refresh from db reloads it.";
         IsProcessListingLoading = false;
-        if (_featureModules.TryGetActivated<DumpsAndPeFeatureModule>(FeatureIds.DumpsAndPeAnalysis, out var dumpsAndPe))
+        if (_presentationModules.TryGetActivated<DumpsAndPeFeatureModule>(FeatureIds.DumpsAndPeAnalysis, out var dumpsAndPe))
         {
             dumpsAndPe.MemoryDumpsViewModel.Clear();
             dumpsAndPe.PeAnalysisViewModel.Clear();
         }
 
-        if (_featureModules.TryGetActivated<MemoryInvestigationViewModel>(FeatureIds.SystemMemoryAndVolatility, out var memory))
+        if (_presentationModules.TryGetActivated<MemoryInvestigationViewModel>(FeatureIds.SystemMemoryAndVolatility, out var memory))
         {
             memory.Clear();
         }
 
-        if (_featureModules.TryGetActivated<FilesystemArtifactsViewModel>(FeatureIds.FilesystemArtifacts, out var filesystem))
+        if (_presentationModules.TryGetActivated<FilesystemArtifactsViewModel>(FeatureIds.FilesystemArtifacts, out var filesystem))
         {
             filesystem.Clear();
         }
 
-        if (_featureModules.TryGetActivated<EventTelemetryFeatureModule>(FeatureIds.EventTelemetry, out var events))
+        if (_presentationModules.TryGetActivated<EventTelemetryFeatureModule>(FeatureIds.EventTelemetry, out var events))
         {
             events.SystemActivityViewModel.Clear();
         }
         InspectorPaneViewModel.Clear();
-        ExplorerViewModel.ResetCounts();
+        _activeProcessPresentation?.ExplorerViewModel.ResetCounts();
         ResetExplorerTabCounts();
         TotalProcessCount = 0;
         RunningProcessCount = 0;
@@ -7159,6 +6276,8 @@ public partial class MainViewModel : ViewModelBase,
         minutes is 1 or 2 or 5 or 10;
 
     private sealed record SnapshotPresentationRequest(
+        ProcessPresentationViewModel? Origin,
+        long HostRevision,
         long WorkspaceGeneration,
         string SessionId,
         ProcessListingQuery ListingQuery,
@@ -7341,9 +6460,10 @@ public partial class MainViewModel : ViewModelBase,
                         if (!headerQueriesSuspended)
                         {
                             headerQueriesSuspended = true;
-                            SuspendHeaderQueries();
+                            _telemetryProjectionService.SuspendReadAdmission();
                         }
                     }, token);
+                    await InvokeOnViewerDispatcherAsync(() => _presentationHost.QuiesceAsync(token), token).Unwrap();
                     await WaitForWorkspaceQueriesToDrainAsync(token);
                 },
                 preparePresentation: async (candidate, token) =>
@@ -7356,6 +6476,7 @@ public partial class MainViewModel : ViewModelBase,
                     prepared = await PrepareSnapshotPresentationAsync(
                         presentationRequest,
                         candidate.Binding,
+                        candidate.Generation,
                         token);
                 },
                 publishPresentation: async (activation, token) =>
@@ -7482,7 +6603,7 @@ public partial class MainViewModel : ViewModelBase,
                 }
             }, CancellationToken.None);
             if (headerQueriesSuspended)
-                await InvokeOnViewerDispatcherAsync(ResumeHeaderQueries, CancellationToken.None);
+                await InvokeOnViewerDispatcherAsync(() => { _telemetryProjectionService.ResumeReadAdmission(); _presentationHost.Abort(); }, CancellationToken.None);
             if (isManual)
             {
                 await InvokeOnViewerDispatcherAsync(
@@ -7504,29 +6625,31 @@ public partial class MainViewModel : ViewModelBase,
         }
 
         return new SnapshotPresentationRequest(
+            _activeProcessPresentation,
+            _presentationHost.ContextRevision,
             request.WorkspaceGeneration,
             request.SessionId,
-            BuildCurrentListingQuery(),
+            _activeProcessPresentation?.BuildCurrentListingQuery() ?? new ProcessListingQuery(),
             Volatile.Read(ref _processListingQueryGeneration),
             Volatile.Read(ref _explorerCountInputGeneration),
             Volatile.Read(ref _snapshotPresentationInteractionGeneration),
             SelectedProcess?.ProcessInfo.ProcessEntityId ?? string.Empty,
             SelectedProcess?.ProcessKey ?? string.Empty,
             CaptureProcessViewportAnchor(),
-            _activeExplorerScope,
+            _activeProcessPresentation?._activeExplorerScope ?? CreateAllProcessesScope(),
             SelectedExplorerTab?.Key,
             SelectedDataTab?.Key,
             SelectedDetailsTabKey,
-            _featureModules.TryGetActivated<NetworkAndZeekFeatureModule>(
+            _presentationModules.TryGetActivated<NetworkAndZeekFeatureModule>(
                 FeatureIds.NetworkAndZeek,
                 out _),
-            _featureModules.TryGetActivated<MemoryInvestigationViewModel>(
+            _presentationModules.TryGetActivated<MemoryInvestigationViewModel>(
                 FeatureIds.SystemMemoryAndVolatility,
                 out _),
-            _featureModules.TryGetActivated<FilesystemArtifactsViewModel>(
+            _presentationModules.TryGetActivated<FilesystemArtifactsViewModel>(
                 FeatureIds.FilesystemArtifacts,
                 out _),
-            _featureModules.TryGetActivated<EventTelemetryFeatureModule>(
+            _presentationModules.TryGetActivated<EventTelemetryFeatureModule>(
                 FeatureIds.EventTelemetry,
                 out _));
     }
@@ -7534,6 +6657,7 @@ public partial class MainViewModel : ViewModelBase,
     private async Task<PreparedSnapshotPresentation> PrepareSnapshotPresentationAsync(
         SnapshotPresentationRequest request,
         LiveSnapshotDatabaseBinding binding,
+        long snapshotGeneration,
         CancellationToken cancellationToken)
     {
         var queryService = binding.QueryService
@@ -7547,21 +6671,18 @@ public partial class MainViewModel : ViewModelBase,
         return await Task.Run(async () =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var count = await listingService.CountProcessesAsync(
-                request.ListingQuery.Filters,
-                cancellationToken);
-            var firstPage = await listingService.GetPageAsync(
-                request.ListingQuery,
-                cancellationToken);
-            var anchors = new ProcessListingAnchorResolver(listingService, request.ListingQuery, firstPage);
-            var selected = await anchors.ResolveAsync(
-                request.SelectedProcessEntityId,
-                request.SelectedProcessKey,
-                cancellationToken);
-            var viewport = await anchors.ResolveAsync(
-                request.ViewportAnchor?.ProcessEntityId ?? string.Empty,
-                request.ViewportAnchor?.ProcessKey ?? string.Empty,
-                cancellationToken);
+            var candidateProjection = new TelemetryProjectionService();
+            candidateProjection.SetSqliteStagingQueryService(queryService, EvidenceReadPath.ViewerSnapshotSqlite);
+            var listing = await _presentationHost.PrepareAsync(
+                new Services.Presentation.ViewerReadBinding(request.WorkspaceGeneration, snapshotGeneration, queryService, listingService, candidateProjection),
+                request.Origin == null ? null : new Services.Presentation.ProcessListingSnapshotRequest(request.ListingQuery, request.ListingQueryGeneration,
+                    request.SelectedProcessEntityId, request.SelectedProcessKey, request.ViewportAnchor), cancellationToken)
+                ;
+            if (request.Origin != null && listing == null) throw new InvalidOperationException("The Viewer host returned no prepared Processes listing.");
+            var count = listing?.Count ?? 0;
+            var firstPage = listing?.FirstPage ?? new ProcessListingWindow();
+            var selected = (Index: listing?.SelectedIndex ?? -1, Page: listing?.SelectedPage);
+            var viewport = (Index: listing?.ViewportIndex ?? -1, Page: listing?.ViewportPage);
 
             Interlocked.Increment(ref _activeExplorerRefreshCount);
             ExplorerCountRefreshPayload explorerPayload;
@@ -7668,6 +6789,7 @@ public partial class MainViewModel : ViewModelBase,
             (request, token) => PrepareSnapshotPresentationAsync(
                 request,
                 activation.Binding,
+                activation.Generation,
                 token),
             cancellationToken);
     }
@@ -7682,7 +6804,7 @@ public partial class MainViewModel : ViewModelBase,
         _snapshotRefreshOperation?.BeginPublication();
         CancelSnapshotRefreshCommand.NotifyCanExecuteChanged();
         using var publicationProgress = SqliteWorkScope.Begin("Publishing prepared results", 1, "generation");
-        CloseHeaderFilters();
+        _activeProcessPresentation?.CloseHeaderFilters();
 
         var queryService = activation.Binding.QueryService
             ?? throw new InvalidOperationException(
@@ -7690,9 +6812,8 @@ public partial class MainViewModel : ViewModelBase,
         var listingService = activation.Binding.ListingService
             ?? throw new InvalidOperationException(
                 "The activated snapshot has no process-listing service.");
-        var nextQueryGeneration = Interlocked.Increment(
-            ref _processListingQueryGeneration);
-        var collection = new VirtualizedProcessCollection(
+        var nextQueryGeneration = checked(Volatile.Read(ref _processListingQueryGeneration) + 1);
+        var collection = prepared.Request.Origin == null ? null : new VirtualizedProcessCollection(
             listingService,
             prepared.Request.ListingQuery,
             prepared.Request.WorkspaceGeneration,
@@ -7700,134 +6821,159 @@ public partial class MainViewModel : ViewModelBase,
             VirtualProcessCachePages,
             SynchronizationContext.Current,
             nextQueryGeneration);
-        collection.InitializePrepared(
+        collection?.InitializePrepared(
             prepared.ProcessCount,
             prepared.FirstProcessPage,
             prepared.SelectedProcessPage,
             prepared.ViewportProcessPage);
         var selectedRow = prepared.SelectedProcessIndex < 0
             ? null
-            : collection.GetLoadedItem(prepared.SelectedProcessIndex);
+            : collection?.GetLoadedItem(prepared.SelectedProcessIndex);
         var viewportRow = prepared.ViewportProcessIndex < 0
             ? null
-            : collection.GetLoadedItem(prepared.ViewportProcessIndex);
+            : collection?.GetLoadedItem(prepared.ViewportProcessIndex);
 
+        var previousQuery = _sqliteStagingQueryService;
+        var previousListing = _processListingService;
+        var previousDiagnostics = _telemetryProjectionService.PathDiagnostics;
+        var previousSnapshotPath = SnapshotDatabasePath;
+        var previousHasQuery = _hasActiveQueryDatabase;
         _isPublishingSnapshotPresentation = true;
         try
         {
-            _processListingRefreshCts?.Cancel();
-            _sqliteStagingQueryService = queryService;
-            _processListingService = listingService;
-            _telemetryProjectionService.SetSqliteStagingQueryService(
-                queryService,
-                EvidenceReadPath.ViewerSnapshotSqlite,
-                activation.Snapshot.SnapshotPath);
-            _hasActiveQueryDatabase = true;
-            SnapshotDatabasePath = activation.Snapshot.SnapshotPath;
-            Interlocked.Exchange(
-                ref _explorerCountInputGeneration,
-                prepared.ExplorerInputGeneration);
-            ApplyExplorerCounts(AddAnalysisCounts(prepared.Explorer.Counts));
-            ExplorerViewModel.RefreshEvidenceRoots(prepared.Explorer.EvidenceRoots);
-            ProcessStatisticsViewModel.ApplyPreparedSnapshot(prepared.ProcessStatistics);
+            ViewerPresentationPublication.Publish(_presentationHost, new ViewerReadBinding(prepared.Request.WorkspaceGeneration, activation.Generation,
+                queryService, listingService, _telemetryProjectionService), () =>
+            {
+                _activeProcessPresentation?._listingWorkflow.CancelRefresh();
+                Interlocked.Exchange(ref _processListingQueryGeneration, nextQueryGeneration);
+                _sqliteStagingQueryService = queryService;
+                _processListingService = listingService;
+                _telemetryProjectionService.SetSqliteStagingQueryService(
+                    queryService,
+                    EvidenceReadPath.ViewerSnapshotSqlite,
+                    activation.Snapshot.SnapshotPath);
+                _hasActiveQueryDatabase = true;
+                SnapshotDatabasePath = activation.Snapshot.SnapshotPath;
+                Interlocked.Exchange(
+                    ref _explorerCountInputGeneration,
+                    prepared.ExplorerInputGeneration);
+                _presentationHost.ApplyExplorerMetadata(prepared.Explorer with { Counts = AddAnalysisCounts(prepared.Explorer.Counts) });
 
-            if (prepared.Request.IncludeNetwork &&
-                _featureModules.TryGetActivated<NetworkAndZeekFeatureModule>(
-                    FeatureIds.NetworkAndZeek,
-                    out var network))
-            {
-                network.ViewModel.ApplySnapshot(
-                    prepared.NetworkCaptures,
-                    prepared.ZeekArtifacts);
-            }
+                _activeProcessPresentation?.ProcessStatisticsViewModel.ApplyPreparedSnapshot(prepared.ProcessStatistics, refreshTrend: false);
 
-            if (prepared.Request.IncludeMemory &&
-                _featureModules.TryGetActivated<MemoryInvestigationViewModel>(
-                    FeatureIds.SystemMemoryAndVolatility,
-                    out var memory))
-            {
-                memory.ApplySnapshot(
-                    prepared.MemoryImages,
-                    prepared.VolatilityRuns,
-                    prepared.MemoryProcesses);
-            }
+                if (prepared.Request.IncludeNetwork &&
+                    _presentationModules.TryGetActivated<NetworkAndZeekFeatureModule>(
+                        FeatureIds.NetworkAndZeek,
+                        out var network))
+                {
+                    network.ViewModel.ApplySnapshot(
+                        prepared.NetworkCaptures,
+                        prepared.ZeekArtifacts);
+                }
 
-            if (prepared.Request.IncludeFilesystem &&
-                _featureModules.TryGetActivated<FilesystemArtifactsViewModel>(
-                    FeatureIds.FilesystemArtifacts,
-                    out var filesystem))
-            {
-                filesystem.ApplySnapshot(
-                    prepared.FilesystemArtifacts,
-                    IsSameScope(prepared.Request.ActiveScope, _activeExplorerScope)
-                        ? _activeExplorerScope
-                        : null);
-            }
+                if (prepared.Request.IncludeMemory &&
+                    _presentationModules.TryGetActivated<MemoryInvestigationViewModel>(
+                        FeatureIds.SystemMemoryAndVolatility,
+                        out var memory))
+                {
+                    memory.ApplySnapshot(
+                        prepared.MemoryImages,
+                        prepared.VolatilityRuns,
+                        prepared.MemoryProcesses);
+                }
 
-            if (prepared.Request.IncludeSystemActivity &&
-                _featureModules.TryGetActivated<EventTelemetryFeatureModule>(
-                    FeatureIds.EventTelemetry,
-                    out var events))
-            {
-                events.SystemActivityViewModel.ApplyPreparedSnapshot(
-                    prepared.SystemActivities,
-                    IsSystemActivityScope(_activeExplorerScope)
-                        ? _activeExplorerScope
-                        : null);
-            }
+                if (prepared.Request.IncludeFilesystem &&
+                    _presentationModules.TryGetActivated<FilesystemArtifactsViewModel>(
+                        FeatureIds.FilesystemArtifacts,
+                        out var filesystem))
+                {
+                    filesystem.ApplySnapshot(
+                        prepared.FilesystemArtifacts,
+                        IsSameScope(prepared.Request.ActiveScope, _activeExplorerScope)
+                            ? _activeExplorerScope
+                            : null);
+                }
 
-            AttachVirtualizedProcessListing(collection, selectedRow, navigateToSelection: false);
-            if (_featureModules.TryGetActivated<BaselineComparisonFeatureModule>(
-                    FeatureIds.BaselineComparison,
-                    out var baseline))
-            {
-                baseline.SetActiveSnapshotPath(activation.Snapshot.SnapshotPath);
-            }
+                if (prepared.Request.IncludeSystemActivity &&
+                    _presentationModules.TryGetActivated<EventTelemetryFeatureModule>(
+                        FeatureIds.EventTelemetry,
+                        out var events))
+                {
+                    events.SystemActivityViewModel.ApplyPreparedSnapshot(
+                        prepared.SystemActivities,
+                        IsSystemActivityScope(_activeExplorerScope)
+                            ? _activeExplorerScope
+                            : null);
+                }
 
-            if (_featureModules.TryGetActivated<AgentFeatureModule>(
-                    FeatureIds.AgentsAndCapture,
-                    out var agentFeature))
-            {
-                agentFeature.AgentsViewModel.ApplyTelemetryStats(prepared.Statistics);
-            }
+                if (collection != null) AttachVirtualizedProcessListing(collection, selectedRow, navigateToSelection: false);
+                if (_featureModules.TryGetActivated<BaselineComparisonFeatureModule>(
+                        FeatureIds.BaselineComparison,
+                        out var baseline))
+                {
+                    baseline.SetActiveSnapshotPath(activation.Snapshot.SnapshotPath);
+                }
 
-            UpdateAgentCaptureRuntimeRows();
-            UpdateActiveSessionDetail();
-            var notices = new List<string>();
-            if ((!string.IsNullOrWhiteSpace(prepared.Request.SelectedProcessEntityId) ||
-                 !string.IsNullOrWhiteSpace(prepared.Request.SelectedProcessKey)) &&
-                selectedRow == null)
-            {
-                notices.Add("The previously selected process is absent in this generation; selection was cleared without PID substitution.");
-            }
+                if (_featureModules.TryGetActivated<AgentFeatureModule>(
+                        FeatureIds.AgentsAndCapture,
+                        out var agentFeature))
+                {
+                    agentFeature.AgentsViewModel.ApplyTelemetryStats(prepared.Statistics);
+                }
 
-            if (prepared.Request.ViewportAnchor != null && viewportRow == null)
-            {
-                notices.Add("The previous process scroll anchor is absent in this generation; no replacement row was selected.");
-            }
+                UpdateAgentCaptureRuntimeRows();
+                UpdateActiveSessionDetail();
+                var notices = new List<string>();
+                if ((!string.IsNullOrWhiteSpace(prepared.Request.SelectedProcessEntityId) ||
+                     !string.IsNullOrWhiteSpace(prepared.Request.SelectedProcessKey)) &&
+                    selectedRow == null)
+                {
+                    notices.Add("The previously selected process is absent in this generation; selection was cleared without PID substitution.");
+                }
 
-            _snapshotPresentationContextNotice = string.Join(" ", notices);
-            if (viewportRow != null && prepared.Request.ViewportAnchor != null)
+                if (prepared.Request.ViewportAnchor != null && viewportRow == null)
+                {
+                    notices.Add("The previous process scroll anchor is absent in this generation; no replacement row was selected.");
+                }
+
+                _snapshotPresentationContextNotice = string.Join(" ", notices);
+                if (viewportRow != null && prepared.Request.ViewportAnchor != null)
+                {
+                    ProcessPresentation.RestoreViewport(
+                        viewportRow,
+                        prepared.Request.ViewportAnchor.RelativeOffset);
+                }
+                else if (selectedRow != null)
+                {
+                    ProcessPresentation.RequestRowNavigation(selectedRow);
+                }
+                publicationProgress.Advance(1);
+            }, () =>
             {
-                ProcessViewportAnchorRestoreRequested?.Invoke(
-                    viewportRow,
-                    prepared.Request.ViewportAnchor.RelativeOffset);
-            }
-            else if (selectedRow != null)
-            {
-                ProcessRowNavigationRequested?.Invoke(selectedRow);
-            }
+                _sqliteStagingQueryService = previousQuery;
+                _processListingService = previousListing;
+                _telemetryProjectionService.SetSqliteStagingQueryService(_sqliteStagingQueryService,
+                    previousDiagnostics.ReadPath, previousDiagnostics.DatabasePath);
+                SnapshotDatabasePath = previousSnapshotPath;
+                _hasActiveQueryDatabase = previousHasQuery;
+            });
+        }
+        catch
+        {
+            collection?.Dispose();
+            throw;
         }
         finally
         {
             _isPublishingSnapshotPresentation = false;
         }
-        publicationProgress.Advance(1);
     }
 
     private void ValidatePreparedPresentationIsCurrent(
         SnapshotPresentationRequest request)
     {
+        if (!ReferenceEquals(request.Origin, _activeProcessPresentation) || request.HostRevision != _presentationHost.ContextRevision)
+            throw new InvalidOperationException("The active presentation changed while the snapshot was preparing.");
         if (request.WorkspaceGeneration != _captureWorkspaceCoordinator.Generation ||
             !string.Equals(request.SessionId, _sessionPaths.SessionId, StringComparison.Ordinal) ||
             _captureWorkspaceCoordinator.Mode != CaptureWorkspaceMode.LiveCapture)
@@ -7839,22 +6985,22 @@ public partial class MainViewModel : ViewModelBase,
         if (request.ListingQueryGeneration != Volatile.Read(ref _processListingQueryGeneration) ||
             request.ExplorerInputGeneration != Volatile.Read(ref _explorerCountInputGeneration) ||
             request.InteractionGeneration != Volatile.Read(ref _snapshotPresentationInteractionGeneration) ||
-            !IsSameScope(request.ActiveScope, _activeExplorerScope))
+            !IsSameScope(request.ActiveScope, _activeProcessPresentation?._activeExplorerScope ?? CreateAllProcessesScope()))
         {
             throw new InvalidOperationException(
                 "Viewer filters, scope, or annotation inputs changed while the snapshot was preparing; the previous coherent presentation was kept.");
         }
 
-        if (request.IncludeNetwork != _featureModules.TryGetActivated<NetworkAndZeekFeatureModule>(
+        if (request.IncludeNetwork != _presentationModules.TryGetActivated<NetworkAndZeekFeatureModule>(
                 FeatureIds.NetworkAndZeek,
                 out _) ||
-            request.IncludeMemory != _featureModules.TryGetActivated<MemoryInvestigationViewModel>(
+            request.IncludeMemory != _presentationModules.TryGetActivated<MemoryInvestigationViewModel>(
                 FeatureIds.SystemMemoryAndVolatility,
                 out _) ||
-            request.IncludeFilesystem != _featureModules.TryGetActivated<FilesystemArtifactsViewModel>(
+            request.IncludeFilesystem != _presentationModules.TryGetActivated<FilesystemArtifactsViewModel>(
                 FeatureIds.FilesystemArtifacts,
                 out _) ||
-            request.IncludeSystemActivity != _featureModules.TryGetActivated<EventTelemetryFeatureModule>(
+            request.IncludeSystemActivity != _presentationModules.TryGetActivated<EventTelemetryFeatureModule>(
                 FeatureIds.EventTelemetry,
                 out _))
         {
@@ -7869,6 +7015,7 @@ public partial class MainViewModel : ViewModelBase,
     private static bool CanPublishPreparedPresentation(
         SnapshotPresentationRequest prepared,
         SnapshotPresentationRequest current) =>
+        ReferenceEquals(prepared.Origin, current.Origin) && prepared.HostRevision == current.HostRevision &&
         prepared.WorkspaceGeneration == current.WorkspaceGeneration &&
         string.Equals(prepared.SessionId, current.SessionId, StringComparison.Ordinal) &&
         prepared.ListingQueryGeneration == current.ListingQueryGeneration &&
@@ -7881,32 +7028,7 @@ public partial class MainViewModel : ViewModelBase,
         prepared.IncludeSystemActivity == current.IncludeSystemActivity;
 
     private ViewerProcessViewportAnchor? CaptureProcessViewportAnchor()
-    {
-        var handlers = ProcessViewportAnchorCaptureRequested;
-        if (handlers == null)
-        {
-            return null;
-        }
-
-        foreach (Func<ViewerProcessViewportAnchor?> handler in handlers.GetInvocationList())
-        {
-            try
-            {
-                var anchor = handler();
-                if (anchor != null)
-                {
-                    return anchor;
-                }
-            }
-            catch
-            {
-                // WPF virtualization may be between container generations. Logical
-                // selection still survives; visual anchoring degrades gracefully.
-            }
-        }
-
-        return null;
-    }
+        => _activeProcessPresentation?.CaptureProcessViewportAnchor();
 
     private ViewerSnapshotFollowWorkspace CreateSnapshotFollowWorkspace(
         ViewerWorkspaceLifecycleState state,
@@ -7962,17 +7084,10 @@ public partial class MainViewModel : ViewModelBase,
     }
 
     public void NotifyProcessViewportChanged()
-    {
-        MarkSnapshotPresentationInteraction();
-    }
+        => _activeProcessPresentation?.NotifyProcessViewportChanged();
 
     private void MarkSnapshotPresentationInteraction()
-    {
-        if (!_isPublishingSnapshotPresentation)
-        {
-            Interlocked.Increment(ref _snapshotPresentationInteractionGeneration);
-        }
-    }
+        => _activeProcessPresentation?.MarkSnapshotPresentationInteraction();
 
     private static async Task InvokeOnViewerDispatcherAsync(
         Action action,
@@ -8009,32 +7124,8 @@ public partial class MainViewModel : ViewModelBase,
             cancellationToken).Task;
     }
 
-    private async Task RefreshSnapshotBackedOverviewViewsAsync()
-    {
-        await Dispatcher.Yield(DispatcherPriority.Background);
-        await ProcessStatisticsViewModel.RefreshStatisticsAsync();
-        await Dispatcher.Yield(DispatcherPriority.Background);
-        if (_featureModules.TryGetActivated<NetworkAndZeekFeatureModule>(FeatureIds.NetworkAndZeek, out var network))
-        {
-            network.ViewModel.RefreshNetworkCaptures();
-        }
-        await Dispatcher.Yield(DispatcherPriority.Background);
-        if (_featureModules.TryGetActivated<MemoryInvestigationViewModel>(FeatureIds.SystemMemoryAndVolatility, out var memory))
-        {
-            memory.RefreshMemoryInvestigation();
-        }
-        await Dispatcher.Yield(DispatcherPriority.Background);
-        if (_featureModules.TryGetActivated<FilesystemArtifactsViewModel>(FeatureIds.FilesystemArtifacts, out var filesystem))
-        {
-            filesystem.RefreshArtifacts();
-        }
-        await Dispatcher.Yield(DispatcherPriority.Background);
-        if (_featureModules.TryGetActivated<EventTelemetryFeatureModule>(FeatureIds.EventTelemetry, out var events))
-        {
-            events.SystemActivityViewModel.RefreshActivities(
-                IsSystemActivityScope(_activeExplorerScope) ? _activeExplorerScope : null);
-        }
-    }
+    private Task RefreshSnapshotBackedOverviewViewsAsync()
+        => _activeProcessPresentation?.RefreshSnapshotBackedViewsAsync() ?? Task.CompletedTask;
 
     private async Task<bool> SwitchToFreshLiveCaptureWorkspaceAsync(string reason)
     {
@@ -8175,18 +7266,13 @@ public partial class MainViewModel : ViewModelBase,
 
     private async Task DetachAndReleaseCurrentWorkspaceAsync()
     {
-        await InvokeOnViewerDispatcherAsync(SuspendHeaderQueries, CancellationToken.None);
+        _telemetryProjectionService.SuspendReadAdmission();
         try
         {
-            while (Volatile.Read(ref _activeHeaderQueryCount) > 0) await Task.Delay(25);
-            _viewerNavigationCoordinator.InvalidateProcessNavigation();
-            await _selectedProcessFanOutCoordinator.RebindWorkspaceAsync(
-                _captureWorkspaceCoordinator.Generation);
+            await InvokeOnViewerDispatcherAsync(() => _presentationHost.QuiesceAsync(CancellationToken.None), CancellationToken.None).Unwrap();
+            await WaitForWorkspaceQueriesToDrainAsync();
+            await InvokeOnViewerDispatcherAsync(() => _presentationHost.Detach(_captureWorkspaceCoordinator.Generation), CancellationToken.None);
             await _liveSnapshotRefreshCoordinator.ReleaseActiveBindingAsync();
-            _dbRefreshDebounceTimer?.Stop();
-            _processListingRefreshCts?.Cancel();
-            _processListingRefreshCts?.Dispose();
-            _processListingRefreshCts = null;
             var previousVirtualListing = DetachVirtualizedProcessListing();
             previousVirtualListing?.Dispose();
 
@@ -8206,14 +7292,6 @@ public partial class MainViewModel : ViewModelBase,
             while (previousVirtualListing?.IsLoading == true)
             {
                 await Task.Delay(25);
-            }
-
-            ProcessDescriptionViewModel.SetAnnotationStore(null);
-            ProcessDescriptionViewModel.SetWorkspace(null, _captureWorkspaceCoordinator.Generation);
-            NotesViewModel.SetAnnotationStore(null);
-            if (_featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var ai))
-            {
-                ai.DetachWorkspace();
             }
 
             _hasActiveQueryDatabase = false;
@@ -8239,16 +7317,18 @@ public partial class MainViewModel : ViewModelBase,
                 search.DetachWorkspace();
             }
 
-            DetachCompiledPrivateFeatureWorkspace();
+
         }
-        finally { await InvokeOnViewerDispatcherAsync(ResumeHeaderQueries, CancellationToken.None); }
+        finally { await InvokeOnViewerDispatcherAsync(() => { _telemetryProjectionService.ResumeReadAdmission(); _presentationHost.Abort(); }, CancellationToken.None); }
     }
 
     private async Task WaitForWorkspaceQueriesToDrainAsync(
         CancellationToken cancellationToken = default)
     {
-        while (Volatile.Read(ref _activeHeaderQueryCount) > 0 ||
-               Volatile.Read(ref _activeDbRefreshCount) > 0 ||
+        while (_presentationHost.ProcessPresentations.Any(p =>
+                   Volatile.Read(ref p._activeHeaderQueryCount) > 0 ||
+                   p._activeDbRefreshCount > 0 || p._selectedProcessFanOutCoordinator.ActiveConsumers > 0) ||
+               _telemetryProjectionService.ActiveReadScopes > 0 ||
                Volatile.Read(ref _activeExplorerRefreshCount) > 0 ||
                _agentCaptureWorkflowCoordinator.State.IsPollRunning)
         {
@@ -8280,15 +7360,10 @@ public partial class MainViewModel : ViewModelBase,
                     : EvidenceReadPath.ArchivedCaptureSqlite,
             directArchivedDatabasePath ?? string.Empty);
 
-        ProcessDescriptionViewModel.SetAnnotationStore(annotationStore);
-        ProcessDescriptionViewModel.SetWorkspace(
-            sessionPaths,
-            _captureWorkspaceCoordinator.Generation);
-        NotesViewModel.SetAnnotationStore(annotationStore);
-        if (_featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var ai))
-        {
-            ai.SetWorkspace(sessionPaths, annotationStore);
-        }
+        if (_featureModules.TryGetActivated<AiInvestigationService>(FeatureIds.AiAssistance, out var sharedAi))
+            sharedAi.SetStoragePaths(sessionPaths.AiSettingsPath, sessionPaths.AiSecretPath);
+        _presentationHost.BindCapture(new ViewerCaptureBinding(_captureWorkspaceCoordinator.Generation,
+            sessionPaths, annotationStore, queryService, listingService));
 
         if (_featureModules.TryGetActivated<BaselineComparisonFeatureModule>(FeatureIds.BaselineComparison, out var baseline))
         {
@@ -8301,10 +7376,7 @@ public partial class MainViewModel : ViewModelBase,
             agentFeature.StatusTimer.Start();
         }
 
-        BindCompiledPrivateFeatureWorkspace(
-            sessionPaths,
-            annotationStore,
-            directArchivedDatabasePath);
+
 
         _hasActiveQueryDatabase = queryService != null;
         LiveDatabasePath = sessionPaths.LiveDatabasePath;
@@ -8347,46 +7419,8 @@ public partial class MainViewModel : ViewModelBase,
 
     private void ClearViewerStateForSessionSwitch()
     {
-        var previousVirtualListing = DetachVirtualizedProcessListing();
-        previousVirtualListing?.Dispose();
-        _processViewModels.Clear();
-        Processes.Clear();
-        ProcessesView = CollectionViewSource.GetDefaultView(Processes);
-        SelectedProcess = null;
-        ProcessListingStatus = "Process listing is not loaded.";
-        IsProcessListingLoading = false;
-        TotalProcessCount = 0;
-        RunningProcessCount = 0;
-        ExitedProcessCount = 0;
+        _presentationHost.ResetCapture();
         LastRefreshTime = default;
-        ClearFilters();
-        _dbRefreshDebounceTimer?.Stop();
-        ClearScopedSelectionState();
-        _activeExplorerScope = CreateAllProcessesScope();
-        ExplorerViewModel.ResetSelection();
-        ExplorerViewModel.ResetCounts();
-        ResetExplorerTabCounts();
-        _viewerNavigationCoordinator.ResetWorkspaceContext();
-        if (_featureModules.TryGetActivated<MemoryInvestigationViewModel>(FeatureIds.SystemMemoryAndVolatility, out var memory))
-        {
-            memory.Clear();
-        }
-
-        if (_featureModules.TryGetActivated<EventTelemetryFeatureModule>(FeatureIds.EventTelemetry, out var events))
-        {
-            events.SystemActivityViewModel.Clear();
-        }
-
-        if (_featureModules.TryGetActivated<NetworkAndZeekFeatureModule>(FeatureIds.NetworkAndZeek, out var network))
-        {
-            network.ViewModel.Clear();
-        }
-
-        if (_featureModules.TryGetActivated<FilesystemArtifactsViewModel>(FeatureIds.FilesystemArtifacts, out var filesystem))
-        {
-            filesystem.Clear();
-        }
-
         if (_featureModules.TryGetActivated<SearchFeatureModule>(FeatureIds.SearchAndSigma, out var search))
         {
             search.ClearResults();
@@ -8396,8 +7430,8 @@ public partial class MainViewModel : ViewModelBase,
         {
             sigma.ClearCommand.Execute(null);
         }
-        InspectorPaneViewModel.Clear("Open a session or select a process to inspect details here.");
-        UpdateSelectedProcessBookmarkState();
+
+        _activeProcessPresentation?.UpdateSelectedProcessBookmarkState();
         IncludeSelectedProcessCommand.NotifyCanExecuteChanged();
         ExcludeSelectedProcessCommand.NotifyCanExecuteChanged();
         QueueSelectedProcessDumpCommand.NotifyCanExecuteChanged();
@@ -8447,22 +7481,31 @@ public partial class MainViewModel : ViewModelBase,
     }
 
     private HostMonitoringConfigurationViewModel CreateHostMonitoringConfigurationSettings(
-        AgentHostMonitoringConfiguration? configuration = null)
+        AgentHostMonitoringConfiguration? configuration = null,
+        bool useLegacyEventTelemetryScope = false)
     {
-        var windowsSecurityOnly = IsWindowsSecurityOnlyPublication();
+        var windowsSecurityOnly = !useLegacyEventTelemetryScope && IsWindowsSecurityOnlyPublication();
         var securityProfiles = windowsSecurityOnly
             ? _configProfileService.GetProfiles(ConfigProfileKind.WindowsSecurityAuditPolicy)
-            : SecurityMonitoringPolicyProfiles;
+            : useLegacyEventTelemetryScope
+                ? _securityMonitoringService.GetPolicyProfiles()
+                : SecurityMonitoringPolicyProfiles;
+        var powerShellProfiles = useLegacyEventTelemetryScope
+            ? _powerShellAuditingService.GetAuditingProfiles()
+            : PowerShellAuditingProfiles;
         var eventLogProfiles = windowsSecurityOnly
             ? _configProfileService.GetProfiles(ConfigProfileKind.WindowsSecurityEventLogs)
-            : EventLogPolicyProfiles;
+            : useLegacyEventTelemetryScope
+                ? _configProfileService.GetProfiles(ConfigProfileKind.EventLogs)
+                : EventLogPolicyProfiles;
         var settings = new HostMonitoringConfigurationViewModel(
             EtwCaptureProfiles,
             SysmonConfigProfiles,
             securityProfiles,
-            PowerShellAuditingProfiles,
+            powerShellProfiles,
             eventLogProfiles,
-            _featureAccess.Catalog);
+            _featureAccess.Catalog,
+            preferWindowsSecurityConfiguration: !useLegacyEventTelemetryScope);
 
         if (configuration != null)
         {
@@ -8477,7 +7520,7 @@ public partial class MainViewModel : ViewModelBase,
                 securityProfiles,
                 profileId: null);
             settings.SelectedPowerShellAuditingProfile = HostMonitoringConfigurationViewModel.SelectProfile(
-                PowerShellAuditingProfiles,
+                powerShellProfiles,
                 profileId: null);
             settings.SelectedEventLogProfile = HostMonitoringConfigurationViewModel.SelectProfile(
                 eventLogProfiles,
@@ -8493,22 +7536,23 @@ public partial class MainViewModel : ViewModelBase,
 
     private AgentHostMonitoringConfiguration CreateHostMonitoringConfigurationDraft(
         AgentRegistryEntryViewModel agent,
-        HostMonitoringConfigurationViewModel? settings = null)
+        HostMonitoringConfigurationViewModel? settings = null,
+        bool useLegacyEventTelemetryScope = false)
     {
-        settings ??= CreateHostMonitoringConfigurationSettings(agent.HostMonitoringConfiguration);
+        settings ??= CreateHostMonitoringConfigurationSettings(agent.HostMonitoringConfiguration, useLegacyEventTelemetryScope);
         var sysmonProfile = settings.SelectedSysmonProfile;
         var securityProfile = settings.SelectedSecurityMonitoringProfile;
         var powerShellProfile = settings.SelectedPowerShellAuditingProfile;
         var eventLogProfile = settings.SelectedEventLogProfile;
         var etwProfile = settings.SelectedEtwProfile;
-        var windowsSecurityOnly = IsWindowsSecurityOnlyPublication();
+        var windowsSecurityOnly = !useLegacyEventTelemetryScope && IsWindowsSecurityOnlyPublication();
 
         var draft = new AgentHostMonitoringConfiguration
         {
             AgentId = agent.AgentId,
             HostId = FirstNonEmpty(agent.HostId, Environment.MachineName),
             ConfigurationVersion = "viewer-current-monitoring",
-            ConfigurationAreas = GetHostMonitoringConfigurationAreas(),
+            ConfigurationAreas = GetHostMonitoringConfigurationAreas(useLegacyEventTelemetryScope),
             Sysmon = windowsSecurityOnly
                 ? new AgentSysmonMonitoringIntent { VerifyService = false }
                 : new AgentSysmonMonitoringIntent
@@ -8517,7 +7561,8 @@ public partial class MainViewModel : ViewModelBase,
                     VerifyService = settings.VerifySysmonService,
                     ProfileId = sysmonProfile?.Id ?? string.Empty,
                     ProfileDisplayName = GetProfileName(sysmonProfile),
-                    ConfigurationPath = ResolveConfigProfileFilePath(sysmonProfile)
+                    // Stable profile identity crosses IPC; the Agent resolves its local copy.
+                    ConfigurationPath = string.Empty
                 },
             SecurityAuditPolicy = new AgentSecurityAuditMonitoringIntent
             {
@@ -8528,7 +7573,7 @@ public partial class MainViewModel : ViewModelBase,
                 PolicyProfileId = securityProfile?.Id ?? string.Empty,
                 PolicyProfileDisplayName = GetProfileName(securityProfile),
                 // The Agent resolves its own bundled copy; split packages have separate roots.
-                AuditPolicyPath = windowsSecurityOnly ? string.Empty : ResolveConfigProfileFilePath(securityProfile)
+                AuditPolicyPath = string.Empty
             },
             EventLogs = new AgentEventLogMonitoringIntent
             {
@@ -8564,7 +7609,8 @@ public partial class MainViewModel : ViewModelBase,
                     ConfigureSession = settings.ConfigureEtwSession,
                     ProfileId = etwProfile?.Id ?? string.Empty,
                     ProfileDisplayName = GetProfileName(etwProfile),
-                    ProfilePath = ResolveConfigProfileFilePath(etwProfile)
+                    // Stable profile identity crosses IPC; the Agent resolves its local copy.
+                    ProfilePath = string.Empty
                 },
             ScheduledDumps = new AgentScheduledDumpPolicy
             {
@@ -8698,10 +7744,13 @@ public partial class MainViewModel : ViewModelBase,
         string primaryButtonContent,
         string title,
         AgentHostMonitoringConfiguration? configuration,
-        bool requiresComputerChangeAcknowledgement)
+        bool requiresComputerChangeAcknowledgement,
+        bool useLegacyEventTelemetryScope = false)
     {
         var dialog = new ProcInsider.HostMonitoringConfigurationDialog(
-            CreateHostMonitoringConfigurationSettings(configuration ?? agent.HostMonitoringConfiguration),
+            CreateHostMonitoringConfigurationSettings(
+                configuration ?? agent.HostMonitoringConfiguration,
+                useLegacyEventTelemetryScope),
             primaryButtonContent,
             requiresComputerChangeAcknowledgement)
         {
@@ -8941,6 +7990,7 @@ public partial class MainViewModel : ViewModelBase,
 
     private async Task<IReadOnlyList<ExplorerNodeViewModel>> LoadCorrelationEvidenceGroupNodesAsync(ExplorerScope scope)
     {
+        using var readScope = _telemetryProjectionService.BeginReadScope();
         if (_sqliteStagingQueryService == null || !scope.CorrelationState.HasValue)
         {
             return [];
@@ -8964,6 +8014,7 @@ public partial class MainViewModel : ViewModelBase,
 
     private async Task LoadCorrelationEvidenceResultsAsync(ExplorerScope scope)
     {
+        using var readScope = _telemetryProjectionService.BeginReadScope();
         var queryService = _sqliteStagingQueryService;
         if (queryService == null || !scope.CorrelationState.HasValue)
         {
@@ -9266,7 +8317,7 @@ public partial class MainViewModel : ViewModelBase,
                 : CaptureRunStateFromJob(response.Job, CaptureRunState.Starting));
             UpdateAgentStatus(response, observeWorkflow: false);
             TryNavigateToExplorerTab(ExplorerTabKeys.Network, "Open Network and Zeek");
-            if (_featureModules.TryGetActivated<NetworkAndZeekFeatureModule>(FeatureIds.NetworkAndZeek, out var network))
+            if (_presentationModules.TryGetActivated<NetworkAndZeekFeatureModule>(FeatureIds.NetworkAndZeek, out var network))
             {
                 network.ViewModel.RefreshNetworkCaptures();
             }
@@ -10060,11 +9111,72 @@ public partial class MainViewModel : ViewModelBase,
             : $"Agent artifact enrichment did not start: {FirstNonEmpty(result.Response.ErrorMessage, result.Response.ErrorCode, result.Detail, "agent command failed")}";
     }
 
+    private ViewerSharedActions? _viewerSharedActions;
+    private ViewerSharedActions CreateViewerSharedActions()
+    {
+        if (_viewerSharedActions != null) return _viewerSharedActions;
+        var actions = new ViewerSharedActions
+        {
+            AddAgentCommand = AddAgentCommand,
+            AnalyzeSelectedDumpPeCommand = AnalyzeSelectedDumpPeCommand,
+            AnalyzeSelectedProcessImageCommand = AnalyzeSelectedProcessImageCommand,
+            CancelStopAgentCommand = CancelStopAgentCommand,
+            CheckAgentMonitoringConfigurationCommand = CheckAgentMonitoringConfigurationCommand,
+            ConfirmStopAgentCommand = ConfirmStopAgentCommand,
+            CopySelectedZeekWiresharkFilterCommand = CopySelectedZeekWiresharkFilterCommand,
+            DeployAgentCommand = DeployAgentCommand,
+            DumpSystemMemoryCommand = DumpSystemMemoryCommand,
+            ExportSelectedZeekFlowPcapCommand = ExportSelectedZeekFlowPcapCommand,
+            OpenSelectedZeekPcapCommand = OpenSelectedZeekPcapCommand,
+            OpenSelectedZeekProcessCommand = OpenSelectedZeekProcessCommand,
+            PauseAgentConfiguredCaptureCommand = PauseAgentConfiguredCaptureCommand,
+            QueueArtifactFileImportCommand = QueueArtifactFileImportCommand,
+            QueueArtifactFolderImportCommand = QueueArtifactFolderImportCommand,
+            QueueMemoryImageImportCommand = QueueMemoryImageImportCommand,
+            QueueProcessMonitorImportCommand = QueueProcessMonitorImportCommand,
+            QueueSelectedMemoryImageVolatilityAnalysisCommand = QueueSelectedMemoryImageVolatilityAnalysisCommand,
+            QueueSelectedProcessDumpCommand = QueueSelectedProcessDumpCommand,
+            QueueSelectedZeekAnalysisCommand = QueueSelectedZeekAnalysisCommand,
+            RePairAgentCommand = RePairAgentCommand,
+            ReconnectRunningLocalAgentCommand = ReconnectRunningLocalAgentCommand,
+            RefreshSelectedHandlesCommand = RefreshSelectedHandlesCommand,
+            RefreshSelectedModulesCommand = RefreshSelectedModulesCommand,
+            RefreshViewFromStagingCommand = RefreshViewFromStagingCommand,
+            RevokeAgentPairingCommand = RevokeAgentPairingCommand,
+            SelectProcessMonitorExecutableCommand = SelectProcessMonitorExecutableCommand,
+            ShowAgentHealthCommand = ShowAgentHealthCommand,
+            StartAgentCaptureOptionCommand = StartAgentCaptureOptionCommand,
+            StartAgentConfiguredCaptureCommand = StartAgentConfiguredCaptureCommand,
+            StartNetworkCaptureCommand = StartNetworkCaptureCommand,
+            StopAgentCaptureOptionCommand = StopAgentCaptureOptionCommand,
+            StopAgentCommand = StopAgentCommand,
+            StopAgentConfiguredCaptureCommand = StopAgentConfiguredCaptureCommand,
+            StopNetworkCaptureCommand = StopNetworkCaptureCommand,
+            GetFeaturePublication = () => FeaturePublication,
+            GetEtwCaptureProfiles = () => EtwCaptureProfiles,
+            GetSelectedEtwCaptureProfile = () => SelectedEtwCaptureProfile,
+            SetSelectedEtwCaptureProfile = value => SelectedEtwCaptureProfile = value,
+            GetHasEtwCaptureProfiles = () => HasEtwCaptureProfiles,
+            GetIsAgentViewerConnected = () => IsAgentViewerConnected,
+            GetProcessMonitorExecutablePath = () => ProcessMonitorExecutablePath,
+            GetNetworkCaptureStateDisplay = () => NetworkCaptureStateDisplay,
+            GetZeekWslDistributionName = () => ZeekWslDistributionName,
+            SetZeekWslDistributionName = value => ZeekWslDistributionName = value,
+            GetZeekWslCommand = () => ZeekWslCommand,
+            SetZeekWslCommand = value => ZeekWslCommand = value,
+        };
+        PropertyChanged += actions.SourcePropertyChanged;
+        return _viewerSharedActions = actions;
+    }
+
+    private bool HasEligibleSelectedTarget() => _activeProcessPresentation?.CaptureSelectedTarget() is { } target &&
+        (_activeProcessPresentation?.IsSelectedTargetEligible(target) ?? false);
+
     private bool CanRefreshSelectedHandles()
     {
         return _featureAccess.CanExecute(
             FeatureIds.ModulesAndHandles,
-            SelectedProcess != null && !IsAgentShutdownInProgress);
+            HasEligibleSelectedTarget() && !IsAgentShutdownInProgress);
     }
 
     [RelayCommand(CanExecute = nameof(CanRefreshSelectedHandles))]
@@ -10124,6 +9236,9 @@ public partial class MainViewModel : ViewModelBase,
             return;
         }
 
+        var presentation = ProcessPresentation;
+        var target = presentation.CaptureSelectedTarget();
+        if (target == null || !presentation.IsSelectedTargetEligible(target)) return;
         var selected = SelectedProcess;
         if (selected == null)
         {
@@ -10157,7 +9272,7 @@ public partial class MainViewModel : ViewModelBase,
                 Action: action,
                 Selection: selection,
                 Force: force));
-        if (SelectedProcess?.ProcessKey != processKey)
+        if (!ReferenceEquals(presentation, _activeProcessPresentation) || !presentation.IsSelectedTargetEligible(target))
         {
             return;
         }
@@ -10316,10 +9431,16 @@ public partial class MainViewModel : ViewModelBase,
             return;
         }
 
-        var selected = SelectedProcess;
-        var exactProcessKey = selected.ProcessKey;
-        var processName = selected.ProcessName;
-        var processId = selected.ProcessId;
+        var presentation = ProcessPresentation;
+        var target = presentation.CaptureSelectedTarget();
+        if (target == null || !presentation.IsSelectedTargetEligible(target))
+        {
+            StatusMessage = "The selected process or capture is changing; no job was submitted.";
+            return;
+        }
+        var exactProcessKey = target.ProcessKey;
+        var processName = target.ProcessName;
+        var processId = target.ProcessId;
         var targetAgent = GetLocalAgent();
         if (targetAgent == null)
         {
@@ -10327,6 +9448,7 @@ public partial class MainViewModel : ViewModelBase,
             return;
         }
 
+        var agentTarget = CreateAgentCaptureActionTarget(targetAgent, requireViewerConnection: true);
         var warning =
             $"Capture a full process dump for {processName} (PID {processId})?\n\n" +
             "The exact PID + start-time identity is already captured. The elevated agent writes a new file only inside the active session Dumps directory and never overwrites an existing dump.";
@@ -10340,8 +9462,13 @@ public partial class MainViewModel : ViewModelBase,
             return;
         }
 
+        if (!ReferenceEquals(presentation, _activeProcessPresentation) || !presentation.IsSelectedTargetEligible(target) || !CanQueueSelectedProcessDump())
+        {
+            StatusMessage = "The selected process or capture changed while confirming the dump; no job was submitted.";
+            return;
+        }
         var result = await _agentEvidenceActionService.QueueProcessDumpAsync(
-            CreateAgentCaptureActionTarget(targetAgent, requireViewerConnection: true),
+            agentTarget,
             new ViewerProcessDumpActionRequest(
                 exactProcessKey,
                 MemoryDumpKind.Full,
@@ -10354,8 +9481,11 @@ public partial class MainViewModel : ViewModelBase,
             {
                 UpdateAgentStatus(response, observeWorkflow: false);
             }
-            TryNavigateToDataTab(DataTabKeys.MemoryDumps, "Open Memory Dumps");
-            MemoryDumpsViewModel.RefreshMemoryDumps();
+            if (ReferenceEquals(presentation, _activeProcessPresentation) && presentation.IsSelectedTargetEligible(target))
+            {
+                TryNavigateToDataTab(DataTabKeys.MemoryDumps, "Open Memory Dumps");
+                MemoryDumpsViewModel.RefreshMemoryDumps();
+            }
             StatusMessage = $"Queued full memory dump for {processName} (PID {processId}). Results appear after Refresh from db.";
             return;
         }
@@ -10371,7 +9501,7 @@ public partial class MainViewModel : ViewModelBase,
     private bool CanQueueSelectedProcessDump()
     {
         return _featureAccess.CanExecute(FeatureIds.DumpsAndPeAnalysis, IsAgentViewerConnected &&
-               SelectedProcess != null &&
+               HasEligibleSelectedTarget() && SelectedProcess != null &&
                !string.IsNullOrWhiteSpace(SelectedProcess.ProcessKey));
     }
 
@@ -10389,6 +9519,13 @@ public partial class MainViewModel : ViewModelBase,
             return;
         }
 
+        var presentation = ProcessPresentation;
+        var target = presentation.CaptureSelectedTarget();
+        if (target == null || !presentation.IsSelectedTargetEligible(target))
+        {
+            StatusMessage = "The selected process or capture is changing; no job was submitted.";
+            return;
+        }
         var selected = SelectedProcess;
         var process = selected.ProcessInfo;
         var result = await QueueArtifactEnrichmentActionAsync(
@@ -10417,9 +9554,12 @@ public partial class MainViewModel : ViewModelBase,
 
         if (result.Succeeded)
         {
-            TryNavigateToDataTab(DataTabKeys.PeAnalysis, "Open PE Analysis");
-            PeAnalysisViewModel.SelectedPeSourceTabIndex = 0;
-            StatusMessage = $"Queued PE metadata and string analysis for {selected.ProcessName} (PID {selected.ProcessId}). Results appear after Refresh from db.";
+            if (ReferenceEquals(presentation, _activeProcessPresentation) && presentation.IsSelectedTargetEligible(target))
+            {
+                TryNavigateToDataTab(DataTabKeys.PeAnalysis, "Open PE Analysis");
+                PeAnalysisViewModel.SelectedPeSourceTabIndex = 0;
+            }
+            StatusMessage = $"Queued PE metadata and string analysis for {target.ProcessName} (PID {target.ProcessId}). Results appear after Refresh from db.";
             return;
         }
 
@@ -10435,8 +9575,8 @@ public partial class MainViewModel : ViewModelBase,
 
     private bool CanAnalyzeSelectedProcessImage()
     {
-        return _featureAccess.CanExecute(FeatureIds.DumpsAndPeAnalysis, SelectedProcess != null &&
-               !string.IsNullOrWhiteSpace(SelectedProcess.ProcessKey) &&
+        return _featureAccess.CanExecute(FeatureIds.DumpsAndPeAnalysis, HasEligibleSelectedTarget() &&
+               SelectedProcess != null && !string.IsNullOrWhiteSpace(SelectedProcess.ProcessKey) &&
                !string.IsNullOrWhiteSpace(SelectedProcess.ProcessInfo.ProcessPath));
     }
 
@@ -10750,7 +9890,7 @@ public partial class MainViewModel : ViewModelBase,
             new DelegateViewerAgentCommandRuntime(
                 context =>
                     (IsLocalAgentRecoveryInProgress || _isLocalAgentSetupInProgress) &&
-                    !IsAgentViewerConnected &&
+                    (!IsAgentViewerConnected || !IsAgentConnected) &&
                     context.WorkspaceGeneration == _captureWorkspaceCoordinator.Generation,
                 sessionPaths => _agentRecoveryClient.BindSession(sessionPaths),
                 (commandKind, cancellationToken) =>
@@ -10867,6 +10007,12 @@ public partial class MainViewModel : ViewModelBase,
                 recovery.Diagnostic,
                 lease);
             local.ApplyPairingStatus(pairing);
+        }
+
+        if (origin == LocalAgentRecoveryOrigin.Automatic)
+        {
+            AgentStatusMessage = $"Agent: reconnecting ({recovery.Outcome})";
+            return false;
         }
 
         StatusMessage = recovery.Outcome switch
@@ -12829,82 +11975,28 @@ public partial class MainViewModel : ViewModelBase,
         }
     }
 
-    /// <summary>
-    /// Sorts the currently visible process rows by a row view-model property.
-    /// </summary>
     public void SortVisibleProcessRows(string columnName)
-    {
-        MarkSnapshotPresentationInteraction();
-        if (_currentSortColumn == columnName)
-        {
-            _sortAscending = !_sortAscending;
-        }
-        else
-        {
-            _currentSortColumn = columnName;
-            _sortAscending = true;
-        }
-
-        if (_processListingService != null)
-        {
-            // DB path: sort is pushed into the next SQLite query.
-            ScheduleDbRefresh();
-            return;
-        }
-
-        if (RequiresTreeAwareCompatibilityRebuild(columnName, hasProcessListingService: false))
-        {
-            UpdateProcessList(GetProjectedProcesses());
-            return;
-        }
-
-        ProcessesView?.SortDescriptions.Clear();
-        ProcessesView?.SortDescriptions.Add(new SortDescription(
-            columnName,
-            _sortAscending ? ListSortDirection.Ascending : ListSortDirection.Descending));
-        ProcessesView?.Refresh();
-    }
+        => _activeProcessPresentation?.SortVisibleProcessRows(columnName);
 
     internal static bool RequiresTreeAwareCompatibilityRebuild(
         string columnName,
         bool hasProcessListingService)
-        => !hasProcessListingService &&
-           string.Equals(columnName, "Tree", StringComparison.OrdinalIgnoreCase);
+        => ProcessPresentationViewModel.RequiresTreeAwareCompatibilityRebuild(columnName, hasProcessListingService);
 
-    /// <summary>
-    /// Gets the current sort direction for a column (for UI indicators).
-    /// </summary>
     public ListSortDirection? GetSortDirection(string columnName)
-    {
-        if (_currentSortColumn != columnName)
-            return null;
-        return _sortAscending ? ListSortDirection.Ascending : ListSortDirection.Descending;
-    }
-
-    // Partial methods for filter property changes
-    // DB path: route through ScheduleDbRefresh (debounced, SQLite-backed).
-    // Fallback path: ProcessesView.Refresh() applies the in-memory FilterProcess predicate.
-    partial void OnFilterProcessNameChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterPidChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterParentPidChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterParentProcessNameChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterProcessPathChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterCommandLineChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterUserNameChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterSessionIdChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterArchitectureChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterStartTimeChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterEndTimeChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterStatusChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterCpuUsageChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterMemoryUsageChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterCompanyNameChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterFileDescriptionChanged(string value) => ScheduleDbRefresh();
-    partial void OnFilterSha256HashChanged(string value) => ScheduleDbRefresh();
+        => _activeProcessPresentation?.GetSortDirection(columnName);
 
     partial void OnIsAgentViewerConnectedChanged(bool value)
     {
+        OnPropertyChanged(nameof(CanOpenConnectedAgentMenus));
+        NotifyConnectedAgentMenuCommandsChanged();
         NotifyAgentCommandCanExecuteChanged();
+    }
+
+    partial void OnIsAgentConnectedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanOpenConnectedAgentMenus));
+        NotifyConnectedAgentMenuCommandsChanged();
     }
 
     partial void OnIsAgentShutdownInProgressChanged(bool value) => NotifyAgentCommandCanExecuteChanged();
@@ -12950,313 +12042,52 @@ public partial class MainViewModel : ViewModelBase,
 
     }
 
-    /// <summary>
-    /// Handles selection change - updates detail tabs.
-    /// </summary>
-    partial void OnSelectedProcessChanged(ProcessRowViewModel? oldValue, ProcessRowViewModel? newValue)
-    {
-        MarkSnapshotPresentationInteraction();
-        _virtualizedProcessListing?.PreserveSelection(newValue);
-        var fanOut = _selectedProcessFanOutCoordinator.SelectAsync(
-            newValue,
-            _captureWorkspaceCoordinator.Generation);
-        if (!fanOut.IsCompletedSuccessfully)
-        {
-            _ = ObserveSelectedProcessFanOutAsync(fanOut);
-        }
-
-        UpdateSelectedProcessBookmarkState();
-        IncludeSelectedProcessCommand.NotifyCanExecuteChanged();
-        ExcludeSelectedProcessCommand.NotifyCanExecuteChanged();
-        QueueSelectedProcessDumpCommand.NotifyCanExecuteChanged();
-        AnalyzeSelectedProcessImageCommand.NotifyCanExecuteChanged();
-        AnalyzeSelectedDumpPeCommand.NotifyCanExecuteChanged();
-        if (newValue != null)
-        {
-            QueueSelectedDataTabEnrichmentIfNeeded();
-        }
-
-        RefreshDataTabCounts();
-    }
-
-    private async Task ObserveSelectedProcessFanOutAsync(
+    private  Task ObserveSelectedProcessFanOutAsync(
         Task<SelectedProcessFanOutResult> fanOut)
-    {
-        try
-        {
-            await fanOut;
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Selected-process detail fan-out failed unexpectedly: {ex.Message}";
-        }
-    }
+        => _activeProcessPresentation?.ObserveSelectedProcessFanOutAsync(fanOut) ?? Task.CompletedTask;
 
     private void OnSelectedProcessFanOutStateChanged(
         object? sender,
         SelectedProcessFanOutStateChangedEventArgs e)
-    {
-        if (e.State.LastOutcome == SelectedProcessFanOutOutcome.PartialFailure &&
-            !string.IsNullOrWhiteSpace(e.State.LastError))
-        {
-            StatusMessage = $"Selected-process details loaded with partial failures: {e.State.LastError}";
-        }
-
-        if (e.State.Phase is SelectedProcessFanOutPhase.Active or SelectedProcessFanOutPhase.Empty)
-        {
-            RefreshDataTabCounts();
-        }
-    }
+        => _activeProcessPresentation?.OnSelectedProcessFanOutStateChanged(sender, e);
 
     private void OnFeatureModuleActivated(object? sender, FeatureActivatedEventArgs e)
-    {
-        var lateBinding = _selectedProcessFanOutCoordinator.BindActivatedConsumersAsync(e.FeatureId);
-        if (!lateBinding.IsCompletedSuccessfully)
-        {
-            _ = ObserveSelectedProcessFanOutAsync(lateBinding);
-        }
-    }
+        => _activeProcessPresentation?.OnFeatureModuleActivated(sender, e);
 
-    IReadOnlyList<ISelectedProcessFanOutConsumer>
-        ISelectedProcessFanOutConsumerProvider.GetCoreConsumers()
-    {
-        var consumers = new List<ISelectedProcessFanOutConsumer>
-        {
-            CreateSelectedProcessConsumer(
-                "process-properties",
-                (context, cancellationToken) =>
-                {
-                    var provenance = context == null || _sqliteStagingQueryService == null
-                        ? null
-                        : _sqliteStagingQueryService.GetProcessProjectionProvenance(
-                            context.ProcessEntityId);
-                    cancellationToken.ThrowIfCancellationRequested();
-                    ProcessPropertiesViewModel.LoadProcess(context?.Row, provenance);
-                }),
-            CreateSelectedProcessConsumer(
-                "process-statistics",
-                (context, _) => ProcessStatisticsViewModel.SetSelectedProcess(context?.Row)),
-            CreateSelectedProcessConsumer(
-                "application-info",
-                (context, cancellationToken) =>
-                    ProcessDescriptionViewModel.LoadForProcessSelectionAsync(
-                        context?.Row,
-                        cancellationToken)),
-            CreateSelectedProcessConsumer(
-                "process-notes",
-                (context, cancellationToken) =>
-                    NotesViewModel.LoadNotesForSelectionAsync(
-                        context == null ? null : CreateProcessAnnotationTarget(context.Row),
-                        cancellationToken)),
-            CreateSelectedProcessConsumer(
-                "details-object-inspector-clear",
-                (_, _) => InspectorPaneViewModel.Clear(
-                    "Select a row in Data to inspect its additional properties."))
-        };
+     IReadOnlyList<ISelectedProcessFanOutConsumer> ISelectedProcessFanOutConsumerProvider.GetCoreConsumers()
+        => ((ISelectedProcessFanOutConsumerProvider)ProcessPresentation).GetCoreConsumers();
 
-        var riskDetails = ProcessRiskDetailsViewModel;
-        if (riskDetails != null)
-        {
-            consumers.Add(CreateSelectedProcessConsumer(
-                "process-risk-details",
-                (context, cancellationToken) =>
-                    riskDetails.LoadAsync(
-                        _sqliteStagingQueryService?.ProcessRiskProjectionQueries,
-                        context?.ProcessEntityId ?? string.Empty,
-                        context?.ProcessKey ?? string.Empty,
-                        context == null
-                            ? string.Empty
-                            : $"{context.ProcessName} (PID {context.ProcessId})",
-                        cancellationToken)));
-        }
+     IReadOnlyList<ISelectedProcessFanOutConsumer> ISelectedProcessFanOutConsumerProvider.GetActivatedOptionalConsumers()
+        => ((ISelectedProcessFanOutConsumerProvider)ProcessPresentation).GetActivatedOptionalConsumers();
 
-        return consumers;
-    }
-
-    IReadOnlyList<ISelectedProcessFanOutConsumer>
-        ISelectedProcessFanOutConsumerProvider.GetActivatedOptionalConsumers() =>
-        GetActivatedSelectedProcessConsumers(featureId: null);
-
-    IReadOnlyList<ISelectedProcessFanOutConsumer>
-        ISelectedProcessFanOutConsumerProvider.GetActivatedOptionalConsumers(
-            FeatureId featureId) =>
-        GetActivatedSelectedProcessConsumers(featureId);
+     IReadOnlyList<ISelectedProcessFanOutConsumer> ISelectedProcessFanOutConsumerProvider.GetActivatedOptionalConsumers(
+            FeatureId featureId)
+        => ((ISelectedProcessFanOutConsumerProvider)ProcessPresentation).GetActivatedOptionalConsumers(featureId);
 
     private IReadOnlyList<ISelectedProcessFanOutConsumer> GetActivatedSelectedProcessConsumers(
         FeatureId? featureId)
-    {
-        var consumers = new List<ISelectedProcessFanOutConsumer>();
-        if ((!featureId.HasValue || featureId.Value == FeatureIds.ModulesAndHandles) &&
-            _featureModules.TryGetActivated<ModulesAndHandlesFeatureModule>(
-                FeatureIds.ModulesAndHandles,
-                out var artifacts))
-        {
-            consumers.Add(CreateSelectedProcessConsumer(
-                "modules",
-                async (context, cancellationToken) =>
-                {
-                    if (context == null)
-                    {
-                        artifacts.ModulesViewModel.Clear();
-                        return;
-                    }
+        => _activeProcessPresentation?.GetActivatedSelectedProcessConsumers(featureId) ?? [];
 
-                    await artifacts.ModulesViewModel.LoadModulesForProcessAsync(context.Row.ProcessInfo);
-                    cancellationToken.ThrowIfCancellationRequested();
-                }));
-            consumers.Add(CreateSelectedProcessConsumer(
-                "handles",
-                async (context, cancellationToken) =>
-                {
-                    if (context == null)
-                    {
-                        artifacts.HandlesViewModel.Clear();
-                        return;
-                    }
+    partial void ConfigureCompiledViewerPresentation(Services.Presentation.ViewerPresentationHostRegistration registration, Func<ProcessPresentationViewModel> createPresentation);
 
-                    await artifacts.HandlesViewModel.LoadHandlesForProcessAsync(context.Row.ProcessInfo);
-                    cancellationToken.ThrowIfCancellationRequested();
-                }));
-        }
+    partial void ConfigureCompiledProcessPresentation(Services.Presentation.ViewerPresentationRegistrationContext context);
 
-        if ((!featureId.HasValue || featureId.Value == FeatureIds.DumpsAndPeAnalysis) &&
-            _featureModules.TryGetActivated<DumpsAndPeFeatureModule>(
-                FeatureIds.DumpsAndPeAnalysis,
-                out var dumpsAndPe))
-        {
-            consumers.Add(CreateSelectedProcessConsumer(
-                "memory-dumps",
-                (context, _) =>
-                {
-                    if (context == null)
-                    {
-                        dumpsAndPe.MemoryDumpsViewModel.Clear();
-                        return;
-                    }
-
-                    dumpsAndPe.MemoryDumpsViewModel.SetSelectedProcessEntityId(context.ProcessEntityId);
-                    dumpsAndPe.MemoryDumpsViewModel.LoadMemoryDumpsForProcess(
-                        (context.ProcessKey, context.ProcessId, context.ProcessName));
-                }));
-            consumers.Add(CreateSelectedProcessConsumer(
-                "pe-analysis",
-                (context, _) =>
-                {
-                    if (context == null)
-                    {
-                        dumpsAndPe.PeAnalysisViewModel.Clear();
-                        return;
-                    }
-
-                    dumpsAndPe.PeAnalysisViewModel.SetSelectedProcessEntityId(context.ProcessEntityId);
-                    dumpsAndPe.PeAnalysisViewModel.LoadPeAnalysesForProcess(
-                        (context.ProcessKey, context.ProcessId, context.ProcessName));
-                }));
-        }
-
-        if ((!featureId.HasValue || featureId.Value == FeatureIds.AiAssistance) &&
-            _featureModules.TryGetActivated<AiFeatureModule>(
-                FeatureIds.AiAssistance,
-                out var ai))
-        {
-            consumers.Add(CreateSelectedProcessConsumer(
-                "ai-details-context",
-                (context, _) => ai.DetailsViewModel.SetSelectedProcessContext(context?.Row)));
-            consumers.Add(CreateSelectedProcessConsumer(
-                "ai-investigation",
-                (context, cancellationToken) =>
-                    ai.InvestigationViewModel.LoadForProcessSelectionAsync(
-                        context?.Row,
-                        cancellationToken)));
-        }
-
-        if ((!featureId.HasValue || featureId.Value == FeatureIds.EventTelemetry) &&
-            _featureModules.TryGetActivated<EventTelemetryFeatureModule>(
-                FeatureIds.EventTelemetry,
-                out var events))
-        {
-            AddSelectedProcessEventConsumer(consumers, "runtime-events", events.RuntimeEventsViewModel);
-            AddSelectedProcessEventConsumer(consumers, "etw-events", events.EtwEventsViewModel);
-            AddSelectedProcessEventConsumer(consumers, "powershell-events", events.PowerShellEventsViewModel);
-            AddSelectedProcessEventConsumer(consumers, "windows-other-events", events.OtherWindowsEventsViewModel);
-            AddSelectedProcessEventConsumer(consumers, "sysmon-events", events.SysmonEventsViewModel);
-        }
-
-
-        if ((!featureId.HasValue || featureId.Value == FeatureIds.WindowsSecurityEvents) &&
-            _featureModules.TryGetActivated<WindowsSecurityEventsFeatureModule>(
-                FeatureIds.WindowsSecurityEvents,
-                out var windowsSecurity))
-        {
-            AddSelectedProcessEventConsumer(consumers, "security-events", windowsSecurity.ViewModel);
-        }
-
-        AddCompiledPrivateSelectedProcessConsumers(featureId, consumers);
-
-        return consumers;
-    }
-
-    partial void AddCompiledPrivateViewerFeatureDefinitions(
-        List<IViewerFeatureDefinition> definitions,
-        List<FeatureId> requiredFeatureIds);
-
-    partial void AddCompiledPrivateSelectedProcessConsumers(
-        FeatureId? featureId,
-        List<ISelectedProcessFanOutConsumer> consumers);
-
-    partial void DetachCompiledPrivateFeatureWorkspace();
-
-    partial void BindCompiledPrivateFeatureWorkspace(
-        InvestigationSessionPaths sessionPaths,
-        AnnotationDatabaseService annotationStore,
-        string? directArchivedDatabasePath);
 
     private static void AddSelectedProcessEventConsumer(
         ICollection<ISelectedProcessFanOutConsumer> consumers,
         string key,
         EventsViewModel viewModel)
-    {
-        consumers.Add(CreateSelectedProcessConsumer(
-            key,
-            (context, _) =>
-            {
-                if (context == null)
-                {
-                    viewModel.Clear();
-                    return;
-                }
-
-                viewModel.SetSelectedProcessEntityId(context.ProcessEntityId);
-                viewModel.LoadEventsForProcess(
-                    (context.ProcessKey, context.ProcessId, context.ProcessName));
-            }));
-    }
+        => ProcessPresentationViewModel.AddSelectedProcessEventConsumer(consumers, key, viewModel);
 
     private static ISelectedProcessFanOutConsumer CreateSelectedProcessConsumer(
         string key,
-        Action<SelectedProcessContext?, CancellationToken> apply) =>
-        new DelegateSelectedProcessFanOutConsumer(
-            key,
-            (context, cancellationToken) =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                apply(context, cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-                return Task.FromResult(SelectedProcessConsumerResult.Success);
-            });
+        Action<SelectedProcessContext?, CancellationToken> apply)
+        => ProcessPresentationViewModel.CreateSelectedProcessConsumer(key, apply);
 
     private static ISelectedProcessFanOutConsumer CreateSelectedProcessConsumer(
         string key,
-        Func<SelectedProcessContext?, CancellationToken, Task> apply) =>
-        new DelegateSelectedProcessFanOutConsumer(
-            key,
-            async (context, cancellationToken) =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await apply(context, cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-                return SelectedProcessConsumerResult.Success;
-            });
+        Func<SelectedProcessContext?, CancellationToken, Task> apply)
+        => ProcessPresentationViewModel.CreateSelectedProcessConsumer(key, apply);
 
     private void NotifyAgentCommandCanExecuteChanged()
     {
@@ -13299,34 +12130,13 @@ public partial class MainViewModel : ViewModelBase,
         QueueSelectedProcessDumpCommand.NotifyCanExecuteChanged();
     }
 
-    partial void OnSelectedDataTabChanged(FeatureTabDescriptor? value)
+    private void NotifyConnectedAgentMenuCommandsChanged()
     {
-        if (_isApplyingViewerNavigationState)
-        {
-            return;
-        }
-
-        MarkSnapshotPresentationInteraction();
-        var result = _viewerNavigationCoordinator.AcceptDataSelection(value);
-        if (result.Succeeded)
-        {
-            QueueSelectedDataTabEnrichmentIfNeeded();
-        }
+        OpenEventViewerCommand.NotifyCanExecuteChanged();
+        OpenEventViewerLogCommand.NotifyCanExecuteChanged();
+        OpenTranscriptFolderCommand.NotifyCanExecuteChanged();
+        OpenBuiltInProfileMenuEntryCommand.NotifyCanExecuteChanged();
     }
-
-    partial void OnSelectedExplorerTabChanged(FeatureTabDescriptor? value)
-    {
-        if (_isApplyingViewerNavigationState)
-        {
-            return;
-        }
-
-        MarkSnapshotPresentationInteraction();
-        _viewerNavigationCoordinator.AcceptExplorerSelection(value);
-    }
-
-    partial void OnSelectedDetailsTabKeyChanged(ViewerDetailsTabKey value) =>
-        MarkSnapshotPresentationInteraction();
 
     private void QueueSelectedDataTabEnrichmentIfNeeded()
     {
@@ -13981,16 +12791,42 @@ public partial class MainViewModel : ViewModelBase,
         {
             UpdateSecurityMonitoringPolicyProfiles(
                 _configProfileService.GetProfiles(ConfigProfileKind.WindowsSecurityAuditPolicy));
-            UpdatePowerShellAuditingProfiles([]);
             UpdateEventLogPolicyProfiles(
                 _configProfileService.GetProfiles(ConfigProfileKind.WindowsSecurityEventLogs));
-            return;
+        }
+        else
+        {
+            UpdateSecurityMonitoringPolicyProfiles(_securityMonitoringService.GetPolicyProfiles());
+            UpdateEventLogPolicyProfiles(_configProfileService.GetProfiles(ConfigProfileKind.EventLogs));
         }
 
-        UpdateSecurityMonitoringPolicyProfiles(_securityMonitoringService.GetPolicyProfiles());
-        UpdatePowerShellAuditingProfiles(_powerShellAuditingService.GetAuditingProfiles());
-        UpdateEventLogPolicyProfiles(_configProfileService.GetProfiles(ConfigProfileKind.EventLogs));
+        UpdatePowerShellAuditingProfiles(FeaturePublication.SecurityMonitoringConfiguration
+            ? _powerShellAuditingService.GetAuditingProfiles()
+            : []);
     }
+
+    private void LoadBuiltInProfileMenus()
+    {
+        foreach (var group in new[] { SecurityAuditProfilesMenu, SecurityEventLogProfilesMenu,
+                     SysmonProfilesMenu, WindowsOtherProfilesMenu, PowerShellProfilesMenu, EtwProfilesMenu })
+        {
+            var published = group.Kind is ConfigProfileKind.WindowsSecurityAuditPolicy or ConfigProfileKind.WindowsSecurityEventLogs
+                ? FeaturePublication.WindowsSecurityEvents
+                : FeaturePublication.SecurityMonitoringConfiguration;
+            group.Replace(published ? SortProfilesForMenu(_configProfileService.GetProfiles(group.Kind)) : []);
+        }
+    }
+
+    private BuiltInProfileMenuGroup? GetBuiltInProfileMenuGroup(ConfigProfileKind kind) => kind switch
+    {
+        ConfigProfileKind.WindowsSecurityAuditPolicy => SecurityAuditProfilesMenu,
+        ConfigProfileKind.WindowsSecurityEventLogs => SecurityEventLogProfilesMenu,
+        ConfigProfileKind.Sysmon => SysmonProfilesMenu,
+        ConfigProfileKind.EventLogs => WindowsOtherProfilesMenu,
+        ConfigProfileKind.PowerShellAuditing => PowerShellProfilesMenu,
+        ConfigProfileKind.Etw => EtwProfilesMenu,
+        _ => null
+    };
 
     private bool IsWindowsSecurityOnlyPublication() =>
         FeaturePublication.WindowsSecurityEvents;
@@ -14000,8 +12836,8 @@ public partial class MainViewModel : ViewModelBase,
             ? FeatureIds.WindowsSecurityEvents
             : FeatureIds.SecurityMonitoringConfiguration;
 
-    private AgentConfigurationAreaKind[] GetHostMonitoringConfigurationAreas() =>
-        IsWindowsSecurityOnlyPublication()
+    private AgentConfigurationAreaKind[] GetHostMonitoringConfigurationAreas(bool useLegacyEventTelemetryScope = false) =>
+        !useLegacyEventTelemetryScope && IsWindowsSecurityOnlyPublication()
             ? AgentHostMonitoringConfigurationAreas.WindowsSecurity.ToArray()
             : [];
 
@@ -14226,536 +13062,92 @@ public partial class MainViewModel : ViewModelBase,
             "Viewer-owned evidence backfill is retired; the current snapshot was preserved.";
     }
 
-    // ── DB-backed process grid helpers (Phase 3F / 3G) ────────────────────────
-
-    private const int VirtualProcessPageSize = 128;
-    private const int VirtualProcessCachePages = 6;
-
-    /// <summary>
-    /// Schedules a DB-backed grid refresh, debounced to 300 ms so rapid filter
-    /// keystrokes do not trigger a SQLite query on every character.
-    /// Invalidates the active virtual collection so filter changes return to the
-    /// first page of a new query generation.
-    /// Leaves the viewer unchanged when no SQLite projection is active.
-    /// </summary>
     private void ScheduleDbRefresh()
-    {
-        CloseHeaderFilters();
-        MarkSnapshotPresentationInteraction();
-        if (_processListingService == null)
-        {
-            return;
-        }
+        => _activeProcessPresentation?.ScheduleDbRefresh();
 
-        Interlocked.Increment(ref _processListingQueryGeneration);
-        _processListingRefreshCts?.Cancel();
-
-        if (_dbRefreshDebounceTimer == null)
-        {
-            _dbRefreshDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
-            _dbRefreshDebounceTimer.Tick += async (_, _) =>
-            {
-                _dbRefreshDebounceTimer.Stop();
-                await ExecuteDbRefreshAsync();
-            };
-        }
-
-        _dbRefreshDebounceTimer.Stop();
-        _dbRefreshDebounceTimer.Start();
-    }
-
-    /// <summary>
-    /// Executes a DB-backed process-grid refresh immediately.
-    /// Builds the current query from UI filter/sort state, fetches a bounded
-    /// window via <see cref="ProcessListingService"/>, and replaces the grid rows.
-    /// </summary>
-    private async Task ExecuteDbRefreshAsync(IProgress<ProcessListingLoadProgress>? progress = null)
-    {
-        var listingService = _processListingService;
-        if (listingService == null)
-        {
-            return;
-        }
-
-        var requestGeneration = Interlocked.Increment(ref _processListingQueryGeneration);
-        var workspaceGeneration = _captureWorkspaceCoordinator.Generation;
-        var refreshCts = new CancellationTokenSource();
-        var previousCts = Interlocked.Exchange(ref _processListingRefreshCts, refreshCts);
-        previousCts?.Cancel();
-        Interlocked.Increment(ref _activeDbRefreshCount);
-        VirtualizedProcessCollection? pendingCollection = null;
-
-        try
-        {
-            var query = BuildCurrentListingQuery();
-            progress?.Report(new ProcessListingLoadProgress(
-                0,
-                query.PageSize,
-                0,
-                "Counting matching processes for the virtualized listing..."));
-            pendingCollection = new VirtualizedProcessCollection(
-                listingService,
-                query,
-                workspaceGeneration,
-                VirtualProcessPageSize,
-                VirtualProcessCachePages,
-                SynchronizationContext.Current,
-                requestGeneration);
-            await pendingCollection.InitializeAsync(progress, refreshCts.Token);
-
-            if (requestGeneration != Volatile.Read(ref _processListingQueryGeneration) ||
-                workspaceGeneration != _captureWorkspaceCoordinator.Generation ||
-                !ReferenceEquals(listingService, _processListingService))
-            {
-                return;
-            }
-
-            var selectedKey = SelectedProcess?.ProcessKey;
-            ProcessRowViewModel? selectedRow = null;
-            if (!string.IsNullOrWhiteSpace(selectedKey))
-            {
-                var rowIndex = await listingService.GetProcessRowIndexAsync(
-                    selectedKey,
-                    query,
-                    refreshCts.Token);
-                if (rowIndex >= 0)
-                {
-                    await pendingCollection.EnsureRangeAsync(rowIndex, 1, refreshCts.Token);
-                    selectedRow = pendingCollection.GetLoadedItem(rowIndex);
-                }
-            }
-
-            if (requestGeneration != Volatile.Read(ref _processListingQueryGeneration) ||
-                workspaceGeneration != _captureWorkspaceCoordinator.Generation ||
-                !ReferenceEquals(listingService, _processListingService))
-            {
-                return;
-            }
-
-            AttachVirtualizedProcessListing(pendingCollection, selectedRow);
-            pendingCollection = null;
-
-        }
-        catch (OperationCanceledException) when (refreshCts.IsCancellationRequested)
-        {
-            // A newer sort/filter/scope/workspace generation superseded this request.
-        }
-        catch (Exception ex)
-        {
-            if (requestGeneration == Volatile.Read(ref _processListingQueryGeneration) &&
-                workspaceGeneration == _captureWorkspaceCoordinator.Generation &&
-                ReferenceEquals(listingService, _processListingService))
-            {
-                ProcessListingStatus = $"Listing error: {ex.Message}";
-                StatusMessage = $"Process grid refresh error: {ex.Message}";
-            }
-        }
-        finally
-        {
-            pendingCollection?.Dispose();
-            Interlocked.CompareExchange(ref _processListingRefreshCts, null, refreshCts);
-            refreshCts.Dispose();
-            Interlocked.Decrement(ref _activeDbRefreshCount);
-        }
-    }
+    private  Task ExecuteDbRefreshAsync(IProgress<ProcessListingLoadProgress>? progress = null)
+        => _activeProcessPresentation?.ExecuteDbRefreshAsync(progress) ?? Task.CompletedTask;
 
     private ProcessListingQuery BuildCurrentListingQuery()
-    {
-        var filters = BuildFilterSet();
-        ApplyExplorerScope(filters);
-
-        if (!HasGreenIncludedSelection() &&
-            HasExplorerSelectionWithoutProcessListingScope(filters.SelectedScopes))
-        {
-            filters.IncludedProcessKeys = [NoProcessScopedSelectionKey];
-        }
-
-        return new ProcessListingQuery
-        {
-            Filters = filters,
-            Sort = new ProcessListingSortDescriptor
-            {
-                Column = MapSortColumn(_currentSortColumn),
-                Direction = _sortAscending
-                    ? ProcessListingSortDirection.Ascending
-                    : ProcessListingSortDirection.Descending
-            },
-            Offset = 0,
-            PageSize = VirtualProcessPageSize,
-            IncludeTotalCount = false
-        };
-    }
+        => _activeProcessPresentation?.BuildCurrentListingQuery() ?? new ProcessListingQuery();
 
     private void ApplyExplorerScope(ProcessListingFilterSet filters)
-    {
-        if (!HasGreenIncludedSelection())
-        {
-            filters.SelectedScopes = GetProcessListingSelectedScopes();
-            filters.SelectedDirectChildScopes = GetSelectedDirectChildScopes();
-        }
-    }
+        => _activeProcessPresentation?.ApplyExplorerScope(filters);
 
     private bool HasExplorerSelectionWithoutProcessListingScope(IReadOnlyCollection<ExplorerScope> selectedScopes)
-    {
-        return ExplorerViewModel.SelectedNode is { IsPlaceholder: false } &&
-               selectedScopes.Count == 0 &&
-               ExplorerViewModel.SelectedNode.Scope.ProcessKey is null or "";
-    }
+        => _activeProcessPresentation?.HasExplorerSelectionWithoutProcessListingScope(selectedScopes) ?? false;
 
     private static bool UsesProcessListingScope(ExplorerScope scope)
-    {
-        return scope.Kind switch
-        {
-            ExplorerScopeKind.FilesystemRoot or
-            ExplorerScopeKind.FilesystemEvidenceRoots or
-            ExplorerScopeKind.FilesystemArtifacts or
-            ExplorerScopeKind.FilesystemFolder or
-            ExplorerScopeKind.NetworkRoot or
-            ExplorerScopeKind.NetworkCaptures or
-            ExplorerScopeKind.NetworkCapture or
-            ExplorerScopeKind.ZeekArtifacts or
-            ExplorerScopeKind.AnalysisRoot or
-            ExplorerScopeKind.SearchResults or
-            ExplorerScopeKind.SigmaFindings or
-            ExplorerScopeKind.CorrelationEvidence or
-            ExplorerScopeKind.UnresolvedEvidence or
-            ExplorerScopeKind.AmbiguousEvidence or
-            ExplorerScopeKind.CorrelationEvidenceGroup or
-            ExplorerScopeKind.ArtifactRoot or
-            ExplorerScopeKind.MemoryDumps or
-            ExplorerScopeKind.SystemActivityRoot or
-            ExplorerScopeKind.ActivityAuthentication or
-            ExplorerScopeKind.ActivitySuccessfulLogons or
-            ExplorerScopeKind.ActivityFailedLogons or
-            ExplorerScopeKind.ActivityRemoteInteractive or
-            ExplorerScopeKind.ActivityExplicitCredentialUse or
-            ExplorerScopeKind.ActivityPrivilegedLogons or
-            ExplorerScopeKind.ActivityAccounts or
-            ExplorerScopeKind.ActivityCreatedUsers or
-            ExplorerScopeKind.ActivityDisabledDeletedUsers or
-            ExplorerScopeKind.ActivityPasswordChanges or
-            ExplorerScopeKind.ActivityGroups or
-            ExplorerScopeKind.ActivityLocalAdministratorsChanges or
-            ExplorerScopeKind.ActivitySecurityGroupMembershipChanges or
-            ExplorerScopeKind.ActivityPolicyAudit or
-            ExplorerScopeKind.ActivityAuditPolicyChanged or
-            ExplorerScopeKind.ActivityLogIntegrity or
-            ExplorerScopeKind.ActivitySecurityLogCleared or
-            ExplorerScopeKind.ActivityServicesTasks or
-            ExplorerScopeKind.ActivityServicesInstalled or
-            ExplorerScopeKind.ActivityScheduledTasksChanged or
-            ExplorerScopeKind.UsersRoot or
-            ExplorerScopeKind.UserAccount => false,
-            _ => true
-        };
-    }
+        => ProcessPresentationViewModel.UsesProcessListingScope(scope);
 
     private static bool CanScopeFilterProcessListing(ExplorerScope scope)
-    {
-        return IsSelectableExplorerScope(scope) &&
-               (UsesProcessListingScope(scope) || CanAccountScopeFilterProcessListing(scope));
-    }
+        => ProcessPresentationViewModel.CanScopeFilterProcessListing(scope);
 
     private static bool CanAccountScopeFilterProcessListing(ExplorerScope scope)
-    {
-        return !string.IsNullOrWhiteSpace(scope.OwnerKey) &&
-               scope.Kind is ExplorerScopeKind.UserAccount or
-                   ExplorerScopeKind.ActivityAuthentication or
-                   ExplorerScopeKind.ActivitySuccessfulLogons or
-                   ExplorerScopeKind.ActivityFailedLogons or
-                   ExplorerScopeKind.ActivityRemoteInteractive or
-                   ExplorerScopeKind.ActivityExplicitCredentialUse or
-                   ExplorerScopeKind.ActivityPrivilegedLogons or
-                   ExplorerScopeKind.ActivityAccounts or
-                   ExplorerScopeKind.ActivityCreatedUsers or
-                   ExplorerScopeKind.ActivityDisabledDeletedUsers or
-                   ExplorerScopeKind.ActivityPasswordChanges or
-                   ExplorerScopeKind.ActivityGroups or
-                   ExplorerScopeKind.ActivityLocalAdministratorsChanges or
-                   ExplorerScopeKind.ActivitySecurityGroupMembershipChanges or
-                   ExplorerScopeKind.ActivityPolicyAudit or
-                   ExplorerScopeKind.ActivityAuditPolicyChanged or
-                   ExplorerScopeKind.ActivityLogIntegrity or
-                   ExplorerScopeKind.ActivitySecurityLogCleared or
-                   ExplorerScopeKind.ActivityServicesTasks or
-                   ExplorerScopeKind.ActivityServicesInstalled or
-                   ExplorerScopeKind.ActivityScheduledTasksChanged;
-    }
+        => ProcessPresentationViewModel.CanAccountScopeFilterProcessListing(scope);
 
     private bool MatchesIdentityScope(ProcessRowViewModel process, ExplorerScope scope)
-    {
-        return MatchesIdentityValue(process.ProcessInfo.CaseId, scope.CaseId) &&
-               MatchesIdentityValue(process.ProcessInfo.EvidenceSessionId, scope.EvidenceSessionId) &&
-               MatchesIdentityValue(process.ProcessInfo.CaptureId, scope.CaptureId) &&
-               MatchesIdentityValue(process.ProcessInfo.SourceIdentityId, scope.SourceIdentityId) &&
-               MatchesIdentityValue(process.ProcessInfo.HostId, scope.HostId) &&
-               MatchesIdentityValue(process.ProcessInfo.ExecutionRootId, scope.ExecutionRootId);
-    }
+        => _activeProcessPresentation?.MatchesIdentityScope(process, scope) ?? false;
 
     private static bool MatchesIdentityValue(string actual, string? expected)
-    {
-        return string.IsNullOrWhiteSpace(expected) ||
-               string.Equals(actual, expected, StringComparison.Ordinal);
-    }
+        => ProcessPresentationViewModel.MatchesIdentityValue(actual, expected);
 
     private bool IsProcessInSubtree(string processKey, string rootProcessKey)
-    {
-        if (string.IsNullOrWhiteSpace(processKey) || string.IsNullOrWhiteSpace(rootProcessKey))
-        {
-            return false;
-        }
-
-        var currentKey = processKey;
-        var visited = new HashSet<string>(StringComparer.Ordinal);
-        while (!string.IsNullOrWhiteSpace(currentKey) && visited.Add(currentKey))
-        {
-            if (string.Equals(currentKey, rootProcessKey, StringComparison.Ordinal))
-            {
-                return true;
-            }
-
-            if (!_processViewModels.TryGetValue(currentKey, out var row))
-            {
-                return false;
-            }
-
-            currentKey = !string.IsNullOrWhiteSpace(row.ProcessInfo.ParentProcessKey)
-                ? row.ProcessInfo.ParentProcessKey
-                : FindFallbackParent(row)?.ProcessKey ?? string.Empty;
-        }
-
-        return false;
-    }
+        => _activeProcessPresentation?.IsProcessInSubtree(processKey, rootProcessKey) ?? false;
 
     private ProcessListingFilterSet BuildFilterSet()
-    {
-        var includedScopes = GetProcessListingIncludedScopes();
-        var excludedScopes = GetProcessListingExcludedScopes();
-        var includedProcessKeys = _includedProcessKeys.ToList();
-        if ((_includedScopes.Count > 0 || _includedProcessKeys.Count > 0) &&
-            includedScopes.Count == 0 &&
-            includedProcessKeys.Count == 0)
-        {
-            includedProcessKeys.Add(NoProcessScopedSelectionKey);
-        }
-
-        var f = new ProcessListingFilterSet
-        {
-            ColumnFilters = GetAppliedHeaderFilters(),
-            ProcessNameContains    = NullIfEmpty(FilterProcessName),
-            ProcessIdContains      = NullIfEmpty(FilterPid),
-            ParentProcessIdContains = NullIfEmpty(FilterParentPid),
-            ParentProcessNameContains = NullIfEmpty(FilterParentProcessName),
-            ProcessPathContains    = NullIfEmpty(FilterProcessPath),
-            CommandLineContains    = NullIfEmpty(FilterCommandLine),
-            UserNameContains       = NullIfEmpty(FilterUserName),
-            ArchitectureContains   = NullIfEmpty(FilterArchitecture),
-            CompanyNameContains    = NullIfEmpty(FilterCompanyName),
-            FileDescriptionContains = NullIfEmpty(FilterFileDescription),
-            Sha256HashContains     = NullIfEmpty(FilterSha256Hash),
-            StatusContains         = NullIfEmpty(FilterStatus),
-            IncludedScopes         = includedScopes,
-            ExcludedScopes         = excludedScopes,
-            IncludedProcessKeys    = includedProcessKeys,
-            ExcludedProcessKeys    = _excludedProcessKeys.ToList(),
-            SelectedScopes         = GetProcessListingSelectedScopes()
-        };
-
-        if (int.TryParse(FilterSessionId, out var sid))
-            f.SessionIdEquals = sid;
-
-        return f;
-
-        static string? NullIfEmpty(string s) =>
-            ColumnTextFilter.Normalize(s);
-    }
+        => _activeProcessPresentation?.BuildFilterSet() ?? new ProcessListingFilterSet();
 
     private List<ExplorerScope> GetProcessListingIncludedScopes()
-    {
-        return _includedScopes.Values
-            .Concat(ExplorerViewModel.VisibleIncludedScopes)
-            .GroupBy(scope => scope.StableId, StringComparer.Ordinal)
-            .Select(group => group.First())
-            .Where(CanScopeFilterProcessListing)
-            .ToList();
-    }
+        => _activeProcessPresentation?.GetProcessListingIncludedScopes() ?? [];
 
     private List<ExplorerScope> GetProcessListingSelectedScopes()
-    {
-        return HasGreenIncludedSelection()
-            ? []
-            : ExplorerViewModel.SelectedNodeAndLoadedDescendantScopes
-                .Where(scope => string.IsNullOrWhiteSpace(scope.ProcessKey))
-                .Where(CanScopeFilterProcessListing)
-                .ToList();
-    }
+        => _activeProcessPresentation?.GetProcessListingSelectedScopes() ?? [];
 
     private List<ExplorerScope> GetSelectedDirectChildScopes()
-    {
-        return HasGreenIncludedSelection()
-            ? []
-            : ExplorerViewModel.SelectedScopes
-                .Where(scope => !string.IsNullOrWhiteSpace(scope.ProcessKey))
-                .ToList();
-    }
+        => _activeProcessPresentation?.GetSelectedDirectChildScopes() ?? [];
 
     private bool HasGreenIncludedSelection()
-    {
-        return _includedProcessKeys.Count > 0 ||
-               _includedScopes.Count > 0 ||
-               ExplorerViewModel.VisibleIncludedScopes.Count > 0;
-    }
+        => _activeProcessPresentation?.HasGreenIncludedSelection() ?? false;
 
     private static string GetScopedSelectionGroupKey(ExplorerScope scope)
-    {
-        if (scope.Status.HasValue)
-        {
-            return "status";
-        }
-
-        if (!string.IsNullOrWhiteSpace(scope.OwnerKey))
-        {
-            return "owner";
-        }
-
-        if (!string.IsNullOrWhiteSpace(scope.ProcessKey))
-        {
-            return "process-tree";
-        }
-
-        if (scope.ArtifactScope != ExplorerArtifactScope.None)
-        {
-            return "artifact";
-        }
-
-        if (!string.IsNullOrWhiteSpace(scope.EventSource))
-        {
-            return "event-source";
-        }
-
-        if (scope.Kind == ExplorerScopeKind.Bookmarked)
-        {
-            return "annotation";
-        }
-
-        if (!string.IsNullOrWhiteSpace(scope.CaseId) ||
-            !string.IsNullOrWhiteSpace(scope.EvidenceSessionId) ||
-            !string.IsNullOrWhiteSpace(scope.CaptureId) ||
-            !string.IsNullOrWhiteSpace(scope.SourceIdentityId) ||
-            !string.IsNullOrWhiteSpace(scope.HostId) ||
-            !string.IsNullOrWhiteSpace(scope.ExecutionRootId))
-        {
-            return "identity";
-        }
-
-        return scope.Kind.ToString();
-    }
+        => ProcessPresentationViewModel.GetScopedSelectionGroupKey(scope);
 
     private List<ExplorerScope> GetProcessListingExcludedScopes()
-    {
-        return _excludedScopes.Values
-            .Concat(ExplorerViewModel.VisibleExcludedScopes)
-            .GroupBy(scope => scope.StableId, StringComparer.Ordinal)
-            .Select(group => group.First())
-            .Where(CanScopeFilterProcessListing)
-            .ToList();
-    }
+        => _activeProcessPresentation?.GetProcessListingExcludedScopes() ?? [];
 
-    internal static ProcessListingSortColumn MapSortColumn(string column) => column switch
-    {
-        "Tree"              => ProcessListingSortColumn.Tree,
-        "ProcessName"       => ProcessListingSortColumn.ProcessName,
-        "ProcessId"         => ProcessListingSortColumn.ProcessId,
-        "ParentProcessId"   => ProcessListingSortColumn.ParentProcessId,
-        "ParentProcessName" => ProcessListingSortColumn.ParentProcessName,
-        "ProcessPath"       => ProcessListingSortColumn.ProcessPath,
-        "CommandLine"       => ProcessListingSortColumn.CommandLine,
-        "UserName"          => ProcessListingSortColumn.UserName,
-        "SessionId"         => ProcessListingSortColumn.SessionId,
-        "Architecture"      => ProcessListingSortColumn.Architecture,
-        "StartTime" or "StartTimeDisplay" => ProcessListingSortColumn.StartTime,
-        "EndTime" or "EndTimeDisplay" => ProcessListingSortColumn.EndTime,
-        "Status" or "StatusDisplay" => ProcessListingSortColumn.Status,
-        "CpuUsage"          => ProcessListingSortColumn.CpuUsage,
-        "TotalProcessorTimeTicks" => ProcessListingSortColumn.TotalProcessorTime,
-        "ReadBytes"         => ProcessListingSortColumn.ReadBytes,
-        "WrittenBytes"      => ProcessListingSortColumn.WrittenBytes,
-        "MemoryUsage" or "MemoryUsageBytes" => ProcessListingSortColumn.MemoryUsage,
-        "ModuleCount"       => ProcessListingSortColumn.ModuleCount,
-        "HandleCount"       => ProcessListingSortColumn.HandleCount,
-        "RuntimeEventCount" => ProcessListingSortColumn.RuntimeEventCount,
-        "EtwEventCount"     => ProcessListingSortColumn.EtwEventCount,
-        "SecurityEventCount" => ProcessListingSortColumn.SecurityEventCount,
-        "PowerShellEventCount" => ProcessListingSortColumn.PowerShellEventCount,
-        "OtherWindowsEventCount" => ProcessListingSortColumn.OtherWindowsEventCount,
-        "SysmonEventCount"  => ProcessListingSortColumn.SysmonEventCount,
-        "CompanyName"       => ProcessListingSortColumn.CompanyName,
-        "FileDescription"   => ProcessListingSortColumn.FileDescription,
-        "Sha256Hash"        => ProcessListingSortColumn.Sha256Hash,
-        "RiskScore"         => ProcessListingSortColumn.ProcessRisk,
-        _ => throw new ArgumentOutOfRangeException(
-            nameof(column),
-            column,
-            "The process Listing column does not have a typed database sort mapping.")
-    };
+    internal static ProcessListingSortColumn MapSortColumn(string column)
+        => ProcessPresentationViewModel.MapSortColumn(column);
 
     public void RequestProcessListingRange(int firstIndex, int itemCount = 1)
-        => _virtualizedProcessListing?.RequestRange(firstIndex, itemCount);
+        => _activeProcessPresentation?.RequestProcessListingRange(firstIndex, itemCount);
 
     private void AttachVirtualizedProcessListing(
         VirtualizedProcessCollection collection,
         ProcessRowViewModel? selectedRow,
         bool navigateToSelection = true)
-    {
-        var previous = DetachVirtualizedProcessListing();
-        _virtualizedProcessListing = collection;
-        collection.CacheChanged += OnVirtualizedProcessListingChanged;
-        Processes = new ObservableCollection<ProcessRowViewModel>();
-        ProcessesView = CollectionViewSource.GetDefaultView(collection);
-        TotalProcessCount = collection.Count;
-        SelectedProcess = selectedRow;
-        collection.PreserveSelection(selectedRow);
-        OnVirtualizedProcessListingChanged(collection, EventArgs.Empty);
-        if (selectedRow != null && navigateToSelection)
-        {
-            ProcessesView?.MoveCurrentTo(selectedRow);
-            ProcessRowNavigationRequested?.Invoke(selectedRow);
-        }
-
-        previous?.Dispose();
-    }
+        => _activeProcessPresentation?.AttachVirtualizedProcessListing(collection, selectedRow, navigateToSelection);
 
     private VirtualizedProcessCollection? DetachVirtualizedProcessListing()
-    {
-        var previous = _virtualizedProcessListing;
-        if (previous != null)
-        {
-            previous.CacheChanged -= OnVirtualizedProcessListingChanged;
-            _virtualizedProcessListing = null;
-        }
-
-        return previous;
-    }
+        => _activeProcessPresentation?.DetachVirtualizedProcessListing();
 
     private void OnVirtualizedProcessListingChanged(object? sender, EventArgs e)
+        => _activeProcessPresentation?.OnVirtualizedProcessListingChanged(sender, e);
+    private void OnActivePresentationChanged()
     {
-        if (sender is not VirtualizedProcessCollection collection ||
-            !ReferenceEquals(collection, _virtualizedProcessListing))
-        {
-            return;
-        }
-
-        var loadedRows = collection.GetLoadedRows();
-        _processViewModels.Clear();
-        foreach (var row in loadedRows)
-        {
-            _processViewModels[row.ProcessKey] = row;
-        }
-
-        TotalProcessCount = collection.Count;
-        RunningProcessCount = loadedRows.Count(row => !row.IsExited);
-        ExitedProcessCount = loadedRows.Count(row => row.IsExited);
-        IsProcessListingLoading = collection.IsLoading;
-        ProcessListingStatus = collection.StatusMessage;
+        if (_activeProcessPresentation != null) _activeProcessPresentation.PropertyChanged -= OnProcessPresentationPropertyChanged;
+        _activeProcessPresentation = _presentationHost.ActiveProcessPresentation;
+        if (_activeProcessPresentation != null) _activeProcessPresentation.PropertyChanged += OnProcessPresentationPropertyChanged;
+        OnPropertyChanged(string.Empty);
+        NotifyAgentCommandCanExecuteChanged();
+        QueueSelectedProcessDumpCommand.NotifyCanExecuteChanged();
+        AnalyzeSelectedProcessImageCommand.NotifyCanExecuteChanged();
+        AnalyzeSelectedDumpPeCommand.NotifyCanExecuteChanged();
     }
+
+    private void OnProcessPresentationPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        OnPropertyChanged(e.PropertyName);
+    }
+
 }

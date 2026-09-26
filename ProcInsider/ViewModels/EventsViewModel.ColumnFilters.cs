@@ -17,14 +17,13 @@ public partial class EventsViewModel
         };
 
     private ColumnFilterViewModel Create(string key, ColumnFilterKind kind)
-        => new(key, kind, (search, token) =>
+        => new(key, kind, (search, sort, token) =>
         {
             token.ThrowIfCancellationRequested();
             var values = Events.Where(row => MatchesFilters(row, key))
                 .Select(row => key == "EventCode" ? row.EventCode?.ToString(CultureInfo.InvariantCulture) : row.Description)
-                .Where(value => ColumnTextFilter.Matches(value, search)).Distinct(StringComparer.Ordinal)
-                .OrderBy(value => value, StringComparer.Ordinal).Take(257).ToArray();
-            return Task.FromResult(new ColumnFilterValuePage(values.Take(256).ToArray(), values.Length > 256));
+                .Where(value => ColumnTextFilter.Matches(value, search)).ToArray();
+            return Task.FromResult(ColumnFilterValuePage.FromValues(values, sort));
         }, ApplyFilters);
 
     private static bool MatchesHeader(EventRowViewModel row, string key, ColumnFilterCriteria filter)

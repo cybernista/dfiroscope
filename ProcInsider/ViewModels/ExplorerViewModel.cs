@@ -31,6 +31,7 @@ public partial class ExplorerViewModel : ViewModelBase
     private ExplorerNodeViewModel? _caseSessionRoot;
     private ExplorerNodeViewModel? _processOwners;
     private ExplorerNodeViewModel? _processExecutionRoots;
+    private ExplorerNodeViewModel? _processStatus;
     private ExplorerNodeViewModel? _usersRoot;
     private ExplorerNodeViewModel? _lastSelectedNode;
 
@@ -156,6 +157,8 @@ public partial class ExplorerViewModel : ViewModelBase
         SetCount(ExplorerScopeKind.CaseSessionRoot, TotalEvidenceCount(counts));
         SetCount(ExplorerScopeKind.ProcessTrees, counts.TotalProcesses);
         SetCount(ExplorerScopeKind.AllProcesses, counts.TotalProcesses);
+        _processExecutionRoots?.UpdateCount(counts.TotalProcesses);
+        _processStatus?.UpdateCount(counts.TotalProcesses);
         SetCount(ExplorerScopeKind.RunningProcesses, counts.RunningProcesses);
         SetCount(ExplorerScopeKind.ExitedProcesses, counts.ExitedProcesses);
         SetCount(ExplorerScopeKind.NotFoundProcesses, counts.NotFoundProcesses);
@@ -225,6 +228,9 @@ public partial class ExplorerViewModel : ViewModelBase
             node.UpdateCount(0);
         }
 
+        _processExecutionRoots?.UpdateCount(0);
+        _processStatus?.UpdateCount(0);
+
         RefreshEvidenceRoots([]);
         PruneSelectedNodes();
         StatusMessage = "Explorer scopes are empty.";
@@ -276,19 +282,23 @@ public partial class ExplorerViewModel : ViewModelBase
         {
             Kind = ExplorerScopeKind.ProcessTrees,
             ScopeId = "root:process-trees",
-            Title = "Process Trees",
+            Title = "Processes",
             Description = "Process records grouped by execution roots and status scopes."
         });
 
-        var processStatus = Branch("Process Status", "Common process status and analyst annotation scopes.");
-        processStatus.Children.Add(Node(new ExplorerScope
+        _processStatus = new ExplorerNodeViewModel(new ExplorerScope
+        {
+            Kind = ExplorerScopeKind.AllProcesses, ScopeId = "branch:Process Status",
+            Title = "Process Status", Description = "Common process status and analyst annotation scopes."
+        });
+        _processStatus.Children.Add(Node(new ExplorerScope
         {
             Kind = ExplorerScopeKind.AllProcesses,
             ScopeId = "process:all",
             Title = "All Processes",
             Description = "All staged and live process records."
         }));
-        processStatus.Children.Add(Node(new ExplorerScope
+        _processStatus.Children.Add(Node(new ExplorerScope
         {
             Kind = ExplorerScopeKind.RunningProcesses,
             ScopeId = "process:status:running",
@@ -296,7 +306,7 @@ public partial class ExplorerViewModel : ViewModelBase
             Description = "Processes currently marked as running.",
             Status = ProcessStatus.Running
         }));
-        processStatus.Children.Add(Node(new ExplorerScope
+        _processStatus.Children.Add(Node(new ExplorerScope
         {
             Kind = ExplorerScopeKind.ExitedProcesses,
             ScopeId = "process:status:exited",
@@ -304,7 +314,7 @@ public partial class ExplorerViewModel : ViewModelBase
             Description = "Processes that exited after being observed.",
             Status = ProcessStatus.Exited
         }));
-        processStatus.Children.Add(Node(new ExplorerScope
+        _processStatus.Children.Add(Node(new ExplorerScope
         {
             Kind = ExplorerScopeKind.NotFoundProcesses,
             ScopeId = "process:status:not-found",
@@ -312,7 +322,7 @@ public partial class ExplorerViewModel : ViewModelBase
             Description = "Processes that could not be refreshed or enriched.",
             Status = ProcessStatus.NotFound
         }));
-        processStatus.Children.Add(Node(new ExplorerScope
+        _processStatus.Children.Add(Node(new ExplorerScope
         {
             Kind = ExplorerScopeKind.Bookmarked,
             ScopeId = "process:annotations",
@@ -320,7 +330,11 @@ public partial class ExplorerViewModel : ViewModelBase
             Description = "Process targets with analyst bookmarks or notes."
         }));
 
-        _processExecutionRoots = Branch("Execution Roots", "Capture/execution roots from the active snapshot.");
+        _processExecutionRoots = new ExplorerNodeViewModel(new ExplorerScope
+        {
+            Kind = ExplorerScopeKind.AllProcesses, ScopeId = "branch:Execution Roots",
+            Title = "Execution Roots", Description = "Capture/execution roots from the active snapshot."
+        });
         _processExecutionRoots.Children.Add(ExplorerNodeViewModel.CreatePlaceholder("Refresh from db to load execution roots"));
         _processOwners = Node(new ExplorerScope
         {
@@ -331,7 +345,7 @@ public partial class ExplorerViewModel : ViewModelBase
         });
         _processOwners.MarkChildrenLazy();
         processTrees.Children.Add(_processExecutionRoots);
-        processTrees.Children.Add(processStatus);
+        processTrees.Children.Add(_processStatus);
         processTrees.Children.Add(_processOwners);
 
         var systemActivity = ActivityNode(

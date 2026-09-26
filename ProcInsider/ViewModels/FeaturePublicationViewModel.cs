@@ -24,6 +24,7 @@ public sealed class FeaturePublicationViewModel
     public bool EventTelemetry => IsPublished(FeatureIds.EventTelemetry);
     public bool WindowsSecurityEvents => IsPublished(FeatureIds.WindowsSecurityEvents);
     public bool EventViewerMenu => EventTelemetry || WindowsSecurityEvents;
+    public bool NativeEventViewsMenu => EventViewerMenu || SecurityMonitoringConfiguration;
     public bool AgentsAndCapture => IsPublished(FeatureIds.AgentsAndCapture);
     public bool SearchAndSigma => IsPublished(FeatureIds.SearchAndSigma);
     public bool DumpsAndPeAnalysis => IsPublished(FeatureIds.DumpsAndPeAnalysis);

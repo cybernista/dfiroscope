@@ -7,7 +7,7 @@
       "displayName": "DFIRoscope Live Event Log Baseline",
       "description": "Compatibility event-channel settings for the event sources that remain in the legacy aggregate.",
       "warning": "Changing event log settings affects local retention and can increase disk usage.",
-      "filePath": "..\\SecurityMonitoring\\config\\event-logs.json",
+      "filePath": "event-logs.json",
       "isDefault": true
     }
   ]

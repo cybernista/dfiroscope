@@ -16,6 +16,8 @@
     <InternalsVisibleTo Include="DFIRoscope.Live" />
     <InternalsVisibleTo Include="DFIRoscope.VmFunctionalTest" />
     <InternalsVisibleTo Include="AgentConfigurationSelfTest" />
+    <InternalsVisibleTo Include="CaptureWorkspaceSelfTest" />
+    <InternalsVisibleTo Include="TelemetryLabSelfTest" />
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />

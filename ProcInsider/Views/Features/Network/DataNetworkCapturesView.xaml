@@ -1,6 +1,7 @@
 <UserControl x:Class="ProcInsider.Views.Features.Network.DataNetworkCapturesView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:presentation="clr-namespace:ProcInsider.Services.Presentation">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -16,27 +17,27 @@
                        VerticalAlignment="Center"
                        Margin="0,0,4,0"/>
             <TextBox Width="96"
-                     Text="{Binding DataContext.ZeekWslDistributionName, RelativeSource={RelativeSource AncestorType=Window}, UpdateSourceTrigger=PropertyChanged}"
+                     Text="{Binding (presentation:ViewerPresentationContext.SharedActions).ZeekWslDistributionName, RelativeSource={RelativeSource Self}, UpdateSourceTrigger=PropertyChanged}"
                      ToolTip="WSL distribution for Zeek, such as Ubuntu or Ubuntu-22.04"
                      Margin="0,0,8,0"/>
             <TextBlock Text="Zeek"
                        VerticalAlignment="Center"
                        Margin="0,0,4,0"/>
             <TextBox Width="96"
-                     Text="{Binding DataContext.ZeekWslCommand, RelativeSource={RelativeSource AncestorType=Window}, UpdateSourceTrigger=PropertyChanged}"
+                     Text="{Binding (presentation:ViewerPresentationContext.SharedActions).ZeekWslCommand, RelativeSource={RelativeSource Self}, UpdateSourceTrigger=PropertyChanged}"
                      ToolTip="Zeek command or absolute path inside WSL"
                      Margin="0,0,10,0"/>
             <Button Content="Open Process"
-                    Command="{Binding DataContext.OpenSelectedZeekProcessCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Command="{Binding (presentation:ViewerPresentationContext.SharedActions).OpenSelectedZeekProcessCommand, RelativeSource={RelativeSource Self}}"
                     Padding="10,3" Margin="0,0,10,0"/>
             <Button Content="Open PCAP"
-                    Command="{Binding DataContext.OpenSelectedZeekPcapCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Command="{Binding (presentation:ViewerPresentationContext.SharedActions).OpenSelectedZeekPcapCommand, RelativeSource={RelativeSource Self}}"
                     Padding="10,3" Margin="0,0,10,0"/>
             <Button Content="Copy Filter"
-                    Command="{Binding DataContext.CopySelectedZeekWiresharkFilterCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Command="{Binding (presentation:ViewerPresentationContext.SharedActions).CopySelectedZeekWiresharkFilterCommand, RelativeSource={RelativeSource Self}}"
                     Padding="10,3" Margin="0,0,10,0"/>
             <Button Content="Export Flow"
-                    Command="{Binding DataContext.ExportSelectedZeekFlowPcapCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Command="{Binding (presentation:ViewerPresentationContext.SharedActions).ExportSelectedZeekFlowPcapCommand, RelativeSource={RelativeSource Self}}"
                     Padding="10,3" Margin="0,0,10,0"/>
             <TextBlock Text="{Binding StatusMessage}"
                        VerticalAlignment="Center"

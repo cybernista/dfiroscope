@@ -1,6 +1,7 @@
 <UserControl x:Class="ProcInsider.Views.Features.Filesystem.DataFilesystemArtifactsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:presentation="clr-namespace:ProcInsider.Services.Presentation">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -13,10 +14,10 @@
                     Command="{Binding RefreshArtifactsCommand}"
                     Padding="10,3" Margin="0,0,10,0"/>
             <Button Content="Import File"
-                    Command="{Binding DataContext.QueueArtifactFileImportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Command="{Binding (presentation:ViewerPresentationContext.SharedActions).QueueArtifactFileImportCommand, RelativeSource={RelativeSource Self}}"
                     Padding="10,3" Margin="0,0,10,0"/>
             <Button Content="Import Folder"
-                    Command="{Binding DataContext.QueueArtifactFolderImportCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    Command="{Binding (presentation:ViewerPresentationContext.SharedActions).QueueArtifactFolderImportCommand, RelativeSource={RelativeSource Self}}"
                     Padding="10,3" Margin="0,0,10,0"/>
             <TextBlock Text="{Binding StatusMessage}"
                        VerticalAlignment="Center"

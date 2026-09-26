@@ -1,0 +1,286 @@
+<UserControl x:Class="ProcInsider.Views.Presentation.DetailsPresentationView"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:ProcInsider"
+        xmlns:models="clr-namespace:ProcInsider.Models;assembly=DFIRoscope.Core"
+        xmlns:viewerModels="clr-namespace:ProcInsider.Models"
+        xmlns:vm="clr-namespace:ProcInsider.ViewModels"
+        xmlns:converters="clr-namespace:ProcInsider.Converters"
+        xmlns:aiViews="clr-namespace:ProcInsider.Views.Features.Ai"
+        xmlns:memoryViews="clr-namespace:ProcInsider.Views.Features.Memory"
+        xmlns:networkViews="clr-namespace:ProcInsider.Views.Features.Network"
+        xmlns:infrastructureViews="clr-namespace:ProcInsider.Features.Infrastructure"
+        xmlns:explorerViews="clr-namespace:ProcInsider.Views.Explorer"
+        xmlns:agentViews="clr-namespace:ProcInsider.Views.Features.Agents"
+        xmlns:searchViews="clr-namespace:ProcInsider.Views.Features.Search"
+        xmlns:shared="clr-namespace:ProcInsider.Views.Shared"
+        xmlns:presentationViews="clr-namespace:ProcInsider.Views.Presentation"
+        xmlns:presentation="clr-namespace:ProcInsider.Services.Presentation"
+        presentation:ViewerPresentationContext.SharedActions="{Binding SharedActions}"
+        mc:Ignorable="d">
+<UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="ViewerPresentationResources.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></UserControl.Resources>
+
+<Border Padding="6" Background="#FFF7F7F7">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Background="#FFE8E8E8" Padding="5,3" Margin="0,0,0,4">
+                            <TextBlock Text="Details"
+                                       FontWeight="SemiBold"/>
+                        </Border>
+
+                    <TabControl Grid.Row="1"
+                                SelectedValuePath="Tag"
+                                SelectedValue="{Binding SelectedDetailsTabKey, Mode=TwoWay}">
+                        <TabItem Header="Object"
+                                 Tag="{x:Static viewerModels:ViewerDetailsTabKey.Object}"
+                                 DataContext="{Binding InspectorPaneViewModel}">
+                            <Grid Margin="2">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="2*"/>
+                                </Grid.RowDefinitions>
+
+                                <Border Grid.Row="0"
+                                        Margin="0,0,0,6"
+                                        Padding="8"
+                                        Background="#FFFFFFFF"
+                                        BorderBrush="#FFD8D8D8"
+                                        BorderThickness="1">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding HeaderText}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="13"/>
+                                        <TextBlock Text="{Binding SubtitleText}"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="#555555"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Grid Grid.Row="1">
+                                    <TextBlock Margin="12"
+                                               Text="{Binding EmptyStateMessage}"
+                                               Foreground="#666666"
+                                               TextWrapping="Wrap"
+                                               VerticalAlignment="Center"
+                                               HorizontalAlignment="Center"
+                                               Visibility="{Binding HasSelection, Converter={StaticResource InverseBoolToVisibilityConverter}}"/>
+
+                                    <DataGrid ItemsSource="{Binding Properties}"
+                                              AutoGenerateColumns="False"
+                                              IsReadOnly="True"
+                                              SelectionMode="Single"
+                                              SelectionUnit="FullRow"
+                                              EnableRowVirtualization="True"
+                                              EnableColumnVirtualization="True"
+                                              VirtualizingPanel.IsVirtualizing="True"
+                                              VirtualizingPanel.VirtualizationMode="Recycling"
+                                              GridLinesVisibility="Horizontal"
+                                              HeadersVisibility="Column"
+                                              CanUserReorderColumns="True"
+                                              CanUserResizeColumns="True"
+                                              CanUserSortColumns="True"
+                                              FontSize="11"
+                                              Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Group" Binding="{Binding Group}" Width="95" SortMemberPath="Group"/>
+                                            <DataGridTextColumn Header="Property" Binding="{Binding Name}" Width="130" SortMemberPath="Name"/>
+                                            <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*"
+                                                                SortMemberPath="Value">
+                                                <DataGridTextColumn.ElementStyle>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="TextWrapping" Value="Wrap"/>
+                                                        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                                        <Setter Property="ToolTip" Value="{Binding Value}"/>
+                                                    </Style>
+                                                </DataGridTextColumn.ElementStyle>
+                                            </DataGridTextColumn>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </Grid>
+
+                                <TextBlock Grid.Row="2"
+                                           Margin="0,6,0,4"
+                                           Text="{Binding ContentHeader}"
+                                           FontWeight="SemiBold"
+                                           Visibility="{Binding HasContent, Converter={StaticResource BoolToVisibilityConverter}}"/>
+
+                                <Grid Grid.Row="3">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  Visibility="{Binding HasContentSections, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <ItemsControl ItemsSource="{Binding ContentSections}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Expander Header="{Binding DisplayTitle}"
+                                                              IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
+                                                              Margin="0,0,0,5">
+                                                        <Border BorderBrush="#FFD8D8D8"
+                                                                BorderThickness="1"
+                                                                Padding="4">
+                                                            <Grid>
+                                                                <Grid.RowDefinitions>
+                                                                    <RowDefinition Height="Auto"/>
+                                                                    <RowDefinition Height="*"/>
+                                                                </Grid.RowDefinitions>
+                                                                <TextBlock Text="{Binding Description}"
+                                                                           Foreground="#555555"
+                                                                           TextWrapping="Wrap"
+                                                                           Margin="2,0,2,4"/>
+                                                                <DataGrid Grid.Row="1"
+                                                                          ItemsSource="{Binding Rows}"
+                                                                          AutoGenerateColumns="False"
+                                                                          IsReadOnly="True"
+                                                                          HeadersVisibility="Column"
+                                                                          GridLinesVisibility="Horizontal"
+                                                                          EnableRowVirtualization="True"
+                                                                          EnableColumnVirtualization="True"
+                                                                          VirtualizingPanel.IsVirtualizing="True"
+                                                                          VirtualizingPanel.VirtualizationMode="Recycling"
+                                                                          CanUserSortColumns="True"
+                                                                          CanUserResizeColumns="True"
+                                                                          MinHeight="72"
+                                                                          MaxHeight="320"
+                                                                          FontSize="11">
+                                                                    <DataGrid.Columns>
+                                                                        <DataGridTextColumn Header="Item" Binding="{Binding Item}" Width="2*" SortMemberPath="Item"/>
+                                                                        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="4*" SortMemberPath="Value"/>
+                                                                        <DataGridTextColumn Header="Details" Binding="{Binding Details}" Width="3*" SortMemberPath="Details"/>
+                                                                    </DataGrid.Columns>
+                                                                </DataGrid>
+                                                            </Grid>
+                                                        </Border>
+                                                    </Expander>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                    <ScrollViewer x:Name="InspectorRawContentScrollViewer"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  Visibility="{Binding HasRawText, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <TextBox Text="{Binding RawText, Mode=OneWay}"
+                                                 IsReadOnly="True"
+                                                 TextWrapping="Wrap"
+                                                 AcceptsReturn="True"
+                                                 VerticalScrollBarVisibility="Disabled"
+                                                 FontFamily="Consolas"
+                                                 FontSize="11"/>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Grid>
+                        </TabItem>
+                        <TabItem Header="AI"
+                                 Tag="{x:Static viewerModels:ViewerDetailsTabKey.Ai}"
+                                 Visibility="{Binding DataContext.FeaturePublication.AiAssistance, RelativeSource={RelativeSource AncestorType=presentationViews:DetailsPresentationView}, Converter={StaticResource BoolToVisibilityConverter}}"
+                                 DataContext="{Binding AiDetailsInvestigationViewModel}">
+                            <Grid Margin="2">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+
+                                <Border Grid.Row="0"
+                                        Margin="0,0,0,6"
+                                        Padding="8"
+                                        Background="#FFFFFFFF"
+                                        BorderBrush="#FFD8D8D8"
+                                        BorderThickness="1">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding CurrentTargetDisplay}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="13"/>
+                                        <TextBlock Text="{Binding ProviderStatusDisplay}"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="#555555"
+                                                   TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding PrivacyWarning}"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="#7A4D00"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Grid Grid.Row="1" Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBox Grid.Column="0"
+                                             Text="{Binding ArtifactPrompt, UpdateSourceTrigger=PropertyChanged}"
+                                             MinHeight="48"
+                                             TextWrapping="Wrap"
+                                             AcceptsReturn="True"
+                                             VerticalScrollBarVisibility="Auto"
+                                             IsEnabled="{Binding HasArtifactSelected}"/>
+                                    <Button Grid.Column="1"
+                                            Content="Investigate"
+                                            Command="{Binding RunInvestigationCommand}"
+                                            Margin="6,0,0,0"
+                                            Padding="10,4"
+                                            VerticalAlignment="Top"/>
+                                    <Button Grid.Column="2"
+                                            Content="Cancel"
+                                            Command="{Binding CancelInvestigationCommand}"
+                                            Margin="6,0,0,0"
+                                            Padding="10,4"
+                                            VerticalAlignment="Top"/>
+                                </Grid>
+
+                                <Grid Grid.Row="2">
+                                    <TextBlock Margin="12"
+                                               Text="Select an artifact in Details to build an AI evidence preview."
+                                               Foreground="#666666"
+                                               TextWrapping="Wrap"
+                                               VerticalAlignment="Center"
+                                               HorizontalAlignment="Center"
+                                               Visibility="{Binding HasArtifactSelected, Converter={StaticResource InverseBoolToVisibilityConverter}}"/>
+                                    <TextBox Text="{Binding EvidencePreview, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             AcceptsReturn="True"
+                                             VerticalScrollBarVisibility="Auto"
+                                             FontFamily="Consolas"
+                                             FontSize="11"
+                                             Visibility="{Binding HasArtifactSelected, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                </Grid>
+
+                                <DockPanel Grid.Row="3" Margin="0,6,0,4">
+                                    <ProgressBar DockPanel.Dock="Left"
+                                                 Width="100"
+                                                 Height="16"
+                                                 IsIndeterminate="{Binding IsBusy}"
+                                                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                 Margin="0,0,8,0"/>
+                                    <TextBlock Text="{Binding StatusMessage}"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="Wrap"/>
+                                </DockPanel>
+
+                                <TextBox Grid.Row="4"
+                                         Text="{Binding ResponseText, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         TextWrapping="Wrap"
+                                         AcceptsReturn="True"
+                                         VerticalScrollBarVisibility="Auto"
+                                         FontFamily="Consolas"
+                                         FontSize="11"/>
+                            </Grid>
+                        </TabItem>
+                    </TabControl>
+                    </Grid>
+                </Border>
+</UserControl>

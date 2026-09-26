@@ -1,0 +1,128 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:ProcInsider" xmlns:vm="clr-namespace:ProcInsider.ViewModels" xmlns:converters="clr-namespace:ProcInsider.Converters" xmlns:presentationViews="clr-namespace:ProcInsider.Views.Presentation">
+<ResourceDictionary.MergedDictionaries><ResourceDictionary Source="../Shared/ColumnHeaderResources.xaml"/></ResourceDictionary.MergedDictionaries>
+<converters:ProcessGridSelectionConverter x:Key="ProcessGridSelectionConverter"/>
+<converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+<converters:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter"/>
+<local:FeaturePublicationBindingProxy x:Key="FeaturePublicationProxy" Data="{Binding FeaturePublication}"/>
+        <!-- Style for exited processes (grayed out) -->
+        <Style x:Key="ExitedRowStyle" TargetType="DataGridRow">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsLoadingPlaceholder}" Value="True">
+                    <Setter Property="IsEnabled" Value="False"/>
+                    <Setter Property="Focusable" Value="False"/>
+                    <Setter Property="ToolTip" Value="This row is loading; process actions are unavailable."/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsExited}" Value="True">
+                    <Setter Property="Foreground" Value="Gray"/>
+                    <Setter Property="FontStyle" Value="Italic"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="ScopedActionButtonStyle" TargetType="Button">
+            <Setter Property="MinWidth" Value="62"/>
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="Margin" Value="2,0"/>
+            <Setter Property="Padding" Value="8,2"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="ScopedIncludeButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource ScopedActionButtonStyle}">
+            <Setter Property="Background" Value="#FFE7F5EC"/>
+            <Setter Property="BorderBrush" Value="#FF7BB58E"/>
+            <Setter Property="Foreground" Value="#FF145A2A"/>
+        </Style>
+
+        <Style x:Key="ScopedExcludeButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource ScopedActionButtonStyle}">
+            <Setter Property="Background" Value="#FFFBEAEA"/>
+            <Setter Property="BorderBrush" Value="#FFD48A8A"/>
+            <Setter Property="Foreground" Value="#FF7A1E1E"/>
+        </Style>
+
+        <Style x:Key="ScopedResetButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource ScopedActionButtonStyle}">
+            <Setter Property="Background" Value="#FFF3F3F3"/>
+            <Setter Property="BorderBrush" Value="#FFBEBEBE"/>
+            <Setter Property="Foreground" Value="#FF333333"/>
+        </Style>
+
+        <Style x:Key="ExplorerGreenButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="20"/>
+            <Setter Property="Height" Value="20"/>
+            <Setter Property="Margin" Value="0,0,5,0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="#FFFFFFFF"/>
+            <Setter Property="BorderBrush" Value="#FFBEBEBE"/>
+            <Setter Property="Foreground" Value="#FF555555"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding HasGreenIncludedDescendant}" Value="True">
+                    <Setter Property="Background" Value="#FFE7F5EC"/>
+                    <Setter Property="BorderBrush" Value="#FF7BB58E"/>
+                    <Setter Property="Foreground" Value="#FF145A2A"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsGreenIncludedDirectly}" Value="True">
+                    <Setter Property="Background" Value="#FF188A42"/>
+                    <Setter Property="BorderBrush" Value="#FF0E6B31"/>
+                    <Setter Property="Foreground" Value="#FFFFFFFF"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Style for column headers with sort indicator -->
+        <Style x:Key="SortableHeaderStyle" TargetType="DataGridColumnHeader" BasedOn="{StaticResource ColumnFilterHeaderStyle}"/>
+
+        <HierarchicalDataTemplate DataType="{x:Type vm:ExplorerNodeViewModel}"
+                                  ItemsSource="{Binding Children}">
+            <Border Padding="1">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsScopeSelected}" Value="True">
+                                <Setter Property="Background" Value="#FFE7F0FA"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Visibility="{Binding ShowGreenButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Content="{Binding ScopeGlyph}"
+                            Style="{StaticResource ExplorerGreenButtonStyle}"
+                            ToolTip="{Binding ScopeStateDescription}"
+                            Command="{Binding Tag, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                            CommandParameter="{Binding}"/>
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding DisplayName}"
+                               ToolTip="{Binding Description}"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="#FF000000"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsScopeSelected}" Value="True">
+                                        <Setter Property="FontWeight" Value="SemiBold"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+            </Border>
+        </HierarchicalDataTemplate>
+
+</ResourceDictionary>

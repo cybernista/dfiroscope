@@ -191,14 +191,15 @@ public sealed class AgentCaptureWorkflowCoordinator : IDisposable
 
     private static readonly TimeSpan DefaultReconnectInterval = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan DefaultDisconnectedInterval = TimeSpan.FromSeconds(15);
-    private const int DefaultFastReconnectAttempts = 5;
+    private static readonly TimeSpan DefaultFastReconnectWindow = TimeSpan.FromMinutes(5);
 
     private readonly object _gate = new();
     private readonly IAgentCaptureWorkflowRuntime _runtime;
     private readonly AgentCaptureControlProjectionService _controlProjection;
     private readonly TimeSpan _reconnectInterval;
     private readonly TimeSpan _disconnectedInterval;
-    private readonly int _fastReconnectAttempts;
+    private readonly TimeSpan _fastReconnectWindow;
+    private DateTime? _unavailableSinceUtc;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly Dictionary<JobKind, Guid> _captureJobIds = new();
     private CancellationTokenSource? _operationCts;
@@ -212,23 +213,23 @@ public sealed class AgentCaptureWorkflowCoordinator : IDisposable
         AgentCaptureControlProjectionService? controlProjection = null,
         TimeSpan? reconnectInterval = null,
         TimeSpan? disconnectedInterval = null,
-        int fastReconnectAttempts = DefaultFastReconnectAttempts)
+        TimeSpan? fastReconnectWindow = null)
     {
         if (initialWorkspaceGeneration < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(initialWorkspaceGeneration));
         }
 
-        if (fastReconnectAttempts < 0)
+        if (fastReconnectWindow is { } window && window < TimeSpan.Zero)
         {
-            throw new ArgumentOutOfRangeException(nameof(fastReconnectAttempts));
+            throw new ArgumentOutOfRangeException(nameof(fastReconnectWindow));
         }
 
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _controlProjection = controlProjection ?? new AgentCaptureControlProjectionService();
         _reconnectInterval = reconnectInterval ?? DefaultReconnectInterval;
         _disconnectedInterval = disconnectedInterval ?? DefaultDisconnectedInterval;
-        _fastReconnectAttempts = fastReconnectAttempts;
+        _fastReconnectWindow = fastReconnectWindow ?? DefaultFastReconnectWindow;
         _state = AgentCaptureWorkflowState.Initial(initialWorkspaceGeneration) with
         {
             Control = _controlProjection.Current
@@ -337,6 +338,7 @@ public sealed class AgentCaptureWorkflowCoordinator : IDisposable
 
             CancelOperationLocked();
             CancelPollLocked();
+            _unavailableSinceUtc = null;
             var control = _controlProjection.MarkUnavailable(detail, DateTime.UtcNow);
             state = _state with
             {
@@ -432,6 +434,7 @@ public sealed class AgentCaptureWorkflowCoordinator : IDisposable
             CancelOperationLocked();
             CancelPollLocked();
             _captureJobIds.Clear();
+            _unavailableSinceUtc = null;
             var control = _controlProjection.Reset(detail);
             state = AgentCaptureWorkflowState.Initial(workspaceGeneration) with
             {
@@ -712,6 +715,7 @@ public sealed class AgentCaptureWorkflowCoordinator : IDisposable
             }
 
             _captureJobIds.Clear();
+            _unavailableSinceUtc = null;
             var control = _controlProjection.Reset(detail);
             state = SnapshotLocked(_state with
             {
@@ -940,6 +944,10 @@ public sealed class AgentCaptureWorkflowCoordinator : IDisposable
         var state = _state;
         if (response.Health != null)
         {
+            if (response.Success)
+            {
+                _unavailableSinceUtc = null;
+            }
             var assessment = _runtime.AssessHealth(response.Health);
             var control = _controlProjection.ApplyHealth(
                 response.Health,
@@ -971,7 +979,8 @@ public sealed class AgentCaptureWorkflowCoordinator : IDisposable
         else if (!response.Success && IsUnavailableResponse(response))
         {
             var failureCount = checked(state.HealthFailureCount + 1);
-            var interval = failureCount <= _fastReconnectAttempts
+            _unavailableSinceUtc ??= nowUtc;
+            var interval = nowUtc - _unavailableSinceUtc.Value < _fastReconnectWindow
                 ? _reconnectInterval
                 : _disconnectedInterval;
             state = state with
@@ -1017,6 +1026,7 @@ public sealed class AgentCaptureWorkflowCoordinator : IDisposable
         }
         else if (response.Success)
         {
+            _unavailableSinceUtc = null;
             state = state with
             {
                 IsReachable = true,
@@ -1079,6 +1089,10 @@ public sealed class AgentCaptureWorkflowCoordinator : IDisposable
             }
 
             CancelOperationLocked();
+            if (phase == AgentCaptureWorkflowPhase.Connecting)
+            {
+                CancelPollLocked();
+            }
             _operationCts = CancellationTokenSource.CreateLinkedTokenSource(
                 _lifetimeCts.Token,
                 cancellationToken);

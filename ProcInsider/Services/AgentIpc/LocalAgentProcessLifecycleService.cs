@@ -3,7 +3,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Security;
 using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
@@ -1003,15 +1002,8 @@ public sealed class LocalAgentProcessLifecycleService : IDisposable
         }
 
         return supportedExecutablePaths.Any(path =>
-        {
-            if (!HasSupportedAgentExecutableName(path))
-            {
-                return false;
-            }
-
-            return TryGetCanonicalExecutablePath(path, out var supported) &&
-                   string.Equals(candidate, supported, StringComparison.OrdinalIgnoreCase);
-        });
+            HasSupportedAgentExecutableName(path) &&
+            LocalAgentProcessIdentityVerifier.PathsEqual(candidate, path));
     }
 
     private static bool TryGetCanonicalExecutablePath(string path, out string canonicalPath)
@@ -1339,14 +1331,14 @@ public sealed class LocalAgentProcessLifecycleService : IDisposable
     {
         private readonly Process _process;
         private readonly string _processName;
-        private readonly Lazy<NativeProcessIdentity> _identity;
+        private readonly Lazy<LocalAgentNativeProcessIdentity> _identity;
 
         public SystemLocalAgentProcessHandle(Process process)
         {
             _process = process;
             _processName = process.ProcessName;
-            _identity = new Lazy<NativeProcessIdentity>(
-                () => NativeProcessInspector.Inspect(process.Id));
+            _identity = new Lazy<LocalAgentNativeProcessIdentity>(
+                () => LocalAgentProcessIdentityVerifier.Inspect(process.Id));
         }
 
         public int Id => _process.Id;
@@ -1364,7 +1356,7 @@ public sealed class LocalAgentProcessLifecycleService : IDisposable
         public bool? IsElevated => _identity.Value.IsElevated;
 
         public bool IsRunningQueryOnly =>
-            NativeProcessInspector.IsSameProcessRunning(_process.Id, _identity.Value.StartedAtUtc);
+            LocalAgentProcessIdentityVerifier.IsSameProcessRunning(_process.Id, _identity.Value.StartedAtUtc);
 
         public void Kill(bool entireProcessTree) => _process.Kill(entireProcessTree);
 
@@ -1374,277 +1366,4 @@ public sealed class LocalAgentProcessLifecycleService : IDisposable
         public void Dispose() => _process.Dispose();
     }
 
-    private sealed record NativeProcessIdentity(
-        string ExecutablePath,
-        DateTime StartedAtUtc,
-        string OwnerSid,
-        bool? IsElevated);
-
-    private static class NativeProcessInspector
-    {
-        private const uint ProcessQueryLimitedInformation = 0x1000;
-        private const uint TokenQuery = 0x0008;
-        private const int TokenElevationClass = 20;
-
-        public static NativeProcessIdentity Inspect(int processId)
-        {
-            var processHandle = OpenProcess(
-                ProcessQueryLimitedInformation,
-                inheritHandle: false,
-                processId);
-            if (processHandle == IntPtr.Zero)
-            {
-                throw new Win32Exception(
-                    Marshal.GetLastWin32Error(),
-                    $"The local-agent PID {processId} could not be opened with query-only access.");
-            }
-
-            try
-            {
-                var executablePath = GetExecutablePath(processHandle);
-                var startedAtUtc = GetStartedAtUtc(processHandle);
-                var (ownerSid, isElevated) = GetTokenIdentityOrUnavailable(processHandle);
-                return new NativeProcessIdentity(
-                    executablePath,
-                    startedAtUtc,
-                    ownerSid,
-                    isElevated);
-            }
-            finally
-            {
-                _ = CloseHandle(processHandle);
-            }
-        }
-
-        public static bool IsSameProcessRunning(int processId, DateTime expectedStartedAtUtc)
-        {
-            var processHandle = OpenProcess(
-                ProcessQueryLimitedInformation,
-                inheritHandle: false,
-                processId);
-            if (processHandle == IntPtr.Zero)
-            {
-                var error = Marshal.GetLastWin32Error();
-                if (error is 87 or 1168)
-                {
-                    return false;
-                }
-
-                throw new Win32Exception(
-                    error,
-                    $"The local-agent PID {processId} could not be polled with query-only access.");
-            }
-
-            try
-            {
-                if (!GetProcessTimes(
-                        processHandle,
-                        out var creationTime,
-                        out _,
-                        out _,
-                        out _))
-                {
-                    var error = Marshal.GetLastWin32Error();
-                    if (error is 6 or 87 or 1168)
-                    {
-                        return false;
-                    }
-
-                    throw new Win32Exception(error, "The local-agent process start time could not be polled.");
-                }
-
-                var observedStartedAtUtc = DateTime.FromFileTimeUtc(creationTime.ToLong());
-                if ((observedStartedAtUtc - expectedStartedAtUtc).Duration() > ExactStartTimeTolerance)
-                {
-                    return false;
-                }
-
-                if (!GetExitCodeProcess(processHandle, out var exitCode))
-                {
-                    var error = Marshal.GetLastWin32Error();
-                    if (error is 6 or 87 or 1168)
-                    {
-                        return false;
-                    }
-
-                    throw new Win32Exception(error, "The local-agent process exit state could not be polled.");
-                }
-
-                return exitCode == 259;
-            }
-            finally
-            {
-                _ = CloseHandle(processHandle);
-            }
-        }
-
-        private static string GetExecutablePath(IntPtr processHandle)
-        {
-            var capacity = 32768;
-            var buffer = new StringBuilder(capacity);
-            if (!QueryFullProcessImageName(
-                    processHandle,
-                    flags: 0,
-                    buffer,
-                    ref capacity))
-            {
-                throw new Win32Exception(
-                    Marshal.GetLastWin32Error(),
-                    "The local-agent executable path could not be queried.");
-            }
-
-            return buffer.ToString();
-        }
-
-        private static DateTime GetStartedAtUtc(IntPtr processHandle)
-        {
-            if (!GetProcessTimes(
-                    processHandle,
-                    out var creationTime,
-                    out _,
-                    out _,
-                    out _))
-            {
-                throw new Win32Exception(
-                    Marshal.GetLastWin32Error(),
-                    "The local-agent process start time could not be queried.");
-            }
-
-            return DateTime.FromFileTimeUtc(creationTime.ToLong());
-        }
-
-        private static (string OwnerSid, bool? IsElevated) GetTokenIdentityOrUnavailable(
-            IntPtr processHandle)
-        {
-            if (!OpenProcessToken(processHandle, TokenQuery, out var tokenHandle))
-            {
-                var error = Marshal.GetLastWin32Error();
-                if (IsExpectedIdentityInspectionUnavailable(error))
-                {
-                    return (string.Empty, null);
-                }
-
-                throw new Win32Exception(
-                    error,
-                    "The local-agent process token could not be queried.");
-            }
-
-            try
-            {
-                var ownerSid = string.Empty;
-                try
-                {
-                    using var identity = new WindowsIdentity(tokenHandle);
-                    ownerSid = identity.User?.Value ?? string.Empty;
-                }
-                catch (Win32Exception ex) when (
-                    IsExpectedIdentityInspectionUnavailable(ex.NativeErrorCode))
-                {
-                }
-                catch (UnauthorizedAccessException)
-                {
-                }
-                catch (SecurityException)
-                {
-                }
-
-                bool? isElevated;
-                if (GetTokenInformation(
-                        tokenHandle,
-                        TokenElevationClass,
-                        out var elevation,
-                        Marshal.SizeOf<TokenElevation>(),
-                        out _))
-                {
-                    isElevated = elevation.TokenIsElevated != 0;
-                }
-                else
-                {
-                    var error = Marshal.GetLastWin32Error();
-                    if (!IsExpectedIdentityInspectionUnavailable(error))
-                    {
-                        throw new Win32Exception(
-                            error,
-                            "The local-agent elevation state could not be queried.");
-                    }
-
-                    isElevated = null;
-                }
-
-                return (ownerSid, isElevated);
-            }
-            finally
-            {
-                _ = CloseHandle(tokenHandle);
-            }
-        }
-
-        private static bool IsExpectedIdentityInspectionUnavailable(int nativeError) =>
-            nativeError is 5 or 6 or 87 or 1008 or 1168 or 1314;
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(
-            uint desiredAccess,
-            bool inheritHandle,
-            int processId);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool QueryFullProcessImageName(
-            IntPtr processHandle,
-            int flags,
-            StringBuilder executablePath,
-            ref int size);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool GetProcessTimes(
-            IntPtr processHandle,
-            out NativeFileTime creationTime,
-            out NativeFileTime exitTime,
-            out NativeFileTime kernelTime,
-            out NativeFileTime userTime);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool GetExitCodeProcess(
-            IntPtr processHandle,
-            out uint exitCode);
-
-        [DllImport("advapi32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool OpenProcessToken(
-            IntPtr processHandle,
-            uint desiredAccess,
-            out IntPtr tokenHandle);
-
-        [DllImport("advapi32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool GetTokenInformation(
-            IntPtr tokenHandle,
-            int tokenInformationClass,
-            out TokenElevation tokenInformation,
-            int tokenInformationLength,
-            out int returnLength);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CloseHandle(IntPtr handle);
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct NativeFileTime
-        {
-            private uint _lowDateTime;
-            private uint _highDateTime;
-
-            public long ToLong() =>
-                ((long)_highDateTime << 32) | _lowDateTime;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct TokenElevation
-        {
-            public int TokenIsElevated;
-        }
-    }
 }

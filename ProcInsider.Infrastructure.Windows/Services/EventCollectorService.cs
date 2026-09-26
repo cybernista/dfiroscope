@@ -1258,7 +1258,7 @@ public class EventCollectorService
             var securityEvent = TryCreateSecurityEvent(e.EventRecord);
             if (securityEvent != null)
             {
-                IncrementSourceRecordsMatched(source);
+                RecordSecurityProcessMatch(securityEvent);
                 _securityEventStore.AddEvent(securityEvent);
             }
             else
@@ -1283,6 +1283,18 @@ public class EventCollectorService
         finally
         {
             e.EventRecord.Dispose();
+        }
+    }
+
+    internal void RecordSecurityProcessMatch(ProcessEventInfo securityEvent)
+    {
+        if (string.IsNullOrWhiteSpace(securityEvent.ProcessKey))
+        {
+            IncrementSourceUnmatchedRecords("Security");
+        }
+        else
+        {
+            IncrementSourceRecordsMatched("Security");
         }
     }
 
@@ -1527,55 +1539,115 @@ public class EventCollectorService
     private ProcessEventInfo? TryCreateSecurityEvent(EventRecord eventRecord)
     {
         var xml = eventRecord.ToXml();
-        var processId = ExtractWindowsProcessId(xml, includeExecutionProcessId: false);
-        if (processId <= 0)
-        {
-            return null;
-        }
+        return CreateSecurityEventFromXml(
+            xml,
+            eventRecord.Id,
+            eventRecord.TimeCreated?.ToUniversalTime() ?? DateTime.UtcNow,
+            GetEventLogName(eventRecord),
+            eventRecord.ProviderName,
+            SafeFormatDescription(eventRecord),
+            _processTracker.GetAllProcesses());
+    }
 
-        var process = ResolveTrackedProcess(processId);
-        if (process == null)
-        {
-            return null;
-        }
+    internal static ProcessEventInfo CreateSecurityEventFromXml(
+        string xml,
+        int eventCode,
+        DateTime timestampUtc,
+        string logName,
+        string? providerName,
+        string renderedMessage,
+        IReadOnlyList<ProcessInfo> trackedProcesses)
+    {
+        // A Security record is evidence even when its native fields name no process.
+        // Never substitute the provider execution PID or a reused PID for an event process.
+        var processIds = ExtractWindowsProcessIds(xml, includeExecutionProcessId: false);
+        var process = processIds.Count == 1
+            ? ResolveSecurityProcess(processIds.Single(), timestampUtc, xml, eventCode, trackedProcesses)
+            : null;
 
         var target = FirstNonEmpty(
             ExtractStringFromXml(xml, "NewProcessName"),
             ExtractStringFromXml(xml, "ProcessName"),
             ExtractStringFromXml(xml, "ObjectName"),
             ExtractStringFromXml(xml, "TargetObject"),
-            process.ProcessPath,
-            process.ProcessName);
+            process?.ProcessPath,
+            process?.ProcessName,
+            providerName,
+            logName);
         var subjectUser = FirstNonEmpty(
             ExtractStringFromXml(xml, "SubjectUserName"),
             ExtractStringFromXml(xml, "TargetUserName"),
-            process.UserName);
-        var logName = GetEventLogName(eventRecord);
+            process?.UserName);
 
         return new ProcessEventInfo
         {
-            TimestampUtc = eventRecord.TimeCreated?.ToUniversalTime() ?? DateTime.UtcNow,
-            ProcessKey = process.GetUniqueKey(),
-            ProcessId = process.ProcessId,
-            ProcessStartTimeUtc = process.StartTime?.ToUniversalTime(),
-            ProcessName = process.ProcessName,
-            ParentProcessId = process.ParentProcessId,
-            EventCode = eventRecord.Id,
+            TimestampUtc = timestampUtc,
+            ProcessKey = process?.GetUniqueKey() ?? string.Empty,
+            ProcessId = process?.ProcessId ?? 0,
+            ProcessStartTimeUtc = process?.StartTime?.ToUniversalTime(),
+            ProcessName = process?.ProcessName ?? "<unknown>",
+            ParentProcessId = process?.ParentProcessId ?? 0,
+            EventCode = eventCode,
             Category = ProcessEventCategory.Security,
             Action = ProcessEventAction.SecurityAudit,
             Target = target,
-            Summary = $"{logName} event {eventRecord.Id}: {TrimSingleLine(FirstNonEmpty(target, SafeFormatDescription(eventRecord)), 140)}",
-            Details = BuildEventRecordContent(
-                eventRecord,
+            Summary = $"{logName} event {eventCode}: {TrimSingleLine(FirstNonEmpty(target, renderedMessage), 140)}",
+            Details = BuildSecurityEventContent(
+                renderedMessage,
                 xml,
                 $"Log: {logName}",
-                $"Provider: {eventRecord.ProviderName}",
-                $"Process: {process.ProcessName} (PID: {process.ProcessId})",
-                $"User: {subjectUser}",
+                $"Provider: {providerName}",
+                process == null ? null : $"Process: {process.ProcessName} (PID: {process.ProcessId})",
+                string.IsNullOrWhiteSpace(subjectUser) ? null : $"User: {subjectUser}",
                 $"Target: {target}"),
             RiskFlags = "security",
             IsInteresting = true
         };
+    }
+
+    private static ProcessInfo? ResolveSecurityProcess(
+        int processId,
+        DateTime timestampUtc,
+        string xml,
+        int eventCode,
+        IReadOnlyList<ProcessInfo> trackedProcesses)
+    {
+        var eventTime = timestampUtc.ToLocalTime();
+        var nativeImages = new[]
+        {
+            ExtractStringFromXml(xml, "NewProcessName"),
+            ExtractStringFromXml(xml, "ProcessName"),
+            eventCode is 5156 or 5157 ? ExtractStringFromXml(xml, "Application") : null
+        }.Where(image => !string.IsNullOrWhiteSpace(image)).ToArray();
+        var matches = trackedProcesses
+            .Where(process => process.ProcessId == processId && process.StartTime.HasValue &&
+                              (process.Status == ProcessStatus.Running || process.EndTime.HasValue))
+            .Where(process => process.StartTime!.Value <= eventTime &&
+                              (!process.EndTime.HasValue || process.EndTime.Value >= eventTime))
+            .Where(process => nativeImages.All(image => IsSecurityProcessImageCompatible(image!, process)))
+            .Take(2)
+            .ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
+    private static bool IsSecurityProcessImageCompatible(string nativeImage, ProcessInfo process)
+    {
+        var observed = nativeImage.Trim().Trim('"');
+        var trackedPath = process.ProcessPath;
+        if (!string.IsNullOrWhiteSpace(trackedPath) && trackedPath != "<not available>" &&
+            (observed.Contains('\\') || observed.Contains('/')))
+        {
+            if (observed.StartsWith(@"\Device\", StringComparison.OrdinalIgnoreCase) &&
+                Path.IsPathFullyQualified(trackedPath) && trackedPath.Length > 1 && trackedPath[1] == ':')
+                return string.Equals(Path.GetFileName(observed), Path.GetFileName(trackedPath),
+                    StringComparison.OrdinalIgnoreCase);
+            return string.Equals(observed, trackedPath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.Equals(
+            Path.GetFileNameWithoutExtension(observed),
+            Path.GetFileNameWithoutExtension(process.ProcessName),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private ProcessEventInfo? TryCreateOtherWindowsEvent(EventRecord eventRecord)
@@ -3389,7 +3461,11 @@ public class EventCollectorService
 
     private static string BuildAuditEventDetails(EventRecord eventRecord, string xml, params string?[] lines)
     {
-        var renderedMessage = SafeFormatDescription(eventRecord);
+        return BuildSecurityEventContent(SafeFormatDescription(eventRecord), xml, lines);
+    }
+
+    private static string BuildSecurityEventContent(string renderedMessage, string xml, params string?[] lines)
+    {
         var detailLines = new List<string>();
 
         foreach (var line in lines)

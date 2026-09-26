@@ -14,6 +14,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="170"/>
@@ -37,6 +38,9 @@
                       DisplayMemberPath="DisplayName"
                       IsEnabled="{Binding HasSysmonProfiles}"
                       MinWidth="320"/>
+            <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Margin="0,6,0,0"
+                       Text="Applying this Sysmon profile replaces the active configuration. The separate factory-default restore option removes all Sysmon rules and disables Sysmon network monitoring."
+                       TextWrapping="Wrap" Foreground="DarkOrange"/>
         </Grid>
 
         <Grid Grid.Row="1" Margin="0,0,0,8"

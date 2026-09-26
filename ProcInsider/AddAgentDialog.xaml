@@ -133,7 +133,7 @@
                     </ItemsControl>
                 </StackPanel>
 
-                <TextBlock Text="These choices select what the Agent collects. They do not change Windows audit policy or logging settings. To change those settings, use Security Monitoring → Change config of my computer. Missing capture prerequisites are reported separately."
+                <TextBlock Text="These choices select what the Agent collects. They do not change Windows audit policy or logging settings. To change those settings, use Monitoring configuration → Set monitoring through Agent. Missing capture prerequisites are reported separately."
                            TextWrapping="Wrap" MaxWidth="620" Margin="0,0,0,14"/>
             </StackPanel>
         </ScrollViewer>

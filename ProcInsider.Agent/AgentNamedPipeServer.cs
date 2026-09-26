@@ -24,6 +24,7 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
     private readonly AgentConfigurationCheckService _configurationChecks;
     private readonly AgentMonitoringConfigurationService _monitoringConfiguration;
     private readonly AgentCaptureConfigurationService _captureConfiguration;
+    private readonly AgentTelemetryAuditAutomationService _telemetryAudit;
     private readonly CaptureCompatibilityAssessment _captureCompatibility;
     private readonly IFeatureCatalog _featureCatalog;
     private readonly IReadOnlyList<EvidenceSourceAdapterDescriptor> _evidenceSourceAdapters;
@@ -70,7 +71,8 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
         AgentIpcTransportPolicy? transportPolicy = null,
         IAgentPipeConnectionAuthorizer? connectionAuthorizer = null,
         AgentConfiguredCapturePauseCoordinator? configuredCapturePause = null,
-        bool commandRuntimeOnly = false)
+        bool commandRuntimeOnly = false,
+        AgentTelemetryAuditAutomationService? telemetryAudit = null)
     {
         _options = options;
         _jobQueue = jobQueue;
@@ -85,6 +87,8 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
         _featureCatalog = featureCatalog ?? throw new ArgumentNullException(nameof(featureCatalog));
         _evidenceSourceAdapters = evidenceSourceAdapters ?? throw new ArgumentNullException(nameof(evidenceSourceAdapters));
         _getCaptureHealth = getCaptureHealth;
+        _telemetryAudit = telemetryAudit ?? new AgentTelemetryAuditAutomationService(
+            new WindowsAgentTelemetryAuditRuntime(getCaptureHealth));
         _requestLiveCaptureStop = requestLiveCaptureStop;
         _requestLiveCaptureSourceStop = requestLiveCaptureSourceStop;
         _requestLiveCaptureSourceStart = requestLiveCaptureSourceStart;
@@ -526,8 +530,28 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
             AgentCommandKind.StopConfiguredCapture => await StopConfiguredCaptureAsync(request, cancellationToken).ConfigureAwait(false),
             AgentCommandKind.PauseJob => await PauseConfiguredCaptureAsync(request, cancellationToken).ConfigureAwait(false),
             AgentCommandKind.ResumeJob => await ResumeConfiguredCaptureAsync(request, cancellationToken).ConfigureAwait(false),
+            AgentCommandKind.RunTelemetryAuditTest => await RunTelemetryAuditTestAsync(request, cancellationToken).ConfigureAwait(false),
             _ => AgentIpcResponse.Failure(request.RequestId, "UnknownCommand", $"Unknown agent command kind: {request.CommandKind}.")
         };
+    }
+
+    private async Task<AgentIpcResponse> RunTelemetryAuditTestAsync(
+        AgentIpcRequest request,
+        CancellationToken cancellationToken)
+    {
+        var command = DeserializeCommand<RunTelemetryAuditTestCommand>(request);
+        try
+        {
+            var result = await _telemetryAudit.ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
+            return AgentIpcResponse.Ok(request.RequestId) with { TelemetryAuditTest = result };
+        }
+        catch (InvalidOperationException ex)
+        {
+            return AgentIpcResponse.Failure(
+                request.RequestId,
+                "TelemetryAuditRequestRejected",
+                ex.Message);
+        }
     }
 
     private AgentIpcResponse CheckHostMonitoringConfiguration(AgentIpcRequest request)
@@ -750,8 +774,8 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
         {
             return AgentIpcResponse.Failure(
                 request.RequestId,
-                "LiveCaptureSourceNotRunning",
-                $"{source} capture is not active in the current live-capture job.");
+                "LiveCaptureSourceStopUnconfirmed",
+                $"{source} capture could not be confirmed stopped. Check source health; the collector may still be running.");
         }
 
         return AgentIpcResponse.Ok(request.RequestId) with
@@ -1027,8 +1051,8 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
         {
             return AgentIpcResponse.Failure(
                 request.RequestId,
-                "LiveCaptureSourceNotStopped",
-                $"{command.Source} capture is not a stopped source in the current live-capture job.");
+                "LiveCaptureSourceStartUnavailable",
+                $"{command.Source} capture could not start in the current live-capture job. Check source health for its prerequisite or profile error.");
         }
 
         return AgentIpcResponse.Ok(request.RequestId) with

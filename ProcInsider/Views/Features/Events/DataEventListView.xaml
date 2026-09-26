@@ -48,6 +48,19 @@
                 <DataGridTextColumn Header="EventCode" Binding="{Binding EventCodeDisplay}" Width="85"
                                     SortMemberPath="EventCodeDisplay"/>
 
+                <DataGridTextColumn x:Name="DescriptionColumn" Header="Description" Binding="{Binding Description}" Width="180"
+                                    SortMemberPath="Description"/>
+
+                <DataGridTextColumn x:Name="HighFieldsColumn" Header="High fields" Binding="{Binding DetailsSummary}" Width="2*" MinWidth="220"
+                                    SortMemberPath="DetailsSummary">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="ToolTip" Value="{Binding DetailsSummary}"/>
+                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+
                 <DataGridTextColumn Header="Action" Binding="{Binding ActionDisplay}" Width="140"
                                     SortMemberPath="ActionDisplay"/>
 

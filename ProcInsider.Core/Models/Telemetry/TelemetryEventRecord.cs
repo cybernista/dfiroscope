@@ -4,6 +4,13 @@ namespace ProcInsider.Models;
 
 public class TelemetryEventRecord : IHasProcessEvidenceLink
 {
+    public const string EtwDisplayName = "Event Tracing for Windows";
+
+    /// <summary>Browsing fallback only; never assign the result to captured native metadata.</summary>
+    public static string DisplaySourceMetadata(string? source, string? nativeValue) =>
+        string.Equals(source, "ETW", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(nativeValue)
+            ? EtwDisplayName : nativeValue ?? string.Empty;
+
     public string CaseId { get; set; } = string.Empty;
     public string EvidenceSessionId { get; set; } = string.Empty;
     public string CaptureId { get; set; } = string.Empty;
@@ -58,6 +65,8 @@ public class TelemetryEventRecord : IHasProcessEvidenceLink
             Summary = Summary,
             Details = Details,
             RiskFlags = RiskFlags,
+            RawProvider = RawProvider,
+            RawLogName = RawLogName,
             IsInteresting = IsInteresting,
             RepeatCount = RepeatCount,
             ProcessEntityId = ProcessEntityId,

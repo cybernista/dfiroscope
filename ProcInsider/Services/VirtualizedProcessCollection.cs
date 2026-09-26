@@ -51,6 +51,8 @@ public sealed class VirtualizedProcessCollection : IList, INotifyCollectionChang
     private volatile bool _disposed;
     private int _count;
     private int _activeLoads;
+    private bool _readsSuspended;
+    private CancellationTokenSource _readEpoch = new();
     private int? _selectedPageIndex;
     private long _cacheHits;
     private long _cacheMisses;
@@ -458,11 +460,42 @@ public sealed class VirtualizedProcessCollection : IList, INotifyCollectionChang
         }
 
         _lifetimeCts.Cancel();
+        _readEpoch.Cancel();
         _lifetimeCts.Dispose();
+        _readEpoch.Dispose();
         lock (_gate)
         {
             _pages.Clear();
             _lru.Clear();
+        }
+    }
+
+    internal async Task SuspendReadsAsync(CancellationToken cancellationToken)
+    {
+        Task[] pending;
+        lock (_gate)
+        {
+            _readsSuspended = true;
+            _readEpoch.Cancel();
+            pending = _inflight.Values.ToArray();
+        }
+        try { await Task.WhenAll(pending).WaitAsync(cancellationToken); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+        lock (_gate)
+        {
+            foreach (var page in _inflight.Where(pair => pair.Value.IsCompleted).Select(pair => pair.Key).ToArray())
+                _inflight.Remove(page);
+        }
+    }
+
+    internal void ResumeReads()
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_readsSuspended) return;
+            _readEpoch.Dispose();
+            _readEpoch = new CancellationTokenSource();
+            _readsSuspended = false;
         }
     }
 
@@ -494,6 +527,7 @@ public sealed class VirtualizedProcessCollection : IList, INotifyCollectionChang
         lock (_gate)
         {
             ThrowIfDisposed();
+            if (_readsSuspended) return Task.CompletedTask;
             if (_pages.TryGetValue(pageIndex, out var cached))
             {
                 TouchPage(pageIndex, cached);
@@ -507,7 +541,7 @@ public sealed class VirtualizedProcessCollection : IList, INotifyCollectionChang
             }
 
             Interlocked.Increment(ref _cacheMisses);
-            var task = LoadPageAsync(pageIndex, cancellationToken);
+            var task = LoadPageAsync(pageIndex, cancellationToken, _readEpoch.Token);
             _inflight[pageIndex] = task;
             _ = task.ContinueWith(
                 _ =>
@@ -524,7 +558,7 @@ public sealed class VirtualizedProcessCollection : IList, INotifyCollectionChang
         }
     }
 
-    private async Task LoadPageAsync(int pageIndex, CancellationToken cancellationToken)
+    private async Task LoadPageAsync(int pageIndex, CancellationToken cancellationToken, CancellationToken readEpoch)
     {
         Interlocked.Increment(ref _activeLoads);
         await DispatchStateChangedAsync().ConfigureAwait(false);
@@ -541,6 +575,7 @@ public sealed class VirtualizedProcessCollection : IList, INotifyCollectionChang
 
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(
                 _lifetimeToken,
+                readEpoch,
                 cancellationToken);
             var query = CloneQuery(
                 _baseQuery,
@@ -549,7 +584,11 @@ public sealed class VirtualizedProcessCollection : IList, INotifyCollectionChang
                 _pageSize);
             var window = await _source.GetPageAsync(query, linked.Token).ConfigureAwait(false);
             linked.Token.ThrowIfCancellationRequested();
-            await DispatchAsync(() => ApplyPage(pageIndex, window)).ConfigureAwait(false);
+            await DispatchAsync(() =>
+            {
+                linked.Token.ThrowIfCancellationRequested();
+                ApplyPage(pageIndex, window);
+            }).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

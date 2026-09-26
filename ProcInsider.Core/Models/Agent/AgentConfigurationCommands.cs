@@ -66,6 +66,9 @@ public sealed record ReverseHostMonitoringDeploymentCommand : AgentConfiguration
     public override AgentCommandKind Kind => AgentCommandKind.ReverseHostMonitoringDeployment;
 
     public string[] AcknowledgedWarnings { get; init; } = Array.Empty<string>();
+
+    /// <summary>Explicit Sysmon-only request to reset the installed service with -c --.</summary>
+    public bool ResetSysmonToFactoryDefaults { get; init; }
 }
 
 /// <summary>Requests the selected agent's saved capture configuration.</summary>

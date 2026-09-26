@@ -22,6 +22,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
     private readonly SysmonProcessEvidenceSourceAdapter _sysmonProcessAdapter;
     private readonly object _healthLock = new();
     private readonly object _activeCaptureLock = new();
+    private readonly object _etwControlLock = new();
     private readonly AgentLiveCaptureHealthTracker _sourceHealthTracker = new();
     private readonly InitialProcessInventoryCommitState _initialProcessInventory = new();
     private readonly HashSet<string> _stoppedSources = new(StringComparer.OrdinalIgnoreCase);
@@ -52,6 +53,10 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
     private Guid? _activeJobId;
     private CancellationTokenSource? _activeCollectionStop;
     private int _etwStoppedByUser;
+    private int _etwStartedByUser;
+    private string? _etwStartFailure;
+    private bool _etwLifecycleStopping;
+    private bool _etwPauseStopUnconfirmed;
     private bool _isPaused;
 
     /// <summary>Raised after process rows have been committed to the live database.</summary>
@@ -127,6 +132,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             }
 
             _activeEventBuffer?.MarkDrainingAfterStop();
+            _etwLifecycleStopping = true;
             _activeCollectionStop.Cancel();
             return true;
         }
@@ -137,27 +143,35 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         ProcessTracker? processTracker;
         EventCollectorService? eventCollector;
         ConfigurableEtwService? configurableEtw;
-        lock (_activeCaptureLock)
+        var etwStopConfirmed = true;
+        lock (_etwControlLock)
         {
-            if (_activeJobId != jobId || _activeCollectionStop == null)
+            lock (_activeCaptureLock)
             {
-                return false;
+                if (_activeJobId != jobId || _activeCollectionStop == null || _etwLifecycleStopping)
+                {
+                    return false;
+                }
+
+                if (_isPaused && !_etwPauseStopUnconfirmed)
+                {
+                    return true;
+                }
+
+                _isPaused = true;
+                processTracker = _activeProcessTracker;
+                eventCollector = _activeEventCollector;
+                configurableEtw = _activeConfigurableEtw;
             }
 
-            if (_isPaused)
+            processTracker?.StopRealtimeTracking();
+            eventCollector?.Stop();
+            etwStopConfirmed = configurableEtw?.Stop() != false;
+            lock (_activeCaptureLock)
             {
-                return true;
+                _etwPauseStopUnconfirmed = !etwStopConfirmed;
             }
-
-            _isPaused = true;
-            processTracker = _activeProcessTracker;
-            eventCollector = _activeEventCollector;
-            configurableEtw = _activeConfigurableEtw;
         }
-
-        processTracker?.StopRealtimeTracking();
-        eventCollector?.Stop();
-        configurableEtw?.Stop();
 
         while (true)
         {
@@ -177,61 +191,75 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         var pausedSources = GetHealthSnapshot().Sources
             .Select(source => source with
             {
-                Status = "Paused",
-                Detail = "Configured capture is paused; activity during this acquisition gap is not collected or backfilled.",
-                IsActive = false,
+                Status = !etwStopConfirmed && source.Source == "ETW" ? "Degraded" : "Paused",
+                Detail = !etwStopConfirmed && source.Source == "ETW"
+                    ? "ETW stop was not confirmed; its session may still be active."
+                    : "Configured capture is paused; activity during this acquisition gap is not collected or backfilled.",
+                IsActive = !etwStopConfirmed && source.Source == "ETW" && source.IsActive,
                 RecordsPerSecond = 0,
                 UpdatedUtc = pausedUtc
             })
             .ToArray();
         SetHealth(
-            CaptureHealth.Healthy,
-            "Live capture paused; accepted writes are drained and an acquisition gap is active.",
+            etwStopConfirmed ? CaptureHealth.Healthy : CaptureHealth.Degraded,
+            etwStopConfirmed
+                ? "Live capture paused; accepted writes are drained and an acquisition gap is active."
+                : "Live capture pause was incomplete: ETW stop was not confirmed; its session may still be active.",
             pausedSources);
-        return true;
+        return etwStopConfirmed;
     }
 
     public Task<bool> RequestResumeAsync(Guid jobId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ProcessTracker? processTracker;
-        EventCollectorService? eventCollector;
-        ConfigurableEtwService? configurableEtw;
-        LiveCaptureOptions? options;
-        lock (_activeCaptureLock)
+        lock (_etwControlLock)
         {
-            if (_activeJobId != jobId || !_isPaused)
+            ProcessTracker? processTracker;
+            EventCollectorService? eventCollector;
+            ConfigurableEtwService? configurableEtw;
+            LiveCaptureOptions? options;
+            lock (_activeCaptureLock)
+            {
+                if (_activeJobId != jobId || !_isPaused || _etwLifecycleStopping)
+                {
+                    return Task.FromResult(false);
+                }
+
+                processTracker = _activeProcessTracker;
+                eventCollector = _activeEventCollector;
+                configurableEtw = _activeConfigurableEtw;
+                options = _activeLiveOptions;
+                _isPaused = false;
+                _etwPauseStopUnconfirmed = false;
+            }
+
+            if (options == null || processTracker == null || eventCollector == null)
             {
                 return Task.FromResult(false);
             }
 
-            processTracker = _activeProcessTracker;
-            eventCollector = _activeEventCollector;
-            configurableEtw = _activeConfigurableEtw;
-            options = _activeLiveOptions;
-            _isPaused = false;
-        }
+            processTracker.StartRealtimeTracking();
+            eventCollector.SetSecurityCollectionEnabled(IsSourceEnabled("Security", options.CollectSecurityEvents));
+            eventCollector.SetPowerShellCollectionEnabled(IsSourceEnabled("PowerShell", options.CollectPowerShellEvents));
+            eventCollector.SetOtherWindowsCollectionEnabled(IsSourceEnabled("WindowsOther", options.CollectOtherWindowsEvents));
+            eventCollector.SetSysmonCollectionEnabled(IsSourceEnabled("Sysmon", options.CollectSysmonEvents));
+            eventCollector.Start();
+            if (configurableEtw != null && IsSourceEnabled("ETW", options.CollectEtwEvents))
+            {
+                configurableEtw.Start();
+                if (!configurableEtw.HasActiveProviders)
+                {
+                    SetHealth(CaptureHealth.Degraded,
+                        "Live capture resumed only partially: ETW did not restart. " + configurableEtw.StatusMessage);
+                    return Task.FromResult(false);
+                }
+            }
 
-        if (options == null || processTracker == null || eventCollector == null)
-        {
-            return Task.FromResult(false);
+            SetHealth(
+                CaptureHealth.Healthy,
+                "Live capture resumed after an explicit acquisition gap; new observations append under the same capture and source run.");
+            return Task.FromResult(true);
         }
-
-        processTracker.StartRealtimeTracking();
-        eventCollector.SetSecurityCollectionEnabled(IsSourceEnabled("Security", options.CollectSecurityEvents));
-        eventCollector.SetPowerShellCollectionEnabled(IsSourceEnabled("PowerShell", options.CollectPowerShellEvents));
-        eventCollector.SetOtherWindowsCollectionEnabled(IsSourceEnabled("WindowsOther", options.CollectOtherWindowsEvents));
-        eventCollector.SetSysmonCollectionEnabled(IsSourceEnabled("Sysmon", options.CollectSysmonEvents));
-        eventCollector.Start();
-        if (configurableEtw != null && IsSourceEnabled("ETW", options.CollectEtwEvents))
-        {
-            configurableEtw.Start();
-        }
-
-        SetHealth(
-            CaptureHealth.Healthy,
-            "Live capture resumed after an explicit acquisition gap; new observations append under the same capture and source run.");
-        return Task.FromResult(true);
     }
 
     public bool RequestSourceStop(string source)
@@ -240,6 +268,11 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         if (normalizedSource == null)
         {
             return false;
+        }
+
+        if (normalizedSource == "ETW")
+        {
+            return RequestEtwStop();
         }
 
         lock (_activeCaptureLock)
@@ -256,10 +289,6 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
 
             switch (normalizedSource)
             {
-                case "ETW":
-                    _activeConfigurableEtw?.Stop();
-                    Volatile.Write(ref _etwStoppedByUser, 1);
-                    break;
                 case "Security":
                     _activeEventCollector?.SetSecurityCollectionEnabled(false);
                     break;
@@ -286,6 +315,11 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             return false;
         }
 
+        if (normalizedSource == "ETW")
+        {
+            return RequestEtwStart();
+        }
+
         lock (_activeCaptureLock)
         {
             if (!_activeJobId.HasValue || !_stoppedSources.Remove(normalizedSource))
@@ -295,10 +329,6 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
 
             switch (normalizedSource)
             {
-                case "ETW":
-                    Volatile.Write(ref _etwStoppedByUser, 0);
-                    _activeConfigurableEtw?.Start();
-                    break;
                 case "Security":
                     _activeEventCollector?.SetSecurityCollectionEnabled(true);
                     break;
@@ -314,6 +344,106 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             }
 
             return true;
+        }
+    }
+
+    private bool RequestEtwStop()
+    {
+        lock (_etwControlLock)
+        {
+            ConfigurableEtwService? etw;
+            lock (_activeCaptureLock)
+            {
+                if (!_activeJobId.HasValue || _activeConfigurableEtw == null ||
+                    _etwLifecycleStopping || _isPaused || _activeCollectionStop?.IsCancellationRequested == true)
+                {
+                    return false;
+                }
+
+                if (!_stoppedSources.Add("ETW"))
+                {
+                    return true;
+                }
+
+                etw = _activeConfigurableEtw;
+            }
+
+            // Stop joins the ETW callback thread. That callback checks source state under
+            // _activeCaptureLock, so never hold it while stopping the session.
+            var stopped = etw.Stop();
+            lock (_activeCaptureLock)
+            {
+                if (!stopped)
+                {
+                    _stoppedSources.Remove("ETW");
+                    return false;
+                }
+
+                if (_activeConfigurableEtw != etw || !_activeJobId.HasValue || _etwLifecycleStopping)
+                {
+                    return false;
+                }
+
+                Volatile.Write(ref _etwStoppedByUser, 1);
+                Volatile.Write(ref _etwStartedByUser, 0);
+                Volatile.Write(ref _etwStartFailure, null);
+                return true;
+            }
+        }
+    }
+
+    private bool RequestEtwStart()
+    {
+        lock (_etwControlLock)
+        {
+            ConfigurableEtwService? etw;
+            bool wasStopped;
+            lock (_activeCaptureLock)
+            {
+                etw = _activeConfigurableEtw;
+                if (!_activeJobId.HasValue || etw == null || _etwLifecycleStopping ||
+                    _isPaused || _activeCollectionStop?.IsCancellationRequested == true)
+                {
+                    return false;
+                }
+
+                wasStopped = _stoppedSources.Remove("ETW");
+            }
+
+            if (!wasStopped && etw.HasActiveProviders)
+            {
+                return false;
+            }
+
+            // Starting can restart and join an existing ETW callback thread too.
+            etw.Start();
+            var started = etw.HasActiveProviders;
+            var failure = started ? null : etw.StatusMessage;
+            if (!started)
+            {
+                etw.Stop();
+            }
+
+            lock (_activeCaptureLock)
+            {
+                if (!started)
+                {
+                    Volatile.Write(ref _etwStartFailure, string.IsNullOrWhiteSpace(failure)
+                        ? "ETW did not start any active providers." : failure[..Math.Min(failure.Length, 512)]);
+                    if (wasStopped) _stoppedSources.Add("ETW");
+                    return false;
+                }
+
+                if (_activeConfigurableEtw != etw || !_activeJobId.HasValue || _etwLifecycleStopping)
+                {
+                    return false;
+                }
+
+                Volatile.Write(ref _etwStoppedByUser, 0);
+                Volatile.Write(ref _etwStartedByUser, 1);
+                Volatile.Write(ref _etwStartFailure, null);
+                return true;
+            }
         }
     }
 
@@ -336,6 +466,8 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             _activeProcessWriteThrottle = null;
             _isPaused = false;
             _stoppedSources.Clear();
+            Volatile.Write(ref _etwStartedByUser, 0);
+            Volatile.Write(ref _etwStartFailure, null);
         }
     }
 
@@ -344,6 +476,10 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         var liveOptions = ReadLiveCaptureOptions(context.Request);
         ResetCaptureCounters(liveOptions.CollectRuntimeEvents);
         Volatile.Write(ref _etwStoppedByUser, 0);
+        Volatile.Write(ref _etwStartedByUser, 0);
+        Volatile.Write(ref _etwStartFailure, null);
+        _etwLifecycleStopping = false;
+        _etwPauseStopUnconfirmed = false;
         var writeThrottle = new ProcessWriteThrottle(MaxPendingProcessWriteBatches);
         await using var eventBuffer = new AgentLiveEventBuffer(
             _writer,
@@ -430,15 +566,20 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         sysmonStore.EventsAdded += (_, e) => PersistEventsWhenEnabled("Sysmon", e.Events);
         etwStore.EventsAdded += (_, e) => PersistEventsWhenEnabled("ETW", e.Events);
 
+        var cancellationRequested = false;
+        var finalEtwStopConfirmed = true;
         try
         {
             SetHealth(CaptureHealth.Healthy, "Live capture is starting.");
             processTracker.StartRealtimeTracking();
             await processTracker.RefreshAsync(context.CancellationToken).ConfigureAwait(false);
             eventCollector.Start();
-            if (IsSourceEnabled("ETW", liveOptions.CollectEtwEvents))
+            lock (_etwControlLock)
             {
-                configurableEtw.Start();
+                if (IsSourceEnabled("ETW", liveOptions.CollectEtwEvents))
+                {
+                    configurableEtw.Start();
+                }
             }
 
             PublishSourceHealth(context, liveOptions, configurableEtw, eventCollector, writeThrottle, eventBuffer);
@@ -455,8 +596,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
             SetHealth(CaptureHealth.Idle, "Live capture stopped.");
-            ClearActiveCapture(context.Request.JobId);
-            throw;
+            cancellationRequested = true;
         }
         catch (Exception ex)
         {
@@ -470,7 +610,14 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             processTracker.ProcessChangesDetected -= OnProcessChangesDetected;
             processTracker.ExternalProcessObserved -= OnExternalProcessObserved;
             eventCollector.Stop();
-            configurableEtw.Stop();
+            lock (_etwControlLock)
+            {
+                lock (_activeCaptureLock)
+                {
+                    _etwLifecycleStopping = true;
+                }
+                finalEtwStopConfirmed = configurableEtw.Stop();
+            }
             processTracker.StopRealtimeTracking();
         }
 
@@ -484,29 +631,49 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                 BuildDrainProgressMessage(eventBuffer.GetSnapshot()),
                 CancellationToken.None).ConfigureAwait(false);
             await Task.WhenAll(
-                    eventBuffer.CompleteAndDrainAsync(context.CancellationToken).AsTask(),
-                    processWrites.CompleteAndDrainAsync(context.CancellationToken))
+                    // Collection cancellation stops new observations above.  The durable writer must
+                    // still drain batches it already accepted, including a CancelJob terminal path.
+                    eventBuffer.CompleteAndDrainAsync(CancellationToken.None).AsTask(),
+                    processWrites.CompleteAndDrainAsync(CancellationToken.None))
                 .ConfigureAwait(false);
             var transitionUtc = DateTime.UtcNow;
             var terminalStatuses = AgentLiveCaptureHealthTracker.ProjectTerminalStatuses(
                 BuildSourceHealth(liveOptions, configurableEtw, eventCollector, Volatile.Read(ref _etwStoppedByUser) != 0),
                 GetEnabledSources(liveOptions).ToHashSet(StringComparer.OrdinalIgnoreCase),
                 transitionUtc);
-            var drainedSourceReports = BuildSourceReports(terminalStatuses, transitionUtc, isTerminal: true);
+            var drainedSourceReports = BuildSourceReports(terminalStatuses, transitionUtc, isTerminal: true)
+                .Select(source => !finalEtwStopConfirmed && source.Source == "ETW"
+                    ? source with
+                    {
+                        Status = "Unconfirmed",
+                        Detail = "ETW stop was not confirmed; its session may still be active.",
+                        Error = configurableEtw.StatusMessage ?? "ETW stop was not confirmed."
+                    }
+                    : source)
+                .ToArray();
             SetHealth(
-                CaptureHealth.Idle,
-                "Live capture stopped; accepted live event buffer has been loaded to SQLite.",
+                finalEtwStopConfirmed ? CaptureHealth.Idle : CaptureHealth.Degraded,
+                finalEtwStopConfirmed
+                    ? "Live capture stopped; accepted live event buffer has been loaded to SQLite."
+                    : "Live event writes drained, but ETW stop was not confirmed; its session may still be active.",
                 drainedSourceReports,
-                isTerminal: true);
+                isTerminal: finalEtwStopConfirmed);
             await context.ReportProgressAsync(
                 Interlocked.Read(ref _eventsReceived),
                 -1,
-                "Live capture stopped; SQLite load complete.",
+                finalEtwStopConfirmed
+                    ? "Live capture stopped; SQLite load complete."
+                    : "SQLite load complete; ETW stop was not confirmed and its session may still be active.",
                 CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
             ClearActiveCapture(context.Request.JobId);
+        }
+
+        if (cancellationRequested)
+        {
+            throw new OperationCanceledException(context.CancellationToken);
         }
 
         void OnProcessesUpdated(object? sender, ProcessUpdateEventArgs e)
@@ -518,7 +685,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
 
             if (e.IsFullSnapshot)
             {
-                PersistProcesses(
+                PersistProcessesSafely(
                     e.AllProcesses,
                     "AgentLiveCaptureProcessRefresh",
                     liveOptions,
@@ -545,7 +712,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             var changed = e.NewProcesses
                 .Concat(e.ExitedProcesses)
                 .ToList();
-            PersistProcesses(
+            PersistProcessesSafely(
                 changed,
                 e.Source,
                 liveOptions,
@@ -567,7 +734,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                 return;
             }
 
-            PersistProcesses(
+            PersistProcessesSafely(
                 [e.Process],
                 e.Source,
                 liveOptions,
@@ -582,13 +749,47 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
 
         void OnProcessWriteFailed(IReadOnlyList<ProcessRecord> records, Exception ex)
         {
-            Interlocked.Add(ref _processRecordsDropped, records.Count);
+            RecordProcessWriteFailure(records.Count, "Runtime", ex);
+        }
+
+        void RecordProcessWriteFailure(int recordCount, string healthSource, Exception ex)
+        {
+            Interlocked.Add(ref _processRecordsDropped, recordCount);
             Interlocked.Increment(ref _processBatchesDropped);
             Interlocked.Increment(ref _processWriteFailures);
-            AddSourceRecordsDropped("Runtime", records.Count);
-            AddSourceWriteFailure("Runtime");
+            AddSourceRecordsDropped(healthSource, recordCount);
+            AddSourceWriteFailure(healthSource);
             SetHealth(CaptureHealth.Degraded, $"Live process staging is degraded: {ex.Message}");
             _log.WriteLine($"[{DateTimeOffset.Now:O}] Live process staging failed: {ex.Message}");
+        }
+
+        void PersistProcessesSafely(
+            IReadOnlyCollection<ProcessInfo> processes,
+            string source,
+            LiveCaptureOptions captureOptions,
+            AgentJobContext jobContext,
+            ProcessSnapshotState snapshotState,
+            bool isFullSnapshot,
+            LiveProcessWriteCoordinator writes,
+            CancellationToken cancellationToken,
+            ProcessLifecycleProducer producer = ProcessLifecycleProducer.Runtime,
+            ProcessObservationKind? observationKind = null)
+        {
+            try
+            {
+                PersistProcesses(processes, source, captureOptions, jobContext, snapshotState, isFullSnapshot,
+                    writes, cancellationToken, producer, observationKind);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                var healthSource = observationKind is ProcessObservationKind.SysmonProcessCreate or ProcessObservationKind.SysmonProcessTerminate
+                    ? "Sysmon"
+                    : producer == ProcessLifecycleProducer.Etw ? "ETW" : "Runtime";
+                RecordProcessWriteFailure(processes.Count, healthSource, ex);
+            }
         }
 
         void OnProcessWriteCompleted(IReadOnlyList<ProcessRecord> records, bool isFullSnapshot)
@@ -632,7 +833,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                                 : ProcessStatus.Running
                         })
                         .ToList();
-                    PersistProcesses(
+                    PersistProcessesSafely(
                         lifecycleProcesses,
                         "EtwProcessLifecycle",
                         liveOptions,
@@ -918,7 +1119,9 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             RawProvider = eventMetadata.Provider,
             RawLogName = eventMetadata.LogName,
             RawRecordId = eventMetadata.RecordId,
-            CorrelationMethod = string.IsNullOrWhiteSpace(processEvent.ProcessGuid) ? "PidAndTime" : "ProcessGuid"
+            CorrelationMethod = string.IsNullOrWhiteSpace(processEvent.ProcessKey)
+                ? "Unresolved"
+                : string.IsNullOrWhiteSpace(processEvent.ProcessGuid) ? "PidAndTime" : "ProcessGuid"
         };
     }
 
@@ -1032,12 +1235,14 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
     {
         var statuses = new List<EventSourceHealthSnapshot>
         {
-            CreateEtwHealth(options, configurableEtw, etwStoppedByUser)
+            CreateEtwHealth(options, configurableEtw, etwStoppedByUser, Volatile.Read(ref _etwStartedByUser) != 0,
+                Volatile.Read(ref _etwStartFailure))
         };
         statuses.AddRange(eventCollector.GetSourceHealthSnapshots());
         var stoppedSources = GetStoppedSources();
         return statuses
-            .Select(status => stoppedSources.Contains(status.Source)
+            .Select(status => stoppedSources.Contains(status.Source) &&
+                !(status.Source == "ETW" && Volatile.Read(ref _etwStartFailure) != null)
                 ? status with
                 {
                     Status = "Disabled",
@@ -1064,9 +1269,13 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
     private static EventSourceHealthSnapshot CreateEtwHealth(
         LiveCaptureOptions options,
         ConfigurableEtwService configurableEtw,
-        bool etwStoppedByUser)
+        bool etwStoppedByUser,
+        bool etwStartedByUser,
+        string? startFailure = null)
     {
-        if (!options.CollectEtwEvents || etwStoppedByUser)
+        if (!string.IsNullOrWhiteSpace(startFailure))
+            return CreateFailedEtwStartHealth(startFailure);
+        if ((!options.CollectEtwEvents && !etwStartedByUser) || etwStoppedByUser)
         {
             return new EventSourceHealthSnapshot(
                 "ETW",
@@ -1081,7 +1290,8 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         }
 
         var status = configurableEtw.StatusMessage ?? string.Empty;
-        var degraded = status.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+        var degraded = !configurableEtw.HasActiveProviders ||
+                       status.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
                        status.Contains("error", StringComparison.OrdinalIgnoreCase);
         return new EventSourceHealthSnapshot(
             "ETW",
@@ -1093,6 +1303,9 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             degraded ? status : string.Empty);
     }
 
+    internal static EventSourceHealthSnapshot CreateFailedEtwStartHealth(string failure) =>
+        new("ETW", "Degraded", failure, IsEnabled: true, IsActive: false, DateTime.UtcNow, failure);
+
     private static bool IsEnabledSourceDegraded(EventSourceHealthSnapshot status)
     {
         return status.IsEnabled &&
@@ -1101,7 +1314,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
 
     private bool IsSourceEnabled(string source, bool configuredEnabled)
     {
-        if (!configuredEnabled)
+        if (!configuredEnabled && !(source == "ETW" && Volatile.Read(ref _etwStartedByUser) != 0))
         {
             return false;
         }

@@ -45,6 +45,7 @@ public partial class ExplorerNodeViewModel : ViewModelBase
     public bool IsPlaceholder => Scope.Kind == ExplorerScopeKind.Placeholder;
 
     public bool CanSelectScope => !IsPlaceholder && Scope.Kind != ExplorerScopeKind.Branch;
+    public bool ShowGreenButton => CanSelectScope && !Scope.StableId.StartsWith("root:", StringComparison.Ordinal);
 
     public bool IsGreenIncludedDirectly
     {

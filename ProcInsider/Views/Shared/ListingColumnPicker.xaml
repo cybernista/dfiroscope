@@ -1,0 +1,22 @@
+<UserControl x:Class="ProcInsider.Views.Shared.ListingColumnPicker"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="clr-namespace:ProcInsider.Views.Shared">
+ <Button Content="Fields" Click="OpenColumns" Padding="8,4"
+         AutomationProperties.AutomationId="ListingColumnPicker"
+         ToolTip="Choose visible columns. Filters and sorting still apply to hidden columns.">
+  <Button.ContextMenu>
+   <ContextMenu x:Name="ColumnMenu">
+    <ContextMenu.ItemContainerStyle>
+     <Style TargetType="MenuItem">
+      <Setter Property="Header" Value="{Binding Column.Header}"/>
+      <Setter Property="IsCheckable" Value="True"/>
+      <Setter Property="StaysOpenOnClick" Value="True"/>
+      <Setter Property="IsChecked" Value="{Binding Choice.IsVisible, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+      <Setter Property="Visibility" Value="{Binding Column.(local:ListingColumnPicker.AvailableVisibility)}"/>
+     </Style>
+    </ContextMenu.ItemContainerStyle>
+   </ContextMenu>
+  </Button.ContextMenu>
+ </Button>
+</UserControl>

@@ -23,12 +23,13 @@ public sealed class SearchQueryService : ISearchQueryService
         _projectionService = projectionService ?? throw new ArgumentNullException(nameof(projectionService));
     }
 
-    public Task<IReadOnlyList<TelemetrySearchResult>> SearchAsync(
+    public async Task<IReadOnlyList<TelemetrySearchResult>> SearchAsync(
         TelemetrySearchQuery query,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
-        return Task.Run<IReadOnlyList<TelemetrySearchResult>>(
+        using var readScope = _projectionService.BeginReadScope();
+        return await Task.Run<IReadOnlyList<TelemetrySearchResult>>(
             () =>
             {
                 cancellationToken.ThrowIfCancellationRequested();

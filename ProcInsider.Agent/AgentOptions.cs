@@ -41,6 +41,9 @@ internal sealed record AgentOptions
 
     public bool ForegroundMemoryAcquisitionSmoke { get; init; }
 
+    /// <summary>Runs the exact-host five-source validation against a disposable, Agent-only release catalog.</summary>
+    public bool ForegroundFiveSourceValidationSmoke { get; init; }
+
     public bool StartCaptureOnLaunch { get; init; }
 
     /// <summary>
@@ -102,6 +105,12 @@ internal sealed record AgentOptions
             if (IsOption(arg, "--foreground-memory-acquisition-smoke"))
             {
                 options = options with { ForegroundMemoryAcquisitionSmoke = true };
+                continue;
+            }
+
+            if (IsOption(arg, "--foreground-five-source-validation-smoke"))
+            {
+                options = options with { ForegroundFiveSourceValidationSmoke = true };
                 continue;
             }
 
@@ -492,6 +501,7 @@ internal sealed record AgentOptions
              options.IpcStressTest ||
              options.ForegroundEvidenceActionSmoke ||
              options.ForegroundMemoryAcquisitionSmoke ||
+             options.ForegroundFiveSourceValidationSmoke ||
              options.CaptureSealed ||
              options.PreparedPairingGeneration.HasValue))
         {
@@ -514,6 +524,7 @@ internal sealed record AgentOptions
         if (options.ForegroundMemoryAcquisitionSmoke &&
             (!options.Foreground ||
              options.ForegroundEvidenceActionSmoke ||
+             options.ForegroundFiveSourceValidationSmoke ||
              options.SelfTest ||
              options.CheckIpc ||
              options.IpcStressTest ||
@@ -524,12 +535,27 @@ internal sealed record AgentOptions
                 "--foreground-memory-acquisition-smoke requires foreground mode and an explicit live database directly under a non-reparse ProcInsiderTest-* disposable child of the OS temporary directory; it cannot be combined with other smoke, test, IPC, or sealed modes.");
         }
 
+        if (options.ForegroundFiveSourceValidationSmoke &&
+            (!options.Foreground ||
+             options.ForegroundEvidenceActionSmoke ||
+             options.ForegroundMemoryAcquisitionSmoke ||
+             options.SelfTest ||
+             options.CheckIpc ||
+             options.IpcStressTest ||
+             options.CaptureSealed ||
+             !IsFiveSourceValidationDatabase(options.DatabasePath)))
+        {
+            throw new ArgumentException(
+                "--foreground-five-source-validation-smoke requires foreground mode and an explicit live database directly under a non-reparse issue-675-five-source-* child of C:\\DFIRoscope\\Results; it cannot be combined with other smoke, test, IPC, or sealed modes.");
+        }
+
         if (options.PreparedPairingGeneration.HasValue &&
             (!options.Foreground ||
              options.SelfTest ||
              options.CheckIpc ||
              options.IpcStressTest ||
              options.ForegroundMemoryAcquisitionSmoke ||
+             options.ForegroundFiveSourceValidationSmoke ||
              options.CaptureSealed ||
              string.IsNullOrWhiteSpace(options.DatabasePath)))
         {
@@ -684,6 +710,39 @@ internal sealed record AgentOptions
             var parent = Path.GetDirectoryName(
                 sessionRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
             if (!string.Equals(parent, tempRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var sessionDirectory = new DirectoryInfo(sessionRoot);
+            return sessionDirectory.Exists &&
+                   (sessionDirectory.Attributes & FileAttributes.ReparsePoint) == 0;
+        }
+        catch (Exception ex) when (ex is
+            ArgumentException or
+            NotSupportedException or
+            PathTooLongException or
+            IOException or
+            UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsFiveSourceValidationDatabase(string? databasePath)
+    {
+        if (string.IsNullOrWhiteSpace(databasePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var sessionRoot = Path.GetDirectoryName(Path.GetFullPath(databasePath));
+            var expectedParent = @"C:\DFIRoscope\Results";
+            if (string.IsNullOrWhiteSpace(sessionRoot) ||
+                !Path.GetFileName(sessionRoot).StartsWith("issue-675-five-source-", StringComparison.Ordinal) ||
+                !string.Equals(Path.GetDirectoryName(sessionRoot), expectedParent, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }

@@ -23,7 +23,8 @@ public partial class HostMonitoringConfigurationViewModel : ViewModelBase
         IEnumerable<ConfigProfileDefinition> securityMonitoringProfiles,
         IEnumerable<ConfigProfileDefinition> powerShellAuditingProfiles,
         IEnumerable<ConfigProfileDefinition> eventLogProfiles,
-        IFeatureCatalog? catalog = null)
+        IFeatureCatalog? catalog = null,
+        bool preferWindowsSecurityConfiguration = true)
     {
         AddProfiles(EtwProfiles, etwProfiles);
         AddProfiles(SysmonProfiles, sysmonProfiles);
@@ -32,7 +33,7 @@ public partial class HostMonitoringConfigurationViewModel : ViewModelBase
         AddProfiles(EventLogProfiles, eventLogProfiles);
         if (catalog != null)
         {
-            ApplyFeaturePublication(catalog);
+            ApplyFeaturePublication(catalog, preferWindowsSecurityConfiguration);
         }
     }
 
@@ -63,10 +64,11 @@ public partial class HostMonitoringConfigurationViewModel : ViewModelBase
     public bool HasPublishedConfiguration =>
         IsLegacyConfigurationPublished || IsWindowsSecurityConfigurationPublished;
 
-    public void ApplyFeaturePublication(IFeatureCatalog catalog)
+    public void ApplyFeaturePublication(IFeatureCatalog catalog, bool preferWindowsSecurityConfiguration = true)
     {
         ArgumentNullException.ThrowIfNull(catalog);
-        IsWindowsSecurityConfigurationPublished = catalog.IsPublished(FeatureIds.WindowsSecurityEvents);
+        IsWindowsSecurityConfigurationPublished =
+            preferWindowsSecurityConfiguration && catalog.IsPublished(FeatureIds.WindowsSecurityEvents);
         IsLegacyConfigurationPublished =
             catalog.IsPublished(FeatureIds.SecurityMonitoringConfiguration) &&
             !IsWindowsSecurityConfigurationPublished;

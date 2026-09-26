@@ -1,0 +1,28 @@
+<UserControl x:Class="ProcInsider.Features.InvestigationWorkspaces.WorkspaceShellView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="clr-namespace:ProcInsider.Features.InvestigationWorkspaces"
+ xmlns:presentation="clr-namespace:ProcInsider.Views.Presentation">
+ <UserControl.Resources>
+  <DataTemplate x:Key="ProcessesTemplate"><presentation:ProcessInvestigationView DataContext="{Binding Presentation}"/></DataTemplate>
+  <DataTemplate x:Key="EventsTemplate"><local:EventsWorkspaceView/></DataTemplate>
+  <BooleanToVisibilityConverter x:Key="EventsVisibility"/>
+ </UserControl.Resources>
+ <Grid>
+  <Grid.ColumnDefinitions><ColumnDefinition Width="270" MinWidth="220"/><ColumnDefinition Width="6"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+  <local:ExplorerSectionsView DataContext="{Binding ExplorerSections}"/>
+  <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch"/>
+  <DockPanel Grid.Column="2">
+   <TabControl ItemsSource="{Binding Instances}" SelectedItem="{Binding ActiveInstance, Mode=OneWay}" x:Name="WorkspaceTabs"
+    AutomationProperties.AutomationId="InvestigationWorkspaces">
+    <TabControl.ItemTemplate><DataTemplate>
+     <StackPanel Orientation="Horizontal" ToolTip="{Binding ToolTip}">
+      <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+      <CheckBox Content="Pin" IsChecked="{Binding IsPinned, Mode=TwoWay}" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip="Protect this investigation from automatic navigation"/>
+      <Button Content="×" Tag="CloseWorkspace" Margin="8,0,0,0" Padding="4,0" ToolTip="Close workspace"/>
+     </StackPanel>
+    </DataTemplate></TabControl.ItemTemplate>
+   </TabControl>
+  </DockPanel>
+ </Grid>
+</UserControl>

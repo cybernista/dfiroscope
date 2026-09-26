@@ -430,6 +430,7 @@ public static class InfrastructureCommandPolicy
         Add(AgentCommandKind.StopLiveCaptureSource, InfrastructureCommandClass.CaptureLifecycle);
         Add(AgentCommandKind.StartLiveCaptureSource, InfrastructureCommandClass.CaptureLifecycle);
         Add(AgentCommandKind.QueueMemoryAcquisition, InfrastructureCommandClass.JobSubmission);
+        AddUnsupported(AgentCommandKind.RunTelemetryAuditTest);
 
         var expected = Enum.GetValues<AgentCommandKind>().Where(kind => kind != AgentCommandKind.Unknown).ToArray();
         if (expected.Except(values.Keys).Any() || values.Keys.Except(expected).Any())

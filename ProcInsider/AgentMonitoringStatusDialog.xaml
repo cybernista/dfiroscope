@@ -121,7 +121,7 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,12,0,0">
-            <TextBlock Text="To change settings, use Security Monitoring &#x2192; Change config of my computer."
+            <TextBlock Text="To change settings, use Monitoring configuration &#x2192; Set monitoring through Agent."
                        TextWrapping="Wrap" MaxWidth="480" VerticalAlignment="Center" Margin="0,0,12,0"/>
             <Button Content="Close"
                     MinWidth="76"

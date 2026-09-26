@@ -477,7 +477,8 @@ public sealed class ViewerNavigationCoordinator : IDisposable
 
     public async Task<ViewerNavigationResult> NavigateToProcessResultAsync(
         TelemetrySearchResult result,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool retainFilters = false)
     {
         ArgumentNullException.ThrowIfNull(result);
         if (TryCreateDisposedResult(out var disposed))
@@ -530,6 +531,9 @@ public sealed class ViewerNavigationCoordinator : IDisposable
 
             if (context == null || string.IsNullOrWhiteSpace(processKey))
             {
+                if (retainFilters)
+                    return CompleteProcessResult(operation, ViewerNavigationOutcome.NotFound,
+                        "The exact process is unavailable in the current filtered listing; no replacement was selected.");
                 var legacy = _runtime.NavigateLegacyProcessResult(result);
                 return CompleteLegacy(operation, legacy);
             }
@@ -557,7 +561,7 @@ public sealed class ViewerNavigationCoordinator : IDisposable
             }
 
             var clearedFilters = false;
-            if (rowIndex < 0)
+            if (rowIndex < 0 && !retainFilters)
             {
                 context = await _runtime.ClearFiltersAndRebindProcessListingAsync(operation.Token);
                 if (context == null || !IsOperationCurrent(operation, context))
@@ -581,7 +585,7 @@ public sealed class ViewerNavigationCoordinator : IDisposable
                 return CompleteProcessResult(
                     operation,
                     ViewerNavigationOutcome.NotFound,
-                    $"Could not locate '{result.ProcessName}' (PID {result.ProcessId}) in the process listing.");
+                    $"The exact process '{result.ProcessName}' is missing or excluded by the current scope and column filters; no replacement was selected.");
             }
 
             await context.Collection.EnsureRangeAsync(rowIndex, 1, operation.Token);
@@ -591,7 +595,9 @@ public sealed class ViewerNavigationCoordinator : IDisposable
             }
 
             var row = context.Collection.GetLoadedItem(rowIndex);
-            if (row == null)
+            if (row == null || !string.Equals(row.ProcessKey, processKey, StringComparison.Ordinal) ||
+                (!string.IsNullOrWhiteSpace(result.ProcessEntityId) &&
+                 !string.Equals(row.ProcessInfo.ProcessEntityId, result.ProcessEntityId, StringComparison.Ordinal)))
             {
                 return CompleteProcessResult(
                     operation,

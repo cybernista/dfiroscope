@@ -106,8 +106,11 @@ public partial class ProcessStatisticsViewModel : ViewModelBase
     [RelayCommand]
     public async Task RefreshStatisticsAsync()
     {
+        using var readScope = _projectionService.BeginReadScope();
+        var version = ++_statisticsRefreshVersion;
         var rows = await Task.Run(() => PrepareSnapshotRows(
             _projectionService.GetLatestProcessStatistics(MaxVisibleStatistics)));
+        if (version != _statisticsRefreshVersion) return;
         ApplyPreparedSnapshot(rows, refreshTrend: false);
         await RefreshSelectedTrendAsync();
     }
@@ -259,6 +262,7 @@ public partial class ProcessStatisticsViewModel : ViewModelBase
 
         try
         {
+            using var readScope = _projectionService.BeginReadScope();
             var snapshot = await Task.Run(() => BuildTrendSnapshot(processKey, processLabel));
             if (version != _trendRefreshVersion)
             {
@@ -289,6 +293,14 @@ public partial class ProcessStatisticsViewModel : ViewModelBase
                 IsTrendLoading = false;
             }
         }
+    }
+
+    private int _statisticsRefreshVersion;
+    internal void CancelPendingRequests()
+    {
+        ++_statisticsRefreshVersion;
+        ++_trendRefreshVersion;
+        IsTrendLoading = false;
     }
 
     private TrendSnapshot BuildTrendSnapshot(string processKey, string processLabel)

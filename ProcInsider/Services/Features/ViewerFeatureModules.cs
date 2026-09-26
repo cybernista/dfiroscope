@@ -8,6 +8,8 @@ using ProcInsider.Services.AgentIpc;
 using ProcInsider.Services.Ai;
 using ProcInsider.ViewModels;
 
+using ProcInsider.Services.Presentation;
+
 namespace ProcInsider.Services.Features;
 
 /// <summary>
@@ -122,12 +124,14 @@ public sealed class WindowsSecurityEventsFeatureModule : EventSourceFeatureModul
     public WindowsSecurityEventsFeatureModule(
         TelemetryProjectionService projectionService,
         InspectorPaneViewModel inspectorPaneViewModel,
-        Action<(string ProcessKey, int ProcessId, string ProcessName)> backfill)
+        Action<(string ProcessKey, int ProcessId, string ProcessName)> backfill,
+        WindowsSecurityPresentationServices? sharedServices = null)
         : base(projectionService, inspectorPaneViewModel, "Security", backfill)
     {
-        ConfigProfileService = new ConfigProfileService();
-        SecurityMonitoringService = new SecurityMonitoringService(ConfigProfileService);
-        DetailsWorkflow = new ProcInsider.Features.WindowsSecurityDetails.SecurityDetailsWorkflow(ViewModel);
+        sharedServices ??= new WindowsSecurityPresentationServices();
+        ConfigProfileService = sharedServices.ConfigProfileService;
+        SecurityMonitoringService = sharedServices.SecurityMonitoringService;
+        DetailsWorkflow = new ProcInsider.Features.WindowsSecurityDetails.SecurityDetailsWorkflow(ViewModel, sharedServices.Profiles, sharedServices.DetailsStore);
     }
 
     public ConfigProfileService ConfigProfileService { get; }
@@ -177,17 +181,21 @@ public sealed class SysmonEventsFeatureModule : EventSourceFeatureModule
 public sealed class EventTelemetryFeatureModule : IDisposable
 {
     private bool _disposed;
+    private readonly ProcInsider.Features.NativeEventProfiles.NativeEventProfileStore _profiles;
 
     public EventTelemetryFeatureModule(
         TelemetryProjectionService projectionService,
         InspectorPaneViewModel inspectorPaneViewModel,
         Action<(string ProcessKey, int ProcessId, string ProcessName)> backfillPowerShell,
         Action<(string ProcessKey, int ProcessId, string ProcessName)> backfillOtherWindows,
-        Action<(string ProcessKey, int ProcessId, string ProcessName)> backfillSysmon)
+        Action<(string ProcessKey, int ProcessId, string ProcessName)> backfillSysmon,
+        EventTelemetryPresentationServices? sharedServices = null)
     {
-        ConfigProfileService = new ConfigProfileService();
-        PowerShellAuditingService = new PowerShellAuditingService(ConfigProfileService);
-        SysmonService = new SysmonService(ConfigProfileService);
+        sharedServices ??= new EventTelemetryPresentationServices();
+        ConfigProfileService = sharedServices.ConfigProfileService;
+        PowerShellAuditingService = sharedServices.PowerShellAuditingService;
+        SysmonService = sharedServices.SysmonService;
+        _profiles = sharedServices.Profiles;
 
         RuntimeEventsModule = new RuntimeEventsFeatureModule(projectionService, inspectorPaneViewModel);
         EtwEventsModule = new EtwEventsFeatureModule(projectionService, inspectorPaneViewModel);
@@ -203,6 +211,9 @@ public sealed class EventTelemetryFeatureModule : IDisposable
             projectionService,
             inspectorPaneViewModel,
             backfillSysmon);
+        PowerShellEventsModule.ViewModel.ConfigureNativeProfiles(_profiles);
+        SysmonEventsModule.ViewModel.ConfigureNativeProfiles(_profiles);
+        _profiles.Changed += ProfilesChanged;
         SystemActivityViewModel = new SystemActivityViewModel(projectionService, inspectorPaneViewModel);
     }
 
@@ -220,6 +231,12 @@ public sealed class EventTelemetryFeatureModule : IDisposable
     public EventsViewModel OtherWindowsEventsViewModel => WindowsOtherEventsModule.ViewModel;
     public EventsViewModel SysmonEventsViewModel => SysmonEventsModule.ViewModel;
     public SystemActivityViewModel SystemActivityViewModel { get; }
+    private void ProfilesChanged(object? sender, EventArgs e)
+    {
+        if (_disposed) return;
+        PowerShellEventsModule.ViewModel.RefreshNativeDetails();
+        SysmonEventsModule.ViewModel.RefreshNativeDetails();
+    }
 
     public void Dispose()
     {
@@ -229,6 +246,7 @@ public sealed class EventTelemetryFeatureModule : IDisposable
         }
 
         _disposed = true;
+        _profiles.Changed -= ProfilesChanged;
         RuntimeEventsModule.Dispose();
         EtwEventsModule.Dispose();
         PowerShellEventsModule.Dispose();
@@ -388,6 +406,7 @@ public sealed class NetworkAndZeekFeatureModule : IDisposable
 public sealed class AiFeatureModule : IDisposable
 {
     private bool _disposed;
+    private readonly bool _ownsService;
 
     public AiFeatureModule(
         InvestigationSessionPaths sessionPaths,
@@ -395,9 +414,11 @@ public sealed class AiFeatureModule : IDisposable
         AnnotationDatabaseService? annotationStore,
         ApplicationCatalogService? applicationCatalog,
         InspectorPaneViewModel inspectorPaneViewModel,
-        FeatureAccessService featureAccess)
+        FeatureAccessService featureAccess,
+        AiInvestigationService? sharedService = null)
     {
-        Service = new AiInvestigationService(sessionPaths.AiSettingsPath, sessionPaths.AiSecretPath);
+        _ownsService = sharedService == null;
+        Service = sharedService ?? new AiInvestigationService(sessionPaths.AiSettingsPath, sessionPaths.AiSecretPath);
         EvidencePackBuilder = new AiEvidencePackBuilder(projectionService, annotationStore, applicationCatalog);
         InvestigationViewModel = new AiInvestigationViewModel(
             Service,
@@ -420,7 +441,7 @@ public sealed class AiFeatureModule : IDisposable
 
     public void SetWorkspace(InvestigationSessionPaths sessionPaths, AnnotationDatabaseService? annotationStore)
     {
-        Service.SetStoragePaths(sessionPaths.AiSettingsPath, sessionPaths.AiSecretPath);
+        if (_ownsService) Service.SetStoragePaths(sessionPaths.AiSettingsPath, sessionPaths.AiSecretPath);
         EvidencePackBuilder.SetAnnotationStore(annotationStore);
         InvestigationViewModel.SetAnnotationStore(annotationStore);
         InvestigationViewModel.ReloadSettings();
