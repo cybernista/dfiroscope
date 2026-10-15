@@ -65,6 +65,9 @@ internal sealed record EventsFilter
     public string? AuditCategoryKey { get; init; }
     public string? AuditSubcategoryKey { get; init; }
     public EventReference? ExactEvent { get; init; }
+    /// <summary>Optional read boundary applied before aggregates and paging; exact-event locators remain exact.</summary>
+    public EvidenceIdentity? ReadScope { get; init; }
+    public bool IncludeCompatibleExecutionRoots { get; init; }
     public IReadOnlyDictionary<EventSort, ColumnFilterCriteria> Columns { get; init; } = new Dictionary<EventSort, ColumnFilterCriteria>();
     public IReadOnlyList<ExtractedEventColumnFilter> ExtractedColumns { get; init; } = [];
     public IEventsTextProjection? TextProjection { get; init; }

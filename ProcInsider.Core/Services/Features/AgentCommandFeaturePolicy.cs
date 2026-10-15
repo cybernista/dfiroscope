@@ -344,6 +344,7 @@ public static class AgentCommandFeaturePolicy
                         features.Add(FeatureIds.EventTelemetry);
                     }
 
+                    if (command.CollectOsNetworkEndpoints) features.Add(FeatureIds.NetworkWorkspace);
                     if (command.CollectSecurityEvents)
                     {
                         features.Add(FeatureIds.WindowsSecurityEvents);
@@ -359,6 +360,10 @@ public static class AgentCommandFeaturePolicy
                     if (string.Equals(source, "Security", StringComparison.OrdinalIgnoreCase))
                     {
                         features.Add(FeatureIds.WindowsSecurityEvents);
+                    }
+                    else if (string.Equals(source, "OS endpoints", StringComparison.OrdinalIgnoreCase))
+                    {
+                        features.Add(FeatureIds.NetworkWorkspace);
                     }
                     else if (IsLegacyEventTelemetrySource(source))
                     {
@@ -519,6 +524,7 @@ public static class AgentCommandFeaturePolicy
                     features.Add(FeatureIds.EventTelemetry);
                 }
 
+                if (command.CollectOsNetworkEndpoints) features.Add(FeatureIds.NetworkWorkspace);
                 if (command.CollectSecurityEvents)
                 {
                     features.Add(FeatureIds.WindowsSecurityEvents);
@@ -574,7 +580,7 @@ public static class AgentCommandFeaturePolicy
         if (configuration.SourceToggles == null ||
             configuration.NetworkCapture == null ||
             configuration.Zeek == null ||
-            configuration.ArtifactCapture == null)
+            configuration.ArtifactCapture == null || configuration.Persistence == null)
         {
             throw new InvalidOperationException(
                 "Capture configuration feature selection is incomplete or malformed.");
@@ -594,6 +600,9 @@ public static class AgentCommandFeaturePolicy
             features.Add(FeatureIds.WindowsSecurityEvents);
         }
 
+        if (configuration.SourceToggles.OsNetworkEndpoints) features.Add(FeatureIds.NetworkWorkspace);
+        if (configuration.Persistence.Enabled) features.Add(FeatureIds.Persistence);
+        if (configuration.CollectPrefetchOnStart) features.Add(FeatureIds.FilesystemArtifacts);
         if (configuration.NetworkCapture.Enabled ||
             configuration.Zeek.Enabled ||
             configuration.Zeek.RunAfterNetworkCapture)
@@ -688,7 +697,7 @@ public static class AgentCommandFeaturePolicy
         var agents = FeatureIds.AgentsAndCapture;
         var rules = new Dictionary<AgentCommandKind, FeatureRule>
         {
-            [AgentCommandKind.StartLiveCapture] = Dynamic(ResolverKind.StartLiveCapture, [agents], [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents]),
+            [AgentCommandKind.StartLiveCapture] = Dynamic(ResolverKind.StartLiveCapture, [agents], [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents, FeatureIds.NetworkWorkspace]),
             [AgentCommandKind.StopLiveCapture] = Static(agents),
             [AgentCommandKind.QueueBackfill] = Static(agents, FeatureIds.EventTelemetry) with
             {
@@ -722,11 +731,11 @@ public static class AgentCommandFeaturePolicy
             [AgentCommandKind.SaveCaptureConfiguration] = Dynamic(
                 ResolverKind.CaptureConfiguration,
                 [agents],
-                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents, FeatureIds.ModulesAndHandles, FeatureIds.DumpsAndPeAnalysis, FeatureIds.NetworkAndZeek]),
+                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents, FeatureIds.NetworkWorkspace, FeatureIds.ModulesAndHandles, FeatureIds.DumpsAndPeAnalysis, FeatureIds.NetworkAndZeek, FeatureIds.Persistence, FeatureIds.FilesystemArtifacts]),
             [AgentCommandKind.CheckCaptureConfiguration] = Dynamic(
                 ResolverKind.CaptureConfiguration,
                 [agents],
-                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents, FeatureIds.ModulesAndHandles, FeatureIds.DumpsAndPeAnalysis, FeatureIds.NetworkAndZeek]),
+                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents, FeatureIds.NetworkWorkspace, FeatureIds.ModulesAndHandles, FeatureIds.DumpsAndPeAnalysis, FeatureIds.NetworkAndZeek, FeatureIds.Persistence, FeatureIds.FilesystemArtifacts]),
             [AgentCommandKind.StartConfiguredCapture] = Static(agents),
             [AgentCommandKind.StopConfiguredCapture] = Static(agents),
             [AgentCommandKind.StartProcessMonitorCapture] = Static(agents, FeatureIds.EventTelemetry),
@@ -737,12 +746,15 @@ public static class AgentCommandFeaturePolicy
             [AgentCommandKind.StopLiveCaptureSource] = Dynamic(
                 ResolverKind.LiveCaptureSource,
                 [agents],
-                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents]),
+                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents, FeatureIds.NetworkWorkspace]),
             [AgentCommandKind.StartLiveCaptureSource] = Dynamic(
                 ResolverKind.LiveCaptureSource,
                 [agents],
-                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents]),
-            [AgentCommandKind.RunTelemetryAuditTest] = Static(agents, FeatureIds.WindowsSecurityEvents)
+                [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents, FeatureIds.NetworkWorkspace]),
+            [AgentCommandKind.RunTelemetryAuditTest] = Static(agents, FeatureIds.WindowsSecurityEvents),
+            [AgentCommandKind.CollectPersistenceNow] = Static(agents, FeatureIds.Persistence),
+            [AgentCommandKind.RebaselinePersistence] = Static(agents, FeatureIds.Persistence),
+            [AgentCommandKind.CollectPrefetch] = Static(agents, FeatureIds.FilesystemArtifacts)
         };
 
         EnsureCoverage(
@@ -758,7 +770,7 @@ public static class AgentCommandFeaturePolicy
         var agents = FeatureIds.AgentsAndCapture;
         var rules = new Dictionary<JobKind, FeatureRule>
         {
-            [JobKind.LiveCapture] = Dynamic(ResolverKind.StartLiveCapture, [agents], [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents]),
+            [JobKind.LiveCapture] = Dynamic(ResolverKind.StartLiveCapture, [agents], [FeatureIds.EventTelemetry, FeatureIds.WindowsSecurityEvents, FeatureIds.NetworkWorkspace]),
             [JobKind.Backfill] = Static(agents, FeatureIds.EventTelemetry),
             [JobKind.Import] = Static(agents),
             [JobKind.ModuleEnrichment] = Dynamic(
@@ -777,6 +789,9 @@ public static class AgentCommandFeaturePolicy
             [JobKind.ArtifactImport] = Static(agents, FeatureIds.FilesystemArtifacts),
             [JobKind.MemoryImageImport] = Static(agents, FeatureIds.SystemMemoryAndVolatility),
             [JobKind.MemoryAcquisition] = Static(agents, FeatureIds.SystemMemoryAndVolatility),
+            [JobKind.PersistenceCapture] = Static(agents, FeatureIds.Persistence),
+            [JobKind.PersistenceCollection] = Static(agents, FeatureIds.Persistence),
+            [JobKind.PrefetchCollection] = Static(agents, FeatureIds.FilesystemArtifacts),
             [JobKind.VolatilityAnalysis] = Static(agents, FeatureIds.SystemMemoryAndVolatility),
             [JobKind.ProcessMonitorCapture] = Static(agents, FeatureIds.EventTelemetry),
             [JobKind.ProcessMonitorImport] = Static(agents, FeatureIds.EventTelemetry),

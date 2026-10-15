@@ -16,10 +16,19 @@ public sealed class ZeekProcessingService
 {
     private static readonly string[] SupportedLogs = ["conn.log", "dns.log", "http.log", "ssl.log", "quic.log", "weird.log"];
     private readonly InvestigationSessionPaths? _sessionPaths;
+    private readonly OwnedAnalysisProcessRunner _processRunner;
+
+    public bool OwnedProcessExitConfirmationFailed => _processRunner.ExitConfirmationFailed;
 
     public ZeekProcessingService(InvestigationSessionPaths? sessionPaths = null)
+        : this(sessionPaths, new OwnedAnalysisProcessRunner())
+    {
+    }
+
+    internal ZeekProcessingService(InvestigationSessionPaths? sessionPaths, OwnedAnalysisProcessRunner processRunner)
     {
         _sessionPaths = sessionPaths;
+        _processRunner = processRunner;
     }
 
     public async Task<ZeekProcessingResult> ProcessCaptureAsync(
@@ -110,7 +119,7 @@ public sealed class ZeekProcessingService
             : SessionPathService.GetDefaultZeekDirectory(captureId, jobId);
     }
 
-    private static async Task<IZeekRunner> ResolveRunnerAsync(
+    private async Task<IZeekRunner> ResolveRunnerAsync(
         ZeekProcessingOptions options,
         ZeekDiagnosticLog diagnosticLog,
         CancellationToken cancellationToken)
@@ -121,7 +130,7 @@ public sealed class ZeekProcessingService
         if (!string.IsNullOrWhiteSpace(nativeZeek))
         {
             diagnosticLog.Write($"Native Zeek candidate selected: {nativeZeek}");
-            return new NativeZeekRunner(nativeZeek);
+            return new NativeZeekRunner(this, nativeZeek);
         }
 
         diagnosticLog.Write("Native Zeek was not found via configured path, PATH, or known Windows executable directories.");
@@ -135,12 +144,12 @@ public sealed class ZeekProcessingService
             if (!string.IsNullOrWhiteSpace(configuredDistro) &&
                 await WslZeekIsAvailableAsync(wsl, configuredDistro, zeekCommand, diagnosticLog, cancellationToken).ConfigureAwait(false))
             {
-                return new WslZeekRunner(wsl, configuredDistro, zeekCommand);
+                return new WslZeekRunner(this, wsl, configuredDistro, zeekCommand);
             }
 
             if (await WslZeekIsAvailableAsync(wsl, string.Empty, zeekCommand, diagnosticLog, cancellationToken).ConfigureAwait(false))
             {
-                return new WslZeekRunner(wsl, string.Empty, zeekCommand);
+                return new WslZeekRunner(this, wsl, string.Empty, zeekCommand);
             }
         }
         else
@@ -151,7 +160,7 @@ public sealed class ZeekProcessingService
         throw new InvalidOperationException($"Zeek was not found. Configure a native Zeek path or a WSL distro and Zeek command in the Network tab, then run Zeek analysis again. {ProductIdentity.DisplayName} does not install Zeek or WSL automatically.");
     }
 
-    private static async Task LogWslInventoryAsync(
+    private async Task LogWslInventoryAsync(
         string wslPath,
         ZeekDiagnosticLog diagnosticLog,
         CancellationToken cancellationToken)
@@ -202,7 +211,7 @@ public sealed class ZeekProcessingService
         }
     }
 
-    private static async Task<bool> WslZeekIsAvailableAsync(
+    private async Task<bool> WslZeekIsAvailableAsync(
         string wslPath,
         string distributionName,
         string zeekCommand,
@@ -486,41 +495,36 @@ public sealed class ZeekProcessingService
         return builder.ToString();
     }
 
-    private static async Task<ProcessRunResult> RunProcessAsync(
+    private async Task<ProcessRunResult> RunProcessAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         string? workingDirectory,
         ZeekDiagnosticLog diagnosticLog,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool remoteProducer = false)
     {
         diagnosticLog.Write($"Running: {fileName} {FormatArguments(arguments)}");
         diagnosticLog.Write($"Working directory: {FirstNonEmpty(workingDirectory, "<default>")}");
-        using var process = new Process
+        var startInfo = new ProcessStartInfo
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                WorkingDirectory = workingDirectory ?? string.Empty,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            }
+            FileName = fileName,
+            WorkingDirectory = workingDirectory ?? string.Empty,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
         };
 
         foreach (var argument in arguments)
         {
-            process.StartInfo.ArgumentList.Add(argument);
+            startInfo.ArgumentList.Add(argument);
         }
 
-        process.Start();
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        var execution = await _processRunner.RunAsync(startInfo, cancellationToken, remoteProducer).ConfigureAwait(false);
         var result = new ProcessRunResult(
-            process.ExitCode,
-            NormalizeProcessOutput(await stdoutTask.ConfigureAwait(false)),
-            NormalizeProcessOutput(await stderrTask.ConfigureAwait(false)));
+            execution.ExitCode,
+            NormalizeProcessOutput(execution.StandardOutput),
+            NormalizeProcessOutput(execution.StandardError));
         diagnosticLog.Write($"Exit code: {result.ExitCode}");
         diagnosticLog.WriteBlock("stdout", result.StandardOutput);
         diagnosticLog.WriteBlock("stderr", result.StandardError);
@@ -590,10 +594,12 @@ public sealed class ZeekProcessingService
 
     private sealed class NativeZeekRunner : IZeekRunner
     {
+        private readonly ZeekProcessingService _owner;
         private readonly string _zeekPath;
 
-        public NativeZeekRunner(string zeekPath)
+        public NativeZeekRunner(ZeekProcessingService owner, string zeekPath)
         {
+            _owner = owner;
             _zeekPath = zeekPath;
         }
 
@@ -605,7 +611,7 @@ public sealed class ZeekProcessingService
             ZeekDiagnosticLog diagnosticLog,
             CancellationToken cancellationToken)
         {
-            var result = await RunProcessAsync(_zeekPath, ["-r", pcapPath], outputDirectory, diagnosticLog, cancellationToken).ConfigureAwait(false);
+            var result = await _owner.RunProcessAsync(_zeekPath, ["-r", pcapPath], outputDirectory, diagnosticLog, cancellationToken).ConfigureAwait(false);
             if (result.ExitCode != 0)
             {
                 throw new InvalidOperationException($"Zeek failed with exit code {result.ExitCode}: {result.StandardError.Trim()}");
@@ -615,12 +621,14 @@ public sealed class ZeekProcessingService
 
     private sealed class WslZeekRunner : IZeekRunner
     {
+        private readonly ZeekProcessingService _owner;
         private readonly string _wslPath;
         private readonly string _distributionName;
         private readonly string _zeekCommand;
 
-        public WslZeekRunner(string wslPath, string distributionName, string zeekCommand)
+        public WslZeekRunner(ZeekProcessingService owner, string wslPath, string distributionName, string zeekCommand)
         {
+            _owner = owner;
             _wslPath = wslPath;
             _distributionName = distributionName.Trim();
             _zeekCommand = FirstNonEmpty(zeekCommand, "zeek");
@@ -636,13 +644,13 @@ public sealed class ZeekProcessingService
             ZeekDiagnosticLog diagnosticLog,
             CancellationToken cancellationToken)
         {
-            var wslPcap = (await RunProcessAsync(
+            var wslPcap = (await _owner.RunProcessAsync(
                 _wslPath,
                 BuildWslCommandArguments(_distributionName, "wslpath", "-a", NormalizeWindowsPathForWslPath(pcapPath)),
                 null,
                 diagnosticLog,
                 cancellationToken).ConfigureAwait(false)).StandardOutput.Trim();
-            var wslOutput = (await RunProcessAsync(
+            var wslOutput = (await _owner.RunProcessAsync(
                 _wslPath,
                 BuildWslCommandArguments(_distributionName, "wslpath", "-a", NormalizeWindowsPathForWslPath(outputDirectory)),
                 null,
@@ -654,12 +662,13 @@ public sealed class ZeekProcessingService
             }
 
             var script = $"cd {ShellQuote(wslOutput)} && {ShellQuote(_zeekCommand)} -r {ShellQuote(wslPcap)}";
-            var result = await RunProcessAsync(
+            var result = await _owner.RunProcessAsync(
                 _wslPath,
                 BuildWslShellArguments(_distributionName, script),
                 null,
                 diagnosticLog,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                remoteProducer: true).ConfigureAwait(false);
             if (result.ExitCode != 0)
             {
                 throw new InvalidOperationException($"WSL Zeek failed with exit code {result.ExitCode}: {result.StandardError.Trim()}");
@@ -785,3 +794,131 @@ public sealed record ZeekProcessingResult(
     string ToolName,
     string DiagnosticLogPath,
     IReadOnlyList<ZeekNetworkRecord> Records);
+
+// Shared by native analysis and one-shot Packet Monitor/Procmon commands. The latch is service-lifetime
+// state: finishing another analysis cannot prove that a prior owned producer stopped.
+internal sealed class OwnedAnalysisProcessRunner
+{
+    private readonly Func<ProcessStartInfo, IOwnedAnalysisProcess> _start;
+    private int _exitConfirmationFailed;
+
+    internal OwnedAnalysisProcessRunner(Func<ProcessStartInfo, IOwnedAnalysisProcess>? start = null)
+    {
+        _start = start ?? (info => new SystemOwnedAnalysisProcess(
+            Process.Start(info) ?? throw new InvalidOperationException("The analysis process could not be started.")));
+    }
+
+    internal bool ExitConfirmationFailed => Volatile.Read(ref _exitConfirmationFailed) != 0;
+
+    internal async Task<OwnedAnalysisProcessResult> RunAsync(
+        ProcessStartInfo startInfo,
+        CancellationToken cancellationToken,
+        bool remoteProducer = false)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var process = _start(startInfo);
+        using var readerCancellation = new CancellationTokenSource();
+        Task<string> stdout = Task.FromResult(string.Empty);
+        Task<string> stderr = Task.FromResult(string.Empty);
+        var exited = false;
+        try
+        {
+            stdout = process.ReadStandardOutputAsync(readerCancellation.Token);
+            stderr = process.ReadStandardErrorAsync(readerCancellation.Token);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            exited = true;
+            var readers = Task.WhenAll(stdout, stderr);
+            await readers.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return new OwnedAnalysisProcessResult(process.ExitCode, stdout.Result, stderr.Result);
+        }
+        catch (Exception original)
+        {
+            var terminationAttempted = !exited;
+            string terminationError = string.Empty;
+            if (!exited)
+            {
+                try { process.Kill(); }
+                catch (Exception ex) { terminationError = $" Termination attempt failed: {ex.Message}"; }
+                try
+                {
+                    using var exitTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    await process.WaitForExitAsync(exitTimeout.Token)
+                        .WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                    exited = true;
+                }
+                catch (Exception ex) { terminationError += $" Exit confirmation failed: {ex.Message}"; }
+            }
+
+            readerCancellation.Cancel();
+            if (!stdout.IsCompleted || !stderr.IsCompleted)
+            {
+                try { process.CloseOutputReaders(); }
+                catch (Exception ex) { terminationError += $" Closing output readers failed: {ex.Message}"; }
+            }
+            var allReaders = Task.WhenAll(stdout, stderr);
+            try { await allReaders.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
+            catch
+            {
+                // Completed faults/cancellation have been observed by the await.
+                // Observe a late fault too; unresolved readers still block completion.
+                if (!allReaders.IsCompleted)
+                {
+                    _ = allReaders.ContinueWith(task => { _ = task.Exception; },
+                        CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
+                }
+            }
+
+            // Killing a Windows WSL launcher gives no proof of the Linux tool's exit.
+            // Any interruption before the launcher's natural exit leaves Linux ownership uncertain.
+            var remoteExitUnconfirmed = remoteProducer && terminationAttempted;
+            if (!exited || !allReaders.IsCompleted || remoteExitUnconfirmed)
+            {
+                Interlocked.Exchange(ref _exitConfirmationFailed, 1);
+                throw new OwnedAnalysisProcessCleanupException(
+                    $"Analysis cleanup failed: owned process exit or output-reader completion could not be confirmed.{terminationError}" +
+                    (remoteExitUnconfirmed ? " Stopping wsl.exe does not confirm the remote Linux analysis process exited." : string.Empty),
+                    original);
+            }
+
+            throw;
+        }
+    }
+
+    private sealed class SystemOwnedAnalysisProcess : IOwnedAnalysisProcess
+    {
+        private readonly Process _process;
+        internal SystemOwnedAnalysisProcess(Process process) => _process = process;
+        public int ExitCode => _process.ExitCode;
+        public Task<string> ReadStandardOutputAsync(CancellationToken token) => _process.StandardOutput.ReadToEndAsync(token);
+        public Task<string> ReadStandardErrorAsync(CancellationToken token) => _process.StandardError.ReadToEndAsync(token);
+        public Task WaitForExitAsync(CancellationToken token) => _process.WaitForExitAsync(token);
+        public void Kill() => _process.Kill(entireProcessTree: true);
+        public void CloseOutputReaders()
+        {
+            try { _process.StandardOutput.Dispose(); }
+            finally { _process.StandardError.Dispose(); }
+        }
+        public void Dispose() => _process.Dispose();
+    }
+}
+
+internal interface IOwnedAnalysisProcess : IDisposable
+{
+    int ExitCode { get; }
+    Task<string> ReadStandardOutputAsync(CancellationToken token);
+    Task<string> ReadStandardErrorAsync(CancellationToken token);
+    Task WaitForExitAsync(CancellationToken token);
+    void Kill();
+    void CloseOutputReaders();
+}
+
+internal sealed record OwnedAnalysisProcessResult(int ExitCode, string StandardOutput, string StandardError);
+
+internal sealed class OwnedAnalysisProcessCleanupException : InvalidOperationException
+{
+    internal OwnedAnalysisProcessCleanupException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}

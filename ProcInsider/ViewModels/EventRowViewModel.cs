@@ -53,6 +53,8 @@ public class EventRowViewModel : ViewModelBase
                 ? $"event:{SequenceId}"
                 : $"{_eventInfo.ProcessKey}:event:{SequenceId}",
             ArtifactId = SequenceId.ToString(),
+            SourceRunId = _eventInfo.SourceRunId,
+            IngestionJobId = _eventInfo.IngestionJobId,
             ProcessKey = _eventInfo.ProcessKey,
             ProcessId = _eventInfo.ProcessId,
             ProcessName = _eventInfo.ProcessName,

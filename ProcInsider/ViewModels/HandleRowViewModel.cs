@@ -42,6 +42,7 @@ public class HandleRowViewModel : ViewModelBase
             ArtifactKind = InspectorArtifactKind.Handle,
             TargetKind = "Handle",
             TargetTable = "Handles",
+            SourceRunId = SourceRunId,
             ArtifactId = $"{HandleValue}|{ObjectType}|{ObjectAddress}|{ObjectName}",
             Header = string.IsNullOrWhiteSpace(ObjectName) || ObjectName == "<not available>"
                 ? $"{ObjectType} Handle"

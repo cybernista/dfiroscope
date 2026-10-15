@@ -26,7 +26,7 @@ public sealed class RuntimeProcessSnapshotEvidenceSourceAdapter
     : EvidenceSourceAdapterBase<RuntimeProcessSnapshotInput>
 {
     public const string Id = "procinsider.runtime-process-snapshot";
-    public const string Version = "2.0.0";
+    public const string Version = "2.0.1";
     public const string ProcessApiPrerequisite = "windows.process-api";
 
     public override EvidenceSourceAdapterDescriptor Descriptor { get; } = new()
@@ -100,14 +100,19 @@ public sealed class RuntimeProcessSnapshotEvidenceSourceAdapter
                 ProcessObservationKind.PeriodicSnapshot,
                 ProcessEntityResolutionStrategy.ExactOrSourceAlias,
                 includeStatistics: true,
-                metadataJson: metadataJson))
+                metadataJson: metadataJson,
+                bindObservationContent: true))
             .ToArray();
-        return await PublishAsync(request, normalized, publisher, progress, cancellationToken)
+        var distinct = normalized.DistinctBy(item => item.Observation.ObservationId).ToArray();
+        return await PublishAsync(request, normalized.Length, normalized.Length - distinct.Length,
+                distinct, publisher, progress, cancellationToken)
             .ConfigureAwait(false);
     }
 
     private async ValueTask<EvidenceSourceExecutionResult> PublishAsync(
         EvidenceSourceAdapterRequest request,
+        int receivedCount,
+        int inputDuplicateCount,
         IReadOnlyList<ProcessObservationAdapterItem> normalized,
         IEvidenceSourcePublisher publisher,
         IProgress<EvidenceSourceProgress>? progress,
@@ -117,7 +122,7 @@ public sealed class RuntimeProcessSnapshotEvidenceSourceAdapter
         var rowsPerProcess = 2 + maxAliases;
         var processBatchSize = Math.Max(1, GetEffectiveBatchRowLimit(Descriptor, publisher) / rowsPerProcess);
         var persisted = 0L;
-        var duplicate = 0L;
+        var duplicate = (long)inputDuplicateCount;
         var diagnostics = new List<EvidenceSourceDiagnostic>();
         var sequence = 0;
 
@@ -156,7 +161,7 @@ public sealed class RuntimeProcessSnapshotEvidenceSourceAdapter
                 {
                     AdapterId = Id,
                     SourceRunId = request.SourceRunId,
-                    ReceivedCount = normalized.Count,
+                    ReceivedCount = receivedCount,
                     NormalizedCount = Math.Min(normalized.Count, sequence * processBatchSize),
                     PersistedCount = persisted,
                     DuplicateCount = duplicate,
@@ -185,7 +190,7 @@ public sealed class RuntimeProcessSnapshotEvidenceSourceAdapter
             return new EvidenceSourceExecutionResult
             {
                 State = persisted > 0 ? EvidenceSourceCompletionState.Partial : EvidenceSourceCompletionState.Failed,
-                ReceivedCount = normalized.Count,
+                ReceivedCount = receivedCount,
                 NormalizedCount = normalized.Count,
                 DuplicateCount = duplicate,
                 PersistedCount = persisted,
@@ -197,7 +202,7 @@ public sealed class RuntimeProcessSnapshotEvidenceSourceAdapter
         return new EvidenceSourceExecutionResult
         {
             State = EvidenceSourceCompletionState.Completed,
-            ReceivedCount = normalized.Count,
+            ReceivedCount = receivedCount,
             NormalizedCount = normalized.Count,
             DuplicateCount = duplicate,
             PersistedCount = persisted,

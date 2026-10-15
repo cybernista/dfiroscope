@@ -20,6 +20,8 @@ internal sealed class AgentNetworkCaptureJobHandler : IAgentJobHandler
         });
     private Guid? _activeJobId;
     private bool _isPaused;
+    private int _unconfirmedProducerTeardown;
+    internal bool HasUnconfirmedProducerTeardown => Volatile.Read(ref _unconfirmedProducerTeardown) != 0 || _captureService.HasUnconfirmedCaptureCleanup;
 
     public AgentNetworkCaptureJobHandler(
         NetworkCaptureService captureService,
@@ -87,6 +89,7 @@ internal sealed class AgentNetworkCaptureJobHandler : IAgentJobHandler
                 segmentIndex,
                 context.CancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             var failed = CreateFailedRecord(context, parameters, requestedUtc, ex.Message);
@@ -98,16 +101,15 @@ internal sealed class AgentNetworkCaptureJobHandler : IAgentJobHandler
         capture.OutputDirectory = session.OutputDirectory;
         capture.EtlFilePath = session.EtlFilePath;
         capture.FilterDescription = BuildFilterDescription(session.LogFilePath);
-        await PublishAsync(context, capture, CancellationToken.None).ConfigureAwait(false);
-        await context.ReportProgressAsync(0, 1, $"Network capture running; ETL segment: {session.EtlFilePath}; diagnostic log: {session.LogFilePath}").ConfigureAwait(false);
-        lock (_controlLock)
-        {
-            _activeJobId = context.Request.JobId;
-            _isPaused = false;
-        }
-
         try
         {
+            lock (_controlLock)
+            {
+                _activeJobId = context.Request.JobId;
+                _isPaused = false;
+            }
+            await PublishAsync(context, capture, CancellationToken.None).ConfigureAwait(false);
+            await context.ReportProgressAsync(0, 1, $"Network capture running; ETL segment: {session.EtlFilePath}; diagnostic log: {session.LogFilePath}").ConfigureAwait(false);
             while (true)
             {
                 var control = await _controlRequests.Reader.ReadAsync(context.CancellationToken).ConfigureAwait(false);
@@ -192,8 +194,9 @@ internal sealed class AgentNetworkCaptureJobHandler : IAgentJobHandler
                 }
             }
         }
-        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+        catch (Exception captureError)
         {
+            // Once start returned, every exit owns stop/finalization, including progress or publication faults.
             try
             {
                 if (session != null)
@@ -204,13 +207,16 @@ internal sealed class AgentNetworkCaptureJobHandler : IAgentJobHandler
                         requestedUtc,
                         session,
                         segmentIndex);
-                    await PublishAsync(context, stopping, CancellationToken.None).ConfigureAwait(false);
-                    await context.ReportProgressAsync(
-                        0,
-                        1,
-                        $"Stopping Packet Monitor capture and finalizing ETL segment: {session.EtlFilePath}",
-                        CancellationToken.None).ConfigureAwait(false);
-
+                    Exception? diagnosticFailure = null;
+                    try
+                    {
+                        await PublishAsync(context, stopping, CancellationToken.None).ConfigureAwait(false);
+                        await context.ReportProgressAsync(
+                            0, 1, $"Stopping Packet Monitor capture and finalizing ETL segment: {session.EtlFilePath}",
+                            CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception error) { diagnosticFailure = error; }
+                    // SQLite/progress failures cannot prevent the owned native producer from stopping.
                     var result = await _captureService.StopCaptureAsync(session, CancellationToken.None).ConfigureAwait(false);
                     var completed = CreateCapturedRecord(
                         context,
@@ -226,21 +232,29 @@ internal sealed class AgentNetworkCaptureJobHandler : IAgentJobHandler
                         1,
                         $"Network capture finalized: {result.FilePath}",
                         CancellationToken.None).ConfigureAwait(false);
+                    if (diagnosticFailure != null) throw new InvalidOperationException(
+                        "Network capture stopped, but its stopping diagnostic could not be persisted.", diagnosticFailure);
                 }
             }
             catch (Exception ex)
             {
+                Interlocked.Exchange(ref _unconfirmedProducerTeardown, 1);
                 var error = WithDiagnosticLog(ex.Message, session?.LogFilePath ?? string.Empty);
                 var failed = CreateFailedRecord(context, parameters, requestedUtc, error);
                 failed.StartedUtc = session?.StartedUtc;
                 failed.OutputDirectory = session?.OutputDirectory ?? parameters.OutputDirectory;
                 failed.EtlFilePath = session?.EtlFilePath ?? string.Empty;
                 failed.FilterDescription = BuildFilterDescription(session?.LogFilePath ?? string.Empty);
-                await PublishAsync(context, failed, CancellationToken.None).ConfigureAwait(false);
-                throw new InvalidOperationException(error, ex);
+                try { await PublishAsync(context, failed, CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception publicationError)
+                {
+                    throw new InvalidOperationException(error, new AggregateException(captureError, ex, publicationError));
+                }
+                throw new InvalidOperationException(error, new AggregateException(captureError, ex));
             }
 
-            return;
+            if (captureError is OperationCanceledException && context.CancellationToken.IsCancellationRequested) return;
+            throw;
         }
         finally
         {

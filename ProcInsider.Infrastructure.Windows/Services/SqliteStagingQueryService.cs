@@ -18,7 +18,7 @@ public sealed record SqliteQueryPlanRecord(
     int NotUsed,
     string Detail);
 
-public sealed class SqliteStagingQueryService
+public sealed partial class SqliteStagingQueryService
 {
     private const int MaxProcessStatisticsRows = 100000;
     private const int MaxProcessDetailArtifactRows = 10000;
@@ -38,7 +38,25 @@ public sealed class SqliteStagingQueryService
     private readonly ReputationAttributionQueryService _reputationAttributionQueries;
     private readonly ProcessRiskProjectionQueryService _processRiskProjectionQueries;
 
+    public ProcInsider.Features.NetworkWorkspace.INetworkEndpointQueryService NetworkEndpointQueries
+    {
+        get
+        {
+            if(CompatibilityAssessment.Context is not (CaptureOpenContext.ViewerLiveSnapshot or CaptureOpenContext.ViewerArchivedReadOnly))
+                throw new InvalidOperationException("OS endpoint browsing requires an assessed Viewer snapshot or read-only archive.");
+            return new NetworkEndpointQueryService(_readContext);
+        }
+    }
     public CaptureCompatibilityAssessment CompatibilityAssessment { get; }
+    public ProcInsider.Features.PersistenceWorkspace.IPersistenceWorkspaceQueryService PersistenceQueries
+    {
+        get
+        {
+            if (CompatibilityAssessment.Context is not (CaptureOpenContext.ViewerLiveSnapshot or CaptureOpenContext.ViewerArchivedReadOnly))
+                throw new InvalidOperationException("Persistence browsing requires an assessed Viewer snapshot or read-only archive.");
+            return new PersistenceWorkspaceQueryService(_readContext);
+        }
+    }
     public IProcessListingQueryService ProcessListingQueries => _processListingQueries;
     public IExplorerQueryService ExplorerQueries => _explorerQueries;
     public ISelectedProcessEvidenceQueryService SelectedProcessEvidenceQueries => _selectedProcessEvidenceQueries;
@@ -151,6 +169,7 @@ public sealed class SqliteStagingQueryService
                     MemoryImageCount = Count(connection, "MemoryImages"),
                     VolatilityPluginRunCount = Count(connection, "VolatilityPluginRuns"),
                     PeAnalysisCount = Count(connection, "PeAnalyses"),
+                    OsNetworkEndpointCount = TableExists(connection,"NetworkEndpointObservations") ? Count(connection,"NetworkEndpointObservations","Kind<>1 AND PollId IN (SELECT PollId FROM NetworkEndpointPolls WHERE Outcome=0)") : 0,
                     NetworkCaptureCount = Count(connection, "NetworkCaptures"),
                     ZeekNetworkArtifactCount = Count(connection, "ZeekNetworkArtifacts"),
                     FilesystemArtifactCount = Count(connection, "Artifacts", "ArtifactType IN ('NtfsMft', 'NtfsUsnJournal', 'NtfsLogFile', 'Prefetch', 'FileMetadata')"),
@@ -442,7 +461,7 @@ public sealed class SqliteStagingQueryService
         {
             "Processes", "ProcessEntities", "ProcessStatistics", "ProcessEvents", "Modules", "Handles", "MemoryDumps",
             "PeAnalyses", "MemoryImages", "VolatilityPluginRuns", "MemoryProcesses", "NetworkCaptures",
-            "ZeekNetworkArtifacts", "RawRecords", "Artifacts"
+            "ZeekNetworkArtifacts", "RawRecords", "Artifacts", "NetworkEndpointObservations", "NetworkEndpointPolls"
         })
         {
             if (!TableExists(connection, table) || !ColumnExists(connection, table, "SourceRunId"))
@@ -568,12 +587,20 @@ public sealed class SqliteStagingQueryService
         string processKey,
         string? source,
         int maxCount,
-        string processEntityId = "")
+        string processEntityId = "",
+        long? fromUtcTicks = null,
+        long? toUtcTicks = null,
+        EvidenceIdentity? permittedScope = null,
+        CancellationToken cancellationToken = default)
         => _selectedProcessEvidenceQueries.GetEventsForProcess(
             processKey,
             source,
             maxCount,
-            processEntityId);
+            processEntityId,
+            fromUtcTicks,
+            toUtcTicks,
+            permittedScope,
+            cancellationToken);
 
     public IReadOnlyList<SystemActivityRecord> GetSystemActivities(SystemActivityQuery query)
     {

@@ -26,6 +26,9 @@ internal sealed class AgentJobHandlerRouter : IAgentJobHandler
     private readonly IFeatureCatalog _featureCatalog;
     private readonly bool _captureSealed;
     private readonly IAgentJobHandler _fallbackHandler;
+    private readonly IAgentJobHandler? _persistenceCaptureHandler;
+    private readonly IAgentJobHandler? _persistenceCollectionHandler;
+    private readonly IAgentJobHandler? _prefetchCollectionHandler;
 
     public AgentJobHandlerRouter(
         IAgentJobHandler liveCaptureHandler,
@@ -45,7 +48,10 @@ internal sealed class AgentJobHandlerRouter : IAgentJobHandler
         EvidenceSourceAdapterRegistry evidenceSourceAdapters,
         IFeatureCatalog featureCatalog,
         bool captureSealed,
-        IAgentJobHandler fallbackHandler)
+        IAgentJobHandler fallbackHandler,
+        IAgentJobHandler? persistenceCaptureHandler = null,
+        IAgentJobHandler? persistenceCollectionHandler = null,
+        IAgentJobHandler? prefetchCollectionHandler = null)
     {
         _liveCaptureHandler = liveCaptureHandler;
         _moduleEnrichmentHandler = moduleEnrichmentHandler;
@@ -65,6 +71,9 @@ internal sealed class AgentJobHandlerRouter : IAgentJobHandler
         _featureCatalog = featureCatalog ?? throw new ArgumentNullException(nameof(featureCatalog));
         _captureSealed = captureSealed;
         _fallbackHandler = fallbackHandler;
+        _persistenceCaptureHandler = persistenceCaptureHandler;
+        _persistenceCollectionHandler = persistenceCollectionHandler;
+        _prefetchCollectionHandler = prefetchCollectionHandler;
     }
 
     public Task ExecuteAsync(AgentJobContext context)
@@ -110,6 +119,9 @@ internal sealed class AgentJobHandlerRouter : IAgentJobHandler
             ProcInsider.Models.Agent.JobKind.ProcessMonitorCapture => _processMonitorCaptureHandler.ExecuteAsync(context),
             ProcInsider.Models.Agent.JobKind.ProcessMonitorImport => _processMonitorImportHandler.ExecuteAsync(context),
             ProcInsider.Models.Agent.JobKind.SqliteBenchmark => _sqliteBenchmarkHandler.ExecuteAsync(context),
+            JobKind.PersistenceCapture => (_persistenceCaptureHandler ?? throw new InvalidOperationException("Persistence lifecycle is unavailable.")).ExecuteAsync(context),
+            JobKind.PersistenceCollection => (_persistenceCollectionHandler ?? throw new InvalidOperationException("Persistence collection is unavailable.")).ExecuteAsync(context),
+            JobKind.PrefetchCollection => (_prefetchCollectionHandler ?? throw new InvalidOperationException("Prefetch collection is unavailable.")).ExecuteAsync(context),
             _ => _fallbackHandler.ExecuteAsync(context)
         };
     }
@@ -171,6 +183,7 @@ internal sealed class AgentJobHandlerRouter : IAgentJobHandler
             JobKind.ProcessDump or
             JobKind.ProcessMonitorCapture or
             JobKind.MemoryAcquisition => CaptureWriteCategory.PrimaryAcquisition,
+            JobKind.PersistenceCapture or JobKind.PersistenceCollection or JobKind.PrefetchCollection => CaptureWriteCategory.PrimaryAcquisition,
             JobKind.Import or
             JobKind.ArtifactImport or
             JobKind.MemoryImageImport or

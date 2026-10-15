@@ -17,11 +17,17 @@ public sealed class NetworkCaptureService
     private const int MaxStartRetryDelayMilliseconds = 2000;
     private readonly InvestigationSessionPaths? _sessionPaths;
     private readonly IPacketMonitorRunner _packetMonitorRunner;
+    private int _unconfirmedCaptureCleanup;
+    public bool HasUnconfirmedCaptureCleanup => Volatile.Read(ref _unconfirmedCaptureCleanup) != 0 ||
+        _packetMonitorRunner is PacketMonitorRunner native && native.ExitConfirmationFailed;
 
     public NetworkCaptureService(InvestigationSessionPaths? sessionPaths = null)
         : this(sessionPaths, new PacketMonitorRunner())
     {
     }
+
+    internal NetworkCaptureService(InvestigationSessionPaths? sessionPaths, OwnedAnalysisProcessRunner processRunner)
+        : this(sessionPaths, new PacketMonitorRunner(processRunner)) { }
 
     public NetworkCaptureService(
         InvestigationSessionPaths? sessionPaths,
@@ -90,26 +96,31 @@ public sealed class NetworkCaptureService
 
             var startArguments = new[] { "start", "--capture", "--pkt-size", "0", "--file-name", etlPath };
             PacketMonitorCommandResult result;
+            var startCommandSubmitted = false;
             try
             {
                 result = await RunPacketMonitorCommandAsync(
                     pktmonPath,
                     startArguments,
                     diagnosticLog,
-                    cancellationToken).ConfigureAwait(false);
+                    CancellationToken.None,
+                    () => startCommandSubmitted = true).ConfigureAwait(false);
 
                 if (result.ExitCode != 0 && IsPacketMonitorAlreadyRunning(result.CombinedOutput))
                 {
-                    await StopStalePacketMonitorSessionAsync(pktmonPath, result.CombinedOutput, diagnosticLog, cancellationToken).ConfigureAwait(false);
+                    await StopStalePacketMonitorSessionAsync(pktmonPath, result.CombinedOutput, diagnosticLog, CancellationToken.None).ConfigureAwait(false);
+                    startCommandSubmitted = false;
                     result = await RunPacketMonitorCommandAsync(
                         pktmonPath,
                         startArguments,
                         diagnosticLog,
-                        cancellationToken).ConfigureAwait(false);
+                        CancellationToken.None,
+                        () => startCommandSubmitted = true).ConfigureAwait(false);
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            catch (Exception ex)
             {
+                if (startCommandSubmitted) await StopFailedCaptureStartAsync(pktmonPath, ex).ConfigureAwait(false);
                 if (IsAccessDeniedFailure(ex.Message))
                 {
                     throw;
@@ -122,7 +133,12 @@ public sealed class NetworkCaptureService
 
             if (result.ExitCode == 0)
             {
-                diagnosticLog.Write($"Packet Monitor capture started on attempt {attempt} of {MaxStartAttempts}.");
+                try { diagnosticLog.Write($"Packet Monitor capture started on attempt {attempt} of {MaxStartAttempts}."); }
+                catch (Exception error)
+                {
+                    await StopFailedCaptureStartAsync(pktmonPath, error).ConfigureAwait(false);
+                    throw;
+                }
                 return new NetworkCaptureSession(pktmonPath, directory, etlPath, pcapPath, diagnosticLog.LogPath, DateTime.UtcNow);
             }
 
@@ -142,20 +158,45 @@ public sealed class NetworkCaptureService
             diagnosticLog.LogPath));
     }
 
+    private async Task StopFailedCaptureStartAsync(string pktmonPath, Exception startupError)
+    {
+        try
+        {
+            // The side-effecting start may have completed without a receipt; stop only the same tool request.
+            // Native runner timeout remains bounded, and diagnostic-file failures cannot skip cleanup.
+            var stop = await _packetMonitorRunner.RunAsync(pktmonPath, ["stop"], CancellationToken.None).ConfigureAwait(false);
+            if (stop.ExitCode != 0 && !IsPacketMonitorNotRunning(stop.CombinedOutput))
+                throw new InvalidOperationException($"pktmon failed-start cleanup was not confirmed: {DescribePktmonFailure(stop)}");
+        }
+        catch (Exception cleanupError)
+        {
+            Interlocked.Exchange(ref _unconfirmedCaptureCleanup, 1);
+            throw new InvalidOperationException("Packet Monitor startup failed and its owned capture cleanup was not confirmed.",
+                new AggregateException(startupError, cleanupError));
+        }
+    }
+
     public async Task<NetworkCaptureResult> StopCaptureAsync(
         NetworkCaptureSession session,
         CancellationToken cancellationToken)
     {
-        var diagnosticLog = NetworkCaptureDiagnosticLog.Open(session.LogFilePath);
-        diagnosticLog.Write("Stopping Packet Monitor capture.");
-
-        var stop = await RunPacketMonitorCommandAsync(session.PktmonPath, new[] { "stop" }, diagnosticLog, cancellationToken).ConfigureAwait(false);
-        if (stop.ExitCode != 0 && !IsPacketMonitorNotRunning(stop.CombinedOutput))
+        // Submit the stop for this owned receipt before diagnostics can fail. The native runner
+        // retains its bounded timeout; job cancellation must not interrupt capture teardown.
+        PacketMonitorCommandResult stop;
+        try
         {
-            throw new InvalidOperationException(WithDiagnosticLog(
-                $"pktmon stop failed: {DescribePktmonFailure(stop)}",
-                diagnosticLog.LogPath));
+            stop = await _packetMonitorRunner.RunAsync(session.PktmonPath, ["stop"], CancellationToken.None).ConfigureAwait(false);
+            if (stop.ExitCode != 0 && !IsPacketMonitorNotRunning(stop.CombinedOutput))
+                throw new InvalidOperationException(WithDiagnosticLog(
+                    $"pktmon stop failed: {DescribePktmonFailure(stop)}", session.LogFilePath));
         }
+        catch
+        {
+            Interlocked.Exchange(ref _unconfirmedCaptureCleanup, 1);
+            throw;
+        }
+        var diagnosticLog = NetworkCaptureDiagnosticLog.Open(session.LogFilePath);
+        diagnosticLog.Write("Packet Monitor stop completed: " + stop.CombinedOutput);
 
         if (!File.Exists(session.EtlFilePath))
         {
@@ -343,12 +384,14 @@ public sealed class NetworkCaptureService
         string pktmonPath,
         IReadOnlyList<string> arguments,
         NetworkCaptureDiagnosticLog diagnosticLog,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action? commandStarting = null)
     {
         diagnosticLog.Write($"Running: {pktmonPath} {FormatArguments(arguments)}");
 
         try
         {
+            commandStarting?.Invoke();
             var result = await _packetMonitorRunner.RunAsync(pktmonPath, arguments, cancellationToken).ConfigureAwait(false);
             diagnosticLog.Write($"Exit code: {result.ExitCode}");
             diagnosticLog.WriteBlock("Output", result.CombinedOutput);
@@ -561,6 +604,10 @@ public sealed class NetworkCaptureService
 
     private sealed class PacketMonitorRunner : IPacketMonitorRunner
     {
+        private readonly OwnedAnalysisProcessRunner _processRunner;
+        internal bool ExitConfirmationFailed => _processRunner.ExitConfirmationFailed;
+        internal PacketMonitorRunner(OwnedAnalysisProcessRunner? processRunner = null) =>
+            _processRunner = processRunner ?? new OwnedAnalysisProcessRunner();
         public string ResolvePktmonPath()
         {
             var systemPath = Environment.GetFolderPath(Environment.SpecialFolder.System);
@@ -595,75 +642,27 @@ public sealed class NetworkCaptureService
             IReadOnlyList<string> arguments,
             CancellationToken cancellationToken)
         {
-            using var process = new Process
+            var startInfo = new ProcessStartInfo
             {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = pktmonPath,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                }
+                FileName = pktmonPath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
             };
-
-            foreach (var argument in arguments)
-            {
-                process.StartInfo.ArgumentList.Add(argument);
-            }
-
-            var output = new StringBuilder();
-            process.OutputDataReceived += (_, e) =>
-            {
-                if (!string.IsNullOrWhiteSpace(e.Data))
-                {
-                    output.AppendLine(e.Data);
-                }
-            };
-            process.ErrorDataReceived += (_, e) =>
-            {
-                if (!string.IsNullOrWhiteSpace(e.Data))
-                {
-                    output.AppendLine(e.Data);
-                }
-            };
-
-            if (!process.Start())
-            {
-                throw new InvalidOperationException("Failed to start pktmon.exe.");
-            }
-
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
+            foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(CommandTimeoutSeconds));
             try
             {
-                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+                var result = await _processRunner.RunAsync(startInfo, timeout.Token).ConfigureAwait(false);
+                return new PacketMonitorCommandResult(result.ExitCode,
+                    (result.StandardOutput + Environment.NewLine + result.StandardError).Trim());
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeout.IsCancellationRequested)
             {
-                TryKill(process);
-                throw new TimeoutException($"pktmon command timed out after {CommandTimeoutSeconds} seconds: {FormatArguments(arguments)}");
+                throw new TimeoutException($"pktmon command timed out after {CommandTimeoutSeconds} seconds; its owned process exit was confirmed: {FormatArguments(arguments)}");
             }
-
-            return new PacketMonitorCommandResult(process.ExitCode, output.ToString().Trim());
-        }
-    }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch
-        {
-            // The timeout error is more useful than a cleanup failure.
         }
     }
 

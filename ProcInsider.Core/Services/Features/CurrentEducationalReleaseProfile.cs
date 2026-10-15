@@ -8,7 +8,7 @@ namespace ProcInsider.Services.Features;
 /// </summary>
 public static class CurrentEducationalReleaseProfile
 {
-    public const string ReleaseId = "workspaces-2026.09-m2-events-v1";
+    public const string ReleaseId = "standalone-2026.10-0.4.0-analyst-v1";
 
     public static IFeatureCatalog Catalog { get; } = BuildCatalog();
 
@@ -30,8 +30,8 @@ public static class CurrentEducationalReleaseProfile
 
     private static IFeatureCatalog BuildCatalog()
     {
-        // The core release exposes process discovery, selected-process investigation,
-        // and local agent/capture orchestration.
+        // The Standalone release exposes process discovery, analyst workspaces,
+        // application comparison, AI assistance, and local agent/capture orchestration.
         // Later educational releases promote lesson-sized groups from ReadyHidden
         // while their code remains compiled and side-effect free until publication.
         var definitions = new[]
@@ -40,8 +40,9 @@ public static class CurrentEducationalReleaseProfile
             Published(FeatureIds.SelectedProcessDetails, FeatureIds.ProcessListing),
             Published(FeatureIds.InvestigationWorkspaces, FeatureIds.ProcessListing, FeatureIds.SelectedProcessDetails),
             Published(FeatureIds.EventsWorkspace, FeatureIds.InvestigationWorkspaces),
+            Published(FeatureIds.NetworkWorkspace, FeatureIds.InvestigationWorkspaces, FeatureIds.EventTelemetry),
             ReadyHidden(FeatureIds.ProcessRiskScore, FeatureIds.ProcessListing, FeatureIds.SelectedProcessDetails),
-            ReadyHidden(FeatureIds.ApplicationComparison, FeatureIds.SelectedProcessDetails),
+            Published(FeatureIds.ApplicationComparison, FeatureIds.SelectedProcessDetails),
             ReadyHidden(FeatureIds.ModulesAndHandles, FeatureIds.SelectedProcessDetails),
             Published(FeatureIds.EventTelemetry, FeatureIds.ProcessListing),
             InDevelopment(FeatureIds.RuntimeEvents, FeatureIds.ProcessListing),
@@ -51,14 +52,15 @@ public static class CurrentEducationalReleaseProfile
             InDevelopment(FeatureIds.WindowsOtherEvents, FeatureIds.ProcessListing),
             InDevelopment(FeatureIds.SysmonEvents, FeatureIds.ProcessListing),
             Published(FeatureIds.AgentsAndCapture),
+            Published(FeatureIds.Persistence, FeatureIds.AgentsAndCapture),
             ReadyHidden(FeatureIds.CommandLine),
             ReadyHidden(FeatureIds.SearchAndSigma, FeatureIds.ProcessListing, FeatureIds.EventTelemetry),
             ReadyHidden(FeatureIds.DumpsAndPeAnalysis, FeatureIds.SelectedProcessDetails),
-            ReadyHidden(FeatureIds.FilesystemArtifacts),
+            Published(FeatureIds.FilesystemArtifacts),
             ReadyHidden(FeatureIds.NetworkAndZeek, FeatureIds.AgentsAndCapture),
             ReadyHidden(FeatureIds.SystemMemoryAndVolatility),
             ReadyHidden(FeatureIds.BaselineComparison, FeatureIds.ProcessListing),
-            ReadyHidden(
+            Published(
                 FeatureIds.AiAssistance,
                 FeatureIds.SelectedProcessDetails,
                 FeatureIds.ApplicationComparison),

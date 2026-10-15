@@ -8,6 +8,7 @@ using ProcInsider.Services;
 using ProcInsider.Services.Features;
 using ProcInsider.Services.Presentation;
 using ProcInsider.Services.Events;
+using ProcInsider.Services.Ai;
 using ProcInsider.ViewModels;
 
 namespace ProcInsider.Features.InvestigationWorkspaces;
@@ -17,10 +18,9 @@ internal sealed partial class EventsWorkspaceViewModel : WorkspaceInstanceViewMo
     private readonly EventsWorkspaceReadSession _session;
     private readonly SecurityDetailsStore? _definitions;
     private readonly Lazy<NativeEventProfileStore> _profiles;
-    private readonly Func<InspectorPaneViewModel, AiDetailsInvestigationViewModel>? _createAi;
-    private AiDetailsInvestigationViewModel? _ai;
+    private readonly Func<WorkspaceInstanceViewModel, ProcessConversationViewModel>? _createObjectConversation;
+    private ProcessConversationViewModel? _objectConversation;
     private AnnotationDatabaseService? _annotations;
-    private string? _aiPrompt;
     private CancellationTokenSource _request = new(), _format = new();
     private readonly HashSet<Task> _work = [];
     private long _revision;
@@ -49,24 +49,25 @@ internal sealed partial class EventsWorkspaceViewModel : WorkspaceInstanceViewMo
     public FeaturePublicationViewModel FeaturePublication { get; }
     public ListingColumnSettings ListingColumns { get; } = new();
     public ViewerSharedActions SharedActions { get; internal set; } = new();
-    public AiDetailsInvestigationViewModel? AiDetailsInvestigationViewModel
+    public ProcessConversationViewModel? ObjectConversationViewModel
     {
         get
         {
-            if (!FeaturePublication.AiAssistance || _createAi == null || IsDisposed) return null;
-            if (_ai == null)
+            if (!FeaturePublication.AiAssistance || _createObjectConversation == null || IsDisposed) return null;
+            if (_objectConversation == null)
             {
-                // A presenter's inspector subject never changes. Retired work cannot publish into a newer subject.
-                var subject = new InspectorPaneViewModel();
-                _ai = _createAi(subject);
-                _ai.SetAnnotationStore(_annotations);
-                if (_aiPrompt != null) _ai.ArtifactPrompt = _aiPrompt;
-                if (InspectorPaneViewModel.CurrentPayload is { } payload) subject.Load(payload);
+                _objectConversation = _createObjectConversation(this);
+                _objectConversation.SelectObject(_selected is { } selected ? EvidenceObjectAgentTools.EventContext(selected.Evidence.Native) : null);
             }
-            return _ai;
+            return _objectConversation;
         }
     }
-    public ViewerDetailsTabKey SelectedDetailsTabKey { get; set; } = ViewerDetailsTabKey.Object;
+    public IAsyncRelayCommand<EventsWorkspaceRowViewModel> ReviewRecordCommand { get; }
+    public IAsyncRelayCommand<EventsWorkspaceRowViewModel> ChatAboutCommand { get; }
+    public IAsyncRelayCommand<EventsWorkspaceRowViewModel> FindSurroundingActivityCommand { get; }
+    public ProcessConversationViewModel? ProcessConversationViewModel => ObjectConversationViewModel;
+    private ViewerDetailsTabKey _selectedDetailsTabKey = ViewerDetailsTabKey.Object;
+    public ViewerDetailsTabKey SelectedDetailsTabKey { get => _selectedDetailsTabKey; set => SetProperty(ref _selectedDetailsTabKey, value); }
     public int SelectedDataTabIndex { get; set; }
     public double VerticalOffset { get; set; }
     public double HorizontalOffset { get; set; }
@@ -107,14 +108,14 @@ internal sealed partial class EventsWorkspaceViewModel : WorkspaceInstanceViewMo
         {
             if (value != null && (!Rows.Contains(value) || _loadedBinding != _session.Binding)) return;
             if (!SetProperty(ref _selected, value)) return;
-            RetireAi();
+            if (_objectConversation != null) _objectConversation.SelectObject(value is { } selected ? EvidenceObjectAgentTools.EventContext(selected.Evidence.Native) : null);
             _retainedSelection = value?.Reference;
             InvestigationChanged?.Invoke();
             if (value == null) InspectorPaneViewModel.Clear("Select an event; unresolved events can also be inspected.");
             else InspectorPaneViewModel.Load(value.CreatePayload());
             RefreshContextualFields();
             StartComparison();
-            OnPropertyChanged(nameof(AiDetailsInvestigationViewModel));
+            OnPropertyChanged(nameof(ObjectConversationViewModel));
         }
     }
     public IRelayCommand ApplyFiltersCommand { get; }
@@ -126,10 +127,13 @@ internal sealed partial class EventsWorkspaceViewModel : WorkspaceInstanceViewMo
 
     internal EventsWorkspaceViewModel(WorkspaceTypeMetadata type, int ordinal, EventsWorkspaceReadSession session,
         SecurityDetailsStore? definitions, FeatureAccessService access,
-        Func<InspectorPaneViewModel, AiDetailsInvestigationViewModel>? createAi = null,
-        Lazy<NativeEventProfileStore>? profiles = null, Lazy<NativeEventPresetStore>? presets = null) : base(type, ordinal)
+        Lazy<NativeEventProfileStore>? profiles = null, Lazy<NativeEventPresetStore>? presets = null,
+        Func<WorkspaceInstanceViewModel, ProcessConversationViewModel>? createObjectConversation = null) : base(type, ordinal)
     {
-        _session = session; _definitions = definitions; _createAi = createAi;
+        _session = session; _definitions = definitions; _createObjectConversation = createObjectConversation;
+        ReviewRecordCommand = new AsyncRelayCommand<EventsWorkspaceRowViewModel>(row => RunObjectActionAsync(row, ProcessConversationAction.ReviewRecord), CanRunObjectAction);
+        ChatAboutCommand = new AsyncRelayCommand<EventsWorkspaceRowViewModel>(row => RunObjectActionAsync(row, ProcessConversationAction.ChatAbout), CanRunObjectAction);
+        FindSurroundingActivityCommand = new AsyncRelayCommand<EventsWorkspaceRowViewModel>(row => RunObjectActionAsync(row, ProcessConversationAction.FindRelatedActivity), CanRunObjectAction);
         foreach (var column in Enum.GetValues<EventSort>().Where(c => c != EventSort.Sequence))
             ListingColumns.GetColumn(column.ToString()).IsVisible = column is EventSort.Timestamp or EventSort.EventId or EventSort.Description;
         _profiles = profiles ?? new(() => new NativeEventProfileStore(SessionPathService.GetNativeEventProfilesPath()));
@@ -161,6 +165,22 @@ internal sealed partial class EventsWorkspaceViewModel : WorkspaceInstanceViewMo
         });
         PreviousPageCommand = new RelayCommand(() => { if (_offset > 0) { _offset = Math.Max(0, _offset - PageSize); InvestigationChanged?.Invoke(); StartRefresh(); } });
         NextPageCommand = new RelayCommand(() => { if (_offset + PageSize < _matching) { _offset += PageSize; InvestigationChanged?.Invoke(); StartRefresh(); } });
+    }
+    private bool CanRunObjectAction(EventsWorkspaceRowViewModel? row) =>
+        FeaturePublication.AiAssistance && _createObjectConversation != null && !IsDisposed && !_suspended &&
+        row != null && Rows.Contains(row) && _loadedBinding == _session.Binding;
+    private async Task RunObjectActionAsync(EventsWorkspaceRowViewModel? row, ProcessConversationAction action)
+    {
+        if (!CanRunObjectAction(row)) return;
+        SelectedEvent = row;
+        ShowObjectConversation();
+        var conversation = ObjectConversationViewModel;
+        if (conversation != null) await conversation.RunActionAsync(action);
+    }
+    internal void ShowObjectConversation()
+    {
+        if (!FeaturePublication.AiAssistance || _createObjectConversation == null || IsDisposed) return;
+        SelectedDetailsTabKey = ViewerDetailsTabKey.Ai;
     }
     internal void SetFilter(EventsFilter filter, string description, bool explicitTypeFilter = false)
     {
@@ -373,9 +393,7 @@ internal sealed partial class EventsWorkspaceViewModel : WorkspaceInstanceViewMo
     {
         RefreshContextualFields();
         if (_selected == null) return;
-        RetireAi();
         InspectorPaneViewModel.Load(_selected.CreatePayload());
-        OnPropertyChanged(nameof(AiDetailsInvestigationViewModel));
     }
     internal void Invalidate(bool captureChanged)
     {
@@ -417,22 +435,11 @@ internal sealed partial class EventsWorkspaceViewModel : WorkspaceInstanceViewMo
     internal void BindAnnotations(AnnotationDatabaseService? annotations)
     {
         if (ReferenceEquals(_annotations, annotations)) return;
-        RetireAi();
         _annotations = annotations;
-        OnPropertyChanged(nameof(AiDetailsInvestigationViewModel));
-    }
-    private void RetireAi()
-    {
-        if (_ai is not { } prior) return;
-        _aiPrompt = prior.ArtifactPrompt;
-        _ai = null;
-        prior.CancelInvestigation();
-        Track(DrainAiAsync(prior));
-    }
-    private static async Task DrainAiAsync(AiDetailsInvestigationViewModel prior)
-    {
-        try { while (prior.IsBusy) await Task.Delay(10); }
-        finally { prior.Dispose(); }
+        _objectConversation?.Detach();
+        if (annotations != null && _selected is { } selected)
+            _objectConversation?.SelectObject(EvidenceObjectAgentTools.EventContext(selected.Evidence.Native));
+        OnPropertyChanged(nameof(ObjectConversationViewModel));
     }
     internal NativeEventProfileEditorViewModel CreateProfileEditor() => new(_profiles.Value, SelectedEvent?.Extraction,
         _definitions?.Snapshot().FirstOrDefault(d => d.EventId == SelectedEvent?.EventCode), _definitions?.LoadError ?? "");
@@ -453,11 +460,11 @@ internal sealed partial class EventsWorkspaceViewModel : WorkspaceInstanceViewMo
         CancelComparison("Comparison paused for evidence transition; selections retained until binding validation.");
         _comparisonAdds.Cancel();
         CancelExtraction();
-        _ai?.CancelInvestigation();
-        while (_ai?.IsBusy == true) await Task.Delay(10, token);
+        _objectConversation?.SelectObject(null);
+        while (_objectConversation?.IsBusy == true) await Task.Delay(10, token);
         while (_work.Where(task => !task.IsCompleted).ToArray() is { Length: > 0 } pending) await Task.WhenAll(pending).WaitAsync(token);
     }
-    internal void Resume() { _suspended = false; BeginFormatting(); BeginExtraction(); StartComparison(); }
+    internal void Resume() { _suspended = false; if (_annotations != null && _selected is { } selected) _objectConversation?.SelectObject(EvidenceObjectAgentTools.EventContext(selected.Evidence.Native)); BeginFormatting(); BeginExtraction(); StartComparison(); }
     public override void Dispose()
     {
         if (IsDisposed) return;
@@ -469,6 +476,6 @@ internal sealed partial class EventsWorkspaceViewModel : WorkspaceInstanceViewMo
         CancelExtraction(); _extraction.Dispose();
         foreach (var header in HeaderFilters.Values) header.Close();
         if (_profiles.IsValueCreated) _profiles.Value.Changed -= ProfilesChanged;
-        _request.Cancel(); _format.Cancel(); _request.Dispose(); _format.Dispose(); _ai?.Dispose();
+        _request.Cancel(); _format.Cancel(); _request.Dispose(); _format.Dispose(); _objectConversation?.Dispose();
     }
 }

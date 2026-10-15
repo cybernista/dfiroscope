@@ -1,6 +1,5 @@
 using System.IO;
 using System.Collections.ObjectModel;
-using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ProcInsider.Models;
@@ -16,11 +15,6 @@ namespace ProcInsider.ViewModels;
 
 public partial class ProcessDescriptionViewModel : ViewModelBase
 {
-    public const string DefaultAppInfoPrompt =
-        "Draft a review-only Windows application reference profile. Keep reusable expected knowledge separate from the selected process observations and state uncertainty plainly.";
-
-    private readonly Func<AiInvestigationService?> _aiServiceFactory;
-    private readonly Func<AiEvidencePackBuilder?> _aiEvidencePackBuilderFactory;
     private readonly FeatureAccessService _featureAccess;
     private readonly ApplicationInfoResolutionService _resolutionService;
     private readonly IApplicationComparisonEvidenceService _comparisonEvidenceService;
@@ -46,42 +40,22 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
     private ApplicationComparisonActualContext? _comparisonActual;
     private string _comparisonSelectionReason = string.Empty;
     private string _matchReason = string.Empty;
-    private ApplicationMetadataRecord? _resolvedRecordBeforeAiDraft;
-    private CancellationTokenSource? _activeAiDraftRequest;
-    private long _aiDraftGeneration;
     private readonly Func<string, bool> _confirmReplace;
     private AiProviderKind _currentAiProviderKind = AiProviderKind.Disabled;
     private string _currentAiEndpointMode = string.Empty;
     private string _currentAiPromptTemplateId = string.Empty;
     private DateTime? _currentAiRequestedUtc;
     private bool _currentAiSourceClaimsUnverified;
-    private ApplicationProfileReviewState _displayedReviewState = ApplicationProfileReviewState.Unreviewed;
-    private DateTime? _displayedReviewedUtc;
-    private ApplicationInfoEvaluationResolutionResult? _evaluationResolution;
-    private ApplicationMetadataRecord? _recordBeforeEvaluation;
-    private bool _metadataExistsBeforeEvaluation;
-    private bool _isDirtyBeforeEvaluation;
-    private bool _hasAiDraftBeforeEvaluation;
-    private ApplicationProfileDefinition? _comparisonCatalogProfileBeforeEvaluation;
-    private IReadOnlyList<ApplicationCatalogMatch> _comparisonCandidatesBeforeEvaluation = [];
-    private string _comparisonSelectionReasonBeforeEvaluation = string.Empty;
-    private string _matchReasonBeforeEvaluation = string.Empty;
-    private string _statusMessageBeforeEvaluation = string.Empty;
-    private List<ApplicationInfoDraftDifferenceViewModel> _draftDifferencesBeforeEvaluation = [];
 
     public ProcessDescriptionViewModel(
         AnnotationDatabaseService? annotationStore,
-        Func<AiInvestigationService?> aiServiceFactory,
         FeatureAccessService featureAccess,
         ApplicationCatalogService? applicationCatalog,
         IApplicationComparisonEvidenceService comparisonEvidenceService,
         NsrlLookupViewModel? nsrlLookupViewModel = null,
-        Func<AiEvidencePackBuilder?>? aiEvidencePackBuilderFactory = null,
         Func<string, bool>? confirmReplace = null)
     {
         _annotationStore = annotationStore;
-        _aiServiceFactory = aiServiceFactory;
-        _aiEvidencePackBuilderFactory = aiEvidencePackBuilderFactory ?? (() => null);
         _featureAccess = featureAccess;
         _confirmReplace = confirmReplace ?? (_ => false);
         _resolutionService = new ApplicationInfoResolutionService(applicationCatalog);
@@ -90,31 +64,14 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
         Nsrl = _featureAccess.IsPublished(FeatureIds.KnownFileReferenceData)
             ? nsrlLookupViewModel
             : null;
-        SecurityAssessment = _featureAccess.IsPublished(FeatureIds.AiAssistance)
-            ? new ApplicationSecurityAssessmentViewModel(
-                _aiServiceFactory,
-                _aiEvidencePackBuilderFactory,
-                _featureAccess,
-                _annotationStore,
-                Nsrl)
-            : null;
         _hasCatalog = applicationCatalog != null;
-        Prompt = DefaultAppInfoPrompt;
     }
 
     public ObservableCollection<ApplicationComparisonRowViewModel> ComparisonRows { get; } = [];
 
-    public ObservableCollection<ApplicationInfoDraftDifferenceViewModel> DraftDifferences { get; } = [];
-
-    public ObservableCollection<AiInvestigationRecord> AppInfoGenerationHistory { get; } = [];
-
     public ApplicationComparisonEvidenceSource? ComparisonEvidenceSource { get; private set; }
 
     public NsrlLookupViewModel? Nsrl { get; }
-
-    public ApplicationSecurityAssessmentViewModel? SecurityAssessment { get; }
-
-    public bool IsAiAssistancePublished => _featureAccess.IsPublished(FeatureIds.AiAssistance);
 
     public bool IsApplicationComparisonPublished =>
         _featureAccess.IsPublished(FeatureIds.ApplicationComparison);
@@ -132,19 +89,7 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
     private bool isBusy;
 
     [ObservableProperty]
-    private bool hasAiDraft;
-
-    [ObservableProperty]
     private bool hasSavedOverride;
-
-    [ObservableProperty]
-    private bool hasEvaluationCandidate;
-
-    [ObservableProperty]
-    private bool isEvaluatingBundledAiDraft;
-
-    [ObservableProperty]
-    private string evaluationStatusDisplay = string.Empty;
 
     [ObservableProperty]
     private string catalogProvenanceDisplay = "Not recorded";
@@ -281,55 +226,16 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
     [ObservableProperty]
     private string statusMessage = "No process selected.";
 
-    public bool IsApplicationProfileEditable => HasProcessSelected && !IsEvaluatingBundledAiDraft;
+    public bool IsApplicationProfileEditable => HasProcessSelected;
 
-    public bool ShowEvaluateBundledAiDraftAction =>
-        IsAiAssistancePublished && HasEvaluationCandidate && !IsEvaluatingBundledAiDraft;
-
-    public string EvaluationCandidateWarning => ApplicationInfoResolutionService.EvaluationCandidateWarning;
-
-    public string PrivacyWarning
-    {
-        get
-        {
-            if (!_featureAccess.IsPublished(FeatureIds.AiAssistance))
-            {
-                return $"AI assistance is not published in educational release '{_featureAccess.Catalog.ReleaseId}'.";
-            }
-
-            var aiService = _aiServiceFactory();
-            if (aiService == null)
-            {
-                return "AI assistance could not be activated. See the viewer status for diagnostics.";
-            }
-
-            var settings = aiService.LoadSettings();
-            if (settings.IsCloudProvider)
-            {
-                var endpoint = string.IsNullOrWhiteSpace(settings.BaseUrl) ? "the configured endpoint" : settings.BaseUrl;
-                return $"Cloud/commercial provider selected: process metadata is sent to {endpoint} only when AI Generate App Info is clicked.";
-            }
-
-            if (settings.ProviderKind == AiProviderKind.LocalOpenAiCompatible)
-            {
-                return "Local-first provider selected. App-info prompts stay on this host if the endpoint is local.";
-            }
-
-            return "AI is disabled. Generate App Info will report setup needed and will not send process metadata.";
-        }
-    }
-
-    public void SetAnnotationStore(AnnotationDatabaseService? annotationStore)
+    public void SetAnnotationStore(AnnotationDatabaseService? annotationStore, bool reloadSelection = true)
     {
         _annotationStore = annotationStore;
-        SecurityAssessment?.SetAnnotationStore(annotationStore);
-        _ = LoadForProcessAsync(_selectedProcess);
+        if (reloadSelection) _ = LoadForProcessAsync(_selectedProcess);
     }
 
     public void SetWorkspace(InvestigationSessionPaths? paths, long workspaceGeneration)
     {
-        ResetEvaluationForContextChange(restoreDisplayedRecord: true);
-        CancelAiDraftRequest();
         Nsrl?.SetWorkspace(paths?.NsrlSettingsPath ?? string.Empty, workspaceGeneration);
     }
 
@@ -342,8 +248,6 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
     internal void CancelPendingPresentationRequests()
     {
         Interlocked.Exchange(ref _activeSelectionLoad, null)?.Cancel();
-        CancelAiDraftRequest();
-        SecurityAssessment?.Shutdown();
         Nsrl?.CancelPendingLookup();
     }
 
@@ -356,8 +260,6 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
         CancellationToken cancellationToken)
     {
         var generation = ++_selectionLoadGeneration;
-        ResetEvaluationForContextChange(restoreDisplayedRecord: true);
-        CancelAiDraftRequest();
         var previousLoad = Interlocked.Exchange(ref _activeSelectionLoad, null);
         previousLoad?.Cancel();
         var sameProcess = _selectedProcess != null &&
@@ -365,7 +267,6 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
         var unsavedDraft = sameProcess && _isDirty ? BuildRecord() : null;
         _selectedProcess = process;
         Nsrl?.SetSelectedProcess(process?.ProcessInfo);
-        SecurityAssessment?.SetContext(process, string.Empty, null);
         if (process == null)
         {
             Clear();
@@ -389,19 +290,16 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
             var sessionOverrideTask = _annotationStore == null
                 ? Task.FromResult<ApplicationMetadataRecord?>(null)
                 : _annotationStore.LoadApplicationMetadataForProcessAsync(process.ProcessInfo);
-            var generationHistoryTask = _annotationStore == null
-                ? Task.FromResult<IReadOnlyList<AiInvestigationRecord>>([])
-                : _annotationStore.LoadAiInvestigationsAsync(CreateProcessAnnotationTarget(process), 100);
             var comparisonActualTask = IsApplicationComparisonPublished
                 ? _comparisonEvidenceService.LoadAsync(process.ProcessInfo, loadToken)
                 : null;
             if (comparisonActualTask == null)
             {
-                await Task.WhenAll(sessionOverrideTask, generationHistoryTask);
+                await sessionOverrideTask;
             }
             else
             {
-                await Task.WhenAll(sessionOverrideTask, generationHistoryTask, comparisonActualTask);
+                await Task.WhenAll(sessionOverrideTask, comparisonActualTask);
             }
 
             loadToken.ThrowIfCancellationRequested();
@@ -418,37 +316,20 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
                 lookupContext,
                 unsavedDraft,
                 sessionOverrideTask.Result);
-            var evaluation = _resolutionService.ResolveEvaluationDetailed(
-                process.ProcessInfo,
-                lookupContext);
             var record = resolution.Record ?? CreateDraftRecord(process);
             _comparisonCatalogProfile = resolution.CatalogProfile;
             _comparisonCandidates = resolution.Candidates;
             _comparisonActual = actual;
             Nsrl?.SetSelectedProcess(process.ProcessInfo, actual?.ProcessImageFileSizeBytes);
             _comparisonSelectionReason = resolution.SelectionReason;
-            SetEvaluationAvailability(evaluation);
             _matchReason = string.IsNullOrWhiteSpace(record.MatchReason)
                 ? resolution.SelectionReason
                 : record.MatchReason;
             record.MatchReason = _matchReason;
             LoadRecord(record, metadataExists: resolution.Record != null);
             HasSavedOverride = sessionOverrideTask.Result != null;
-            HasAiDraft = record.ReviewState == ApplicationProfileReviewState.AiDraft &&
-                         record.RecordOrigin == ApplicationProfileOrigin.UnsavedDraft;
-            _resolvedRecordBeforeAiDraft = HasAiDraft ? null : CloneRecord(record);
-            DraftDifferences.Clear();
-            AppInfoGenerationHistory.Clear();
-            foreach (var historyRecord in generationHistoryTask.Result.Where(historyRecord => string.Equals(
-                         historyRecord.PromptTemplateId,
-                         AiPromptCatalog.AppInfoDraftTemplateId,
-                         StringComparison.Ordinal)))
-            {
-                AppInfoGenerationHistory.Add(historyRecord);
-            }
             _isDirty = resolution.Record?.RecordOrigin == ApplicationProfileOrigin.UnsavedDraft;
             RebuildComparison();
-            UpdateSecurityAssessmentContext();
             StatusMessage = resolution.Record?.RecordOrigin switch
             {
                 ApplicationProfileOrigin.UnsavedDraft => "Kept the unsaved in-memory draft for this process.",
@@ -462,7 +343,7 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
                         : "Loaded a read-only built-in profile. Editing and saving creates only a session override.",
                 _ when !_hasCatalog
                     => "Built-in application catalog is unavailable. Using an editable unsaved draft.",
-                _ => "No session override or built-in profile matched. Edit and save, or generate an AI draft."
+                _ => "No session override or built-in profile matched. Edit and save a session override."
             };
         }
         catch (OperationCanceledException) when (
@@ -483,17 +364,11 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
 
             LoadRecord(CreateDraftRecord(process), metadataExists: false);
             HasSavedOverride = false;
-            HasAiDraft = false;
-            _resolvedRecordBeforeAiDraft = CloneRecord(BuildRecord());
-            DraftDifferences.Clear();
-            AppInfoGenerationHistory.Clear();
             _comparisonCatalogProfile = null;
             _comparisonCandidates = [];
             _comparisonActual = null;
             _comparisonSelectionReason = string.Empty;
-            ResetEvaluationAvailability();
             ClearComparison($"Comparison unavailable because App Info loading failed safely: {ex.Message}");
-            UpdateSecurityAssessmentContext();
             StatusMessage = $"Failed to load app metadata: {ex.Message}";
         }
         finally
@@ -507,75 +382,9 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
         }
     }
 
-    [RelayCommand(CanExecute = nameof(CanEvaluateBundledAiDraft))]
-    public void EvaluateBundledAiDraft()
-    {
-        if (!_featureAccess.TryAccess(FeatureIds.AiAssistance, out var unavailableMessage))
-        {
-            StatusMessage = unavailableMessage;
-            return;
-        }
-
-        var evaluation = _evaluationResolution;
-        if (!CanEvaluateBundledAiDraft() ||
-            _selectedProcess == null ||
-            evaluation?.Record == null ||
-            evaluation.CatalogProfile == null)
-        {
-            StatusMessage = "No unambiguous bundled AI draft is available for this process.";
-            return;
-        }
-
-        _recordBeforeEvaluation = CaptureDisplayedRecord();
-        _metadataExistsBeforeEvaluation = HasMetadata;
-        _isDirtyBeforeEvaluation = _isDirty;
-        _hasAiDraftBeforeEvaluation = HasAiDraft;
-        _comparisonCatalogProfileBeforeEvaluation = _comparisonCatalogProfile;
-        _comparisonCandidatesBeforeEvaluation = _comparisonCandidates;
-        _comparisonSelectionReasonBeforeEvaluation = _comparisonSelectionReason;
-        _matchReasonBeforeEvaluation = _matchReason;
-        _statusMessageBeforeEvaluation = StatusMessage;
-        _draftDifferencesBeforeEvaluation = DraftDifferences.ToList();
-
-        IsEvaluatingBundledAiDraft = true;
-        HasAiDraft = false;
-        DraftDifferences.Clear();
-        _comparisonCatalogProfile = evaluation.CatalogProfile;
-        _comparisonCandidates = evaluation.Candidates;
-        _comparisonSelectionReason = evaluation.SelectionReason;
-        _matchReason = string.IsNullOrWhiteSpace(evaluation.Record.MatchReason)
-            ? evaluation.SelectionReason
-            : evaluation.Record.MatchReason;
-        evaluation.Record.MatchReason = _matchReason;
-        LoadRecord(CloneRecord(evaluation.Record), metadataExists: true);
-        _isDirty = false;
-        RebuildComparison();
-        UpdateSecurityAssessmentContext();
-        StatusMessage = $"Evaluating bundled AI draft '{evaluation.CatalogProfile.DisplayName}'. It is unreviewed, read-only, and not a benign verdict.";
-        NotifyCommandState();
-    }
-
-    [RelayCommand(CanExecute = nameof(CanReturnToNormalProfile))]
-    public void ReturnToNormalProfile()
-    {
-        if (!RestoreRecordBeforeEvaluation())
-        {
-            StatusMessage = "No normal App Info profile is available to restore.";
-            return;
-        }
-
-        StatusMessage = "Returned to the normal App Info profile. The bundled AI draft was not saved.";
-    }
-
     [RelayCommand(CanExecute = nameof(CanSaveMetadata))]
     public async Task SaveMetadataAsync()
     {
-        if (IsEvaluatingBundledAiDraft)
-        {
-            StatusMessage = "Bundled AI draft evaluation is read-only. Return to the normal profile before saving.";
-            return;
-        }
-
         if (HasSavedOverride)
         {
             StatusMessage = "A saved session override already exists. Use Replace saved override so the replacement is explicit and confirmed.";
@@ -588,12 +397,6 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanReplaceSavedOverride))]
     public async Task ReplaceSavedOverrideAsync()
     {
-        if (IsEvaluatingBundledAiDraft)
-        {
-            StatusMessage = "Bundled AI draft evaluation is read-only. Return to the normal profile before replacing an override.";
-            return;
-        }
-
         if (!_confirmReplace("Replace the existing session App Info override with the currently reviewed draft? The shipped catalog will not be changed."))
         {
             StatusMessage = "Replace saved override canceled. The existing saved profile was not changed.";
@@ -601,36 +404,6 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
         }
 
         await PersistMetadataAsync("Replaced the saved session App Info override");
-    }
-
-    [RelayCommand(CanExecute = nameof(CanDiscardAiDraft))]
-    public void DiscardAiDraft()
-    {
-        if (!_featureAccess.TryAccess(FeatureIds.AiAssistance, out var unavailableMessage))
-        {
-            StatusMessage = unavailableMessage;
-            return;
-        }
-
-        if (_resolvedRecordBeforeAiDraft == null)
-        {
-            StatusMessage = "No resolved saved or built-in profile is available to restore.";
-            return;
-        }
-
-        CancelAiDraftRequest();
-        var restored = CloneRecord(_resolvedRecordBeforeAiDraft);
-        LoadRecord(restored, metadataExists: restored.RecordOrigin != ApplicationProfileOrigin.UnsavedDraft);
-        HasAiDraft = false;
-        DraftDifferences.Clear();
-        AiDraftValidationDisplay = string.Empty;
-        AiSourceClaimsDisplay = string.Empty;
-        AiUncertaintyDisplay = string.Empty;
-        _isDirty = restored.RecordOrigin == ApplicationProfileOrigin.UnsavedDraft;
-        RebuildComparison();
-        UpdateSecurityAssessmentContext();
-        StatusMessage = "Discarded the AI draft and restored the previously resolved saved/built-in profile.";
-        NotifyCommandState();
     }
 
     private async Task PersistMetadataAsync(string successPrefix)
@@ -648,12 +421,8 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
             await _annotationStore.SaveApplicationMetadataAsync(record);
             LoadRecord(record, metadataExists: true);
             HasSavedOverride = true;
-            HasAiDraft = false;
-            _resolvedRecordBeforeAiDraft = CloneRecord(record);
-            DraftDifferences.Clear();
             _isDirty = false;
             RebuildComparison();
-            UpdateSecurityAssessmentContext();
             StatusMessage = $"{successPrefix} for {CurrentTargetDisplay}. The shipped catalog was unchanged.";
         }
         catch (Exception ex)
@@ -667,135 +436,12 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
         }
     }
 
-    [RelayCommand(CanExecute = nameof(CanGenerateAppInfo))]
-    public async Task GenerateAppInfoAsync()
-    {
-        if (IsEvaluatingBundledAiDraft)
-        {
-            StatusMessage = "Return to the normal profile before starting the separate AI generation workflow.";
-            return;
-        }
-
-        if (!_featureAccess.TryAccess(FeatureIds.AiAssistance, out var unavailableMessage))
-        {
-            StatusMessage = unavailableMessage;
-            return;
-        }
-
-        if (_selectedProcess == null)
-        {
-            StatusMessage = "Select a process before generating app info.";
-            return;
-        }
-
-        if (_annotationStore == null)
-        {
-            StatusMessage = "Annotation database is unavailable; AI draft provenance/history cannot be persisted.";
-            return;
-        }
-
-        var aiService = _aiServiceFactory();
-        if (aiService == null)
-        {
-            StatusMessage = "AI assistance could not be activated. See the viewer status for diagnostics.";
-            return;
-        }
-
-        var process = _selectedProcess;
-        var generation = Interlocked.Increment(ref _aiDraftGeneration);
-        var cancellation = new CancellationTokenSource();
-        var previous = Interlocked.Exchange(ref _activeAiDraftRequest, cancellation);
-        previous?.Cancel();
-        previous?.Dispose();
-        var recordBeforeRequest = CloneRecord(BuildRecord());
-        try
-        {
-            IsBusy = true;
-            StatusMessage = "Generating a bounded structured App Info draft. Nothing will be saved automatically.";
-            var settings = aiService.LoadSettings();
-            var template = new AiPromptCatalog().GetAppInfoDraftTemplate();
-            var request = new AiInvestigationRequest
-            {
-                SourceScope = BuildAppInfoDraftScope(process),
-                PromptTemplate = template,
-                AnalystPromptSuffix = Prompt,
-                EvidenceText = BuildAppInfoDraftEvidence(process, recordBeforeRequest),
-                Settings = settings
-            };
-            var historyRecord = await aiService.RunInvestigationAsync(request, cancellation.Token);
-            if (!IsCurrentAiDraftRequest(generation, process, cancellation))
-            {
-                return;
-            }
-
-            ApplicationInfoAiDraftParseResult? parsed = null;
-            if (historyRecord.Status == AiInvestigationStatus.Succeeded)
-            {
-                parsed = ApplicationInfoAiResponseParser.ParseDraft(historyRecord.ResponseText);
-                if (!parsed.Success)
-                {
-                    historyRecord.Status = AiInvestigationStatus.Failed;
-                    historyRecord.ErrorText = parsed.Error;
-                }
-            }
-
-            await _annotationStore.SaveAiInvestigationAsync(historyRecord);
-            if (!IsCurrentAiDraftRequest(generation, process, cancellation))
-            {
-                return;
-            }
-
-            AppInfoGenerationHistory.Insert(0, historyRecord);
-            if (historyRecord.Status != AiInvestigationStatus.Succeeded || parsed?.Draft == null)
-            {
-                StatusMessage = $"AI App Info draft was not applied: {historyRecord.ErrorText}";
-                return;
-            }
-
-            var discardBaseline = ResolveDiscardBaseline(recordBeforeRequest);
-            _resolvedRecordBeforeAiDraft = CloneRecord(discardBaseline);
-            ApplyAiDraft(parsed.Draft, historyRecord, recordBeforeRequest, discardBaseline);
-            StatusMessage = parsed.Draft.IsFreeTextFallback
-                ? "Provider returned free text. A bounded low-confidence AI Draft was loaded for review; nothing was saved."
-                : "Structured AI Draft loaded with a field-level diff. Review, then Save/Replace explicitly or Discard.";
-        }
-        catch (OperationCanceledException)
-        {
-            if (IsCurrentAiDraftRequest(generation, process, cancellation))
-            {
-                StatusMessage = "AI App Info generation canceled; saved metadata and current edits were preserved.";
-            }
-        }
-        catch (Exception ex)
-        {
-            if (IsCurrentAiDraftRequest(generation, process, cancellation))
-            {
-                StatusMessage = $"AI App Info draft failed safely: {ex.Message}. Saved metadata and current edits were preserved.";
-            }
-        }
-        finally
-        {
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _activeAiDraftRequest, null, cancellation), cancellation))
-            {
-                cancellation.Dispose();
-            }
-            if (generation == Volatile.Read(ref _aiDraftGeneration) && ReferenceEquals(_selectedProcess, process))
-            {
-                IsBusy = false;
-                NotifyCommandState();
-            }
-        }
-    }
-
     public void Clear()
     {
         _selectionLoadGeneration++;
-        ResetEvaluationForContextChange(restoreDisplayedRecord: false);
         Interlocked.Exchange(ref _activeSelectionLoad, null)?.Cancel();
-        CancelAiDraftRequest();
         _selectedProcess = null;
         Nsrl?.SetSelectedProcess(null);
-        SecurityAssessment?.SetContext(null, string.Empty, null);
         IsBusy = false;
         _applicationId = string.Empty;
         _isLoading = true;
@@ -832,7 +478,7 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
             IsAiGenerated = false;
             ProviderName = string.Empty;
             ModelName = string.Empty;
-            Prompt = DefaultAppInfoPrompt;
+            Prompt = string.Empty;
             ProvenanceDisplay = string.Empty;
             AiDraftValidationDisplay = string.Empty;
             AiSourceClaimsDisplay = string.Empty;
@@ -854,19 +500,13 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
             _currentAiPromptTemplateId = string.Empty;
             _currentAiRequestedUtc = null;
             _currentAiSourceClaimsUnverified = false;
-            _displayedReviewState = ApplicationProfileReviewState.Unreviewed;
-            _displayedReviewedUtc = null;
             CatalogProvenanceDisplay = "Not recorded";
             _comparisonCatalogProfile = null;
             _comparisonCandidates = [];
             _comparisonActual = null;
             _comparisonSelectionReason = string.Empty;
             _matchReason = string.Empty;
-            HasAiDraft = false;
             HasSavedOverride = false;
-            _resolvedRecordBeforeAiDraft = null;
-            DraftDifferences.Clear();
-            AppInfoGenerationHistory.Clear();
             _isDirty = false;
             ClearComparison("Select a process to compare expected and actual values.");
         }
@@ -885,31 +525,7 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
         NotifyCommandState();
     }
 
-    partial void OnHasAiDraftChanged(bool value) => NotifyCommandState();
-
     partial void OnHasSavedOverrideChanged(bool value) => NotifyCommandState();
-
-    partial void OnHasEvaluationCandidateChanged(bool value)
-    {
-        OnPropertyChanged(nameof(ShowEvaluateBundledAiDraftAction));
-        NotifyCommandState();
-    }
-
-    partial void OnIsEvaluatingBundledAiDraftChanged(bool value)
-    {
-        OnPropertyChanged(nameof(IsApplicationProfileEditable));
-        OnPropertyChanged(nameof(ShowEvaluateBundledAiDraftAction));
-        NotifyCommandState();
-    }
-
-    partial void OnPromptChanged(string value)
-    {
-        if (!_isLoading)
-        {
-            _isDirty = true;
-            GenerateAppInfoCommand.NotifyCanExecuteChanged();
-        }
-    }
 
     partial void OnExecutableNamePatternChanged(string value)
     {
@@ -981,8 +597,6 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
             _currentAiPromptTemplateId = record.AiPromptTemplateId;
             _currentAiRequestedUtc = record.AiRequestedUtc;
             _currentAiSourceClaimsUnverified = record.AiSourceClaimsUnverified;
-            _displayedReviewState = record.ReviewState;
-            _displayedReviewedUtc = record.ReviewedUtc;
             Description = record.Description;
             ApplicationCategory = record.ApplicationCategory;
             ExpectedResponsibilities = record.ExpectedResponsibilities;
@@ -1002,7 +616,7 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
             IsAiGenerated = record.IsAiGenerated;
             ProviderName = record.ProviderName;
             ModelName = record.ModelName;
-            Prompt = string.IsNullOrWhiteSpace(record.Prompt) ? DefaultAppInfoPrompt : record.Prompt;
+            Prompt = record.Prompt;
             ProvenanceDisplay = record.ProvenanceDisplay;
             CatalogProvenanceDisplay = string.IsNullOrWhiteSpace(record.CatalogProvenance)
                 ? "Not recorded"
@@ -1017,7 +631,6 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
             MatchStatus = metadataExists
                 ? $"Matched by {record.MatchReason}."
                 : "Draft metadata initialized from selected process fields.";
-            OnPropertyChanged(nameof(PrivacyWarning));
         }
         finally
         {
@@ -1106,222 +719,28 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
             PathPattern = CleanPathPattern(info.ProcessPath),
             Source = "Manual",
             Confidence = 0.5,
-            Prompt = DefaultAppInfoPrompt,
+            Prompt = string.Empty,
             RecordOrigin = ApplicationProfileOrigin.UnsavedDraft,
             ReviewState = ApplicationProfileReviewState.Unreviewed
         };
     }
 
-    private static string BuildAppInfoDraftEvidence(
-        ProcessRowViewModel process,
-        ApplicationMetadataRecord resolved)
-    {
-        var info = process.ProcessInfo;
-        return $"""
-            ## Resolved reference profile before generation
-            Classification: reusable reference knowledge; it is not source-native evidence and not a benign verdict.
-            Display name: {resolved.DisplayName}
-            Executable matcher: {resolved.ExecutableNamePattern}
-            Role summary: {resolved.Description}
-            Category: {resolved.ApplicationCategory}
-            Expected responsibilities: {resolved.ExpectedResponsibilities}
-            Normal behavior: {resolved.NormalBehavior}
-            Launch triggers: {resolved.LaunchTriggers}
-            Typical context: {resolved.ExpectedContext}
-            Command line expectations: {resolved.CommandLineExpectations}
-            Filesystem/registry expectations: {resolved.FilesystemRegistryExpectations}
-            Child process expectations: {resolved.ChildProcessExpectations}
-            Network expectations: {resolved.NetworkExpectations}
-            Variants/caveats: {resolved.NormalVariants}
-            Abuse/masquerading: {resolved.CybersecurityNotes}
-            Analyst checks: {resolved.AnalystValidationChecks}
-            Existing sources: {FormatSources(resolved.SourceReferences)}
-
-            ## Selected-process lookup/context hints
-            Classification: observed hints only. None of these values proves what is expected; do not copy an observed anomaly into an expected field merely because it appears here.
-            Process name: {process.ProcessName}
-            Image path hint: {process.ProcessPath}
-            Parent hint: {info.ParentProcessName}
-            Account/session hint: {info.UserName}; session {info.SessionId}
-            Command-line hint: {info.CommandLine}
-            Company/file-description hints: {info.CompanyName}; {info.FileDescription}
-            SHA-256 lookup hint: {info.Sha256Hash}
-            Process status hint: {info.Status}
-            """;
-    }
-
-    private static AiSourceScope BuildAppInfoDraftScope(ProcessRowViewModel row) => new()
-    {
-        ScopeKind = "AppInfoStructuredDraft",
-        TargetKind = "Process",
-        TargetTable = "Processes",
-        TargetId = row.ProcessKey,
-        ProcessKey = row.ProcessKey,
-        ProcessId = row.ProcessId,
-        ProcessName = row.ProcessName,
-        Label = $"{row.ProcessName} (PID {row.ProcessId})",
-        DisplayPath = row.ProcessPath,
-        CaseId = row.ProcessInfo.CaseId,
-        EvidenceSessionId = row.ProcessInfo.EvidenceSessionId,
-        CaptureId = row.ProcessInfo.CaptureId,
-        SourceIdentityId = row.ProcessInfo.SourceIdentityId,
-        HostId = row.ProcessInfo.HostId,
-        ExecutionRootId = row.ProcessInfo.ExecutionRootId,
-        Summary = "Resolved App Info reference profile plus selected-process lookup/context hints; observed hints are not expected facts."
-    };
-
-    private void ApplyAiDraft(
-        ApplicationInfoAiDraft draft,
-        AiInvestigationRecord historyRecord,
-        ApplicationMetadataRecord currentBeforeRequest,
-        ApplicationMetadataRecord resolvedBaseline)
-    {
-        var draftRecord = CloneRecord(currentBeforeRequest);
-        draftRecord.RecordOrigin = ApplicationProfileOrigin.UnsavedDraft;
-        draftRecord.ReviewState = ApplicationProfileReviewState.AiDraft;
-        draftRecord.Description = draft.RoleSummary;
-        draftRecord.ApplicationCategory = draft.ApplicationCategory;
-        draftRecord.ExpectedResponsibilities = draft.ExpectedResponsibilities;
-        draftRecord.NormalBehavior = draft.NormalBehavior;
-        draftRecord.LaunchTriggers = draft.LaunchTriggers;
-        draftRecord.ExpectedContext = draft.ExpectedContext;
-        draftRecord.CommandLineExpectations = draft.CommandLineExpectations;
-        draftRecord.FilesystemRegistryExpectations = draft.FilesystemRegistryExpectations;
-        draftRecord.ChildProcessExpectations = draft.ChildProcessExpectations;
-        draftRecord.NetworkExpectations = draft.NetworkExpectations;
-        draftRecord.NormalVariants = draft.NormalVariants;
-        draftRecord.CybersecurityNotes = draft.CommonAbuseAndMasquerading;
-        draftRecord.AnalystValidationChecks = draft.AnalystValidationChecks;
-        draftRecord.Source = "AI Draft (unreviewed)";
-        draftRecord.Confidence = draft.Confidence;
-        draftRecord.IsAiGenerated = true;
-        draftRecord.ProviderName = historyRecord.ProviderName;
-        draftRecord.ModelName = historyRecord.ModelName;
-        draftRecord.Prompt = DefaultAppInfoPrompt;
-        draftRecord.SourceReferences = draft.ClaimedSources.Select(source => new ApplicationProfileSourceReference
-        {
-            Title = source.Title,
-            Publisher = source.Publisher,
-            Uri = source.Uri
-        }).ToList();
-        draftRecord.AiProviderKind = historyRecord.ProviderKind;
-        draftRecord.AiEndpointMode = historyRecord.ProviderKind switch
-        {
-            AiProviderKind.LocalOpenAiCompatible => "Local OpenAI-compatible",
-            AiProviderKind.CommercialOpenAiCompatible => "Commercial/cloud OpenAI-compatible",
-            _ => "Disabled"
-        };
-        draftRecord.AiPromptTemplateId = historyRecord.PromptTemplateId;
-        draftRecord.AiRequestedUtc = historyRecord.RequestedUtc;
-        draftRecord.AiUncertainty = draft.Uncertainty;
-        draftRecord.AiValidationWarnings = string.Join(Environment.NewLine, draft.ValidationWarnings.Select(warning => $"- {warning}"));
-        draftRecord.AiSourceClaimsUnverified = true;
-
-        BuildDraftDifferences(resolvedBaseline, draftRecord);
-        LoadRecord(draftRecord, metadataExists: true);
-        HasAiDraft = true;
-        _isDirty = true;
-        RebuildComparison();
-        UpdateSecurityAssessmentContext();
-        NotifyCommandState();
-    }
-
-    private void BuildDraftDifferences(
-        ApplicationMetadataRecord resolved,
-        ApplicationMetadataRecord draft)
-    {
-        DraftDifferences.Clear();
-        AddDifference("Role summary", resolved.Description, draft.Description);
-        AddDifference("Application category", resolved.ApplicationCategory, draft.ApplicationCategory);
-        AddDifference("Expected responsibilities", resolved.ExpectedResponsibilities, draft.ExpectedResponsibilities);
-        AddDifference("Normal behavior", resolved.NormalBehavior, draft.NormalBehavior);
-        AddDifference("Launch triggers", resolved.LaunchTriggers, draft.LaunchTriggers);
-        AddDifference("Typical context", resolved.ExpectedContext, draft.ExpectedContext);
-        AddDifference("Command line", resolved.CommandLineExpectations, draft.CommandLineExpectations);
-        AddDifference("Filesystem / registry", resolved.FilesystemRegistryExpectations, draft.FilesystemRegistryExpectations);
-        AddDifference("Child processes", resolved.ChildProcessExpectations, draft.ChildProcessExpectations);
-        AddDifference("Network", resolved.NetworkExpectations, draft.NetworkExpectations);
-        AddDifference("Variants / caveats", resolved.NormalVariants, draft.NormalVariants);
-        AddDifference("Abuse / masquerading", resolved.CybersecurityNotes, draft.CybersecurityNotes);
-        AddDifference("Analyst validation checks", resolved.AnalystValidationChecks, draft.AnalystValidationChecks);
-        AddDifference("Uncertainty", resolved.AiUncertainty, draft.AiUncertainty);
-        AddDifference("Confidence", resolved.Confidence.ToString("F2"), draft.Confidence.ToString("F2"));
-        AddDifference("Claimed sources", FormatSources(resolved.SourceReferences), FormatSources(draft.SourceReferences));
-    }
-
-    private void AddDifference(string field, string resolved, string draft)
-    {
-        DraftDifferences.Add(new ApplicationInfoDraftDifferenceViewModel
-        {
-            FieldName = field,
-            ResolvedValue = string.IsNullOrWhiteSpace(resolved) ? "<empty>" : resolved,
-            DraftValue = string.IsNullOrWhiteSpace(draft) ? "<empty>" : draft,
-            IsChanged = !string.Equals(
-                NormalizeDifferenceValue(resolved),
-                NormalizeDifferenceValue(draft),
-                StringComparison.Ordinal)
-        });
-    }
-
-    private static string NormalizeDifferenceValue(string value)
-        => string.Join(" ", (value ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-
     private bool CanSaveMetadata()
         => HasProcessSelected &&
            !HasSavedOverride &&
            !IsBusy &&
-           !IsEvaluatingBundledAiDraft &&
            !string.IsNullOrWhiteSpace(ExecutableNamePattern);
 
     private bool CanReplaceSavedOverride()
         => HasProcessSelected &&
            HasSavedOverride &&
            !IsBusy &&
-           !IsEvaluatingBundledAiDraft &&
            !string.IsNullOrWhiteSpace(ExecutableNamePattern);
-
-    private bool CanDiscardAiDraft()
-        => _featureAccess.CanExecute(
-            FeatureIds.AiAssistance,
-            HasProcessSelected &&
-            HasAiDraft &&
-            !IsBusy &&
-            !IsEvaluatingBundledAiDraft &&
-            _resolvedRecordBeforeAiDraft != null);
-
-    private bool CanGenerateAppInfo()
-        => _featureAccess.CanExecute(
-            FeatureIds.AiAssistance,
-            HasProcessSelected &&
-            !IsBusy &&
-            !IsEvaluatingBundledAiDraft &&
-            !string.IsNullOrWhiteSpace(Prompt));
-
-    private bool CanEvaluateBundledAiDraft()
-        => _featureAccess.CanExecute(
-            FeatureIds.AiAssistance,
-            HasProcessSelected &&
-            HasEvaluationCandidate &&
-            !IsBusy &&
-            !IsEvaluatingBundledAiDraft &&
-            _evaluationResolution?.Record != null);
-
-    private bool CanReturnToNormalProfile()
-        => _featureAccess.CanExecute(
-            FeatureIds.AiAssistance,
-            HasProcessSelected &&
-            IsEvaluatingBundledAiDraft &&
-            !IsBusy &&
-            _recordBeforeEvaluation != null);
 
     private void NotifyCommandState()
     {
         SaveMetadataCommand.NotifyCanExecuteChanged();
         ReplaceSavedOverrideCommand.NotifyCanExecuteChanged();
-        DiscardAiDraftCommand.NotifyCanExecuteChanged();
-        GenerateAppInfoCommand.NotifyCanExecuteChanged();
-        EvaluateBundledAiDraftCommand.NotifyCanExecuteChanged();
-        ReturnToNormalProfileCommand.NotifyCanExecuteChanged();
     }
 
     private void MarkDraftDirty()
@@ -1374,7 +793,6 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
             $"Derived at display time; not persisted. Match {matches}, Mismatch {mismatches}, Unknown {unknown}, Not applicable {notApplicable}.";
         ComparisonEvidenceSource = report.BuildEvidenceSource();
         OnPropertyChanged(nameof(ComparisonEvidenceSource));
-        UpdateSecurityAssessmentContext();
     }
 
     private void ClearComparison(string status)
@@ -1389,178 +807,6 @@ public partial class ProcessDescriptionViewModel : ViewModelBase
         ComparisonEvidenceSource = null;
         OnPropertyChanged(nameof(ComparisonEvidenceSource));
     }
-
-    private void UpdateSecurityAssessmentContext()
-    {
-        SecurityAssessment?.UpdateReferenceContext(
-            BuildReferenceProfileEvidence(),
-            ComparisonEvidenceSource);
-    }
-
-    private string BuildReferenceProfileEvidence()
-    {
-        if (!HasProcessSelected)
-        {
-            return string.Empty;
-        }
-
-        var builder = new StringBuilder();
-        builder.AppendLine($"Origin/review: {_recordOrigin}; {ReviewStateDisplay}");
-        builder.AppendLine($"Profile: {SelectedProfileDisplay}");
-        builder.AppendLine($"Role summary: {Description}");
-        builder.AppendLine($"Category: {ApplicationCategory}");
-        builder.AppendLine($"Expected responsibilities: {ExpectedResponsibilities}");
-        builder.AppendLine($"Normal behavior: {NormalBehavior}");
-        builder.AppendLine($"Launch triggers: {LaunchTriggers}");
-        builder.AppendLine($"Typical context: {ExpectedContext}");
-        builder.AppendLine($"Command line expectations: {CommandLineExpectations}");
-        builder.AppendLine($"Filesystem/registry expectations: {FilesystemRegistryExpectations}");
-        builder.AppendLine($"Child process expectations: {ChildProcessExpectations}");
-        builder.AppendLine($"Network expectations: {NetworkExpectations}");
-        builder.AppendLine($"Variants/caveats: {NormalVariants}");
-        builder.AppendLine($"Abuse/masquerading: {CybersecurityNotes}");
-        builder.AppendLine($"Analyst checks: {AnalystValidationChecks}");
-        builder.AppendLine($"Sources: {CatalogSourcesDisplay}");
-        if (HasAiDraft || IsEvaluatingBundledAiDraft)
-        {
-            builder.AppendLine("Draft warning: this is an unsaved, unreviewed AI draft and not approved catalog content.");
-        }
-
-        var text = builder.ToString();
-        return text.Length <= 16000 ? text.TrimEnd() : text[..16000] + "…";
-    }
-
-    private void SetEvaluationAvailability(ApplicationInfoEvaluationResolutionResult evaluation)
-    {
-        if (!IsAiAssistancePublished)
-        {
-            ResetEvaluationAvailability();
-            return;
-        }
-
-        _evaluationResolution = evaluation;
-        HasEvaluationCandidate = evaluation.Record != null;
-        EvaluationStatusDisplay = evaluation.Record != null && evaluation.CatalogProfile != null
-            ? $"A bundled AI draft matches this process: {evaluation.CatalogProfile.DisplayName}. It remains hidden until explicitly evaluated."
-            : evaluation.IsAmbiguous
-                ? evaluation.SelectionReason
-                : string.Empty;
-    }
-
-    private void ResetEvaluationAvailability()
-    {
-        _evaluationResolution = null;
-        HasEvaluationCandidate = false;
-        EvaluationStatusDisplay = string.Empty;
-    }
-
-    private ApplicationMetadataRecord CaptureDisplayedRecord()
-    {
-        var record = BuildRecord();
-        record.RecordOrigin = _recordOrigin;
-        record.ReviewState = _displayedReviewState;
-        record.ReviewedUtc = _displayedReviewedUtc;
-        return record;
-    }
-
-    private bool RestoreRecordBeforeEvaluation()
-    {
-        if (!IsEvaluatingBundledAiDraft || _recordBeforeEvaluation == null)
-        {
-            return false;
-        }
-
-        var record = CloneRecord(_recordBeforeEvaluation);
-        var metadataExists = _metadataExistsBeforeEvaluation;
-        var isDirty = _isDirtyBeforeEvaluation;
-        var hasAiDraft = _hasAiDraftBeforeEvaluation;
-        _comparisonCatalogProfile = _comparisonCatalogProfileBeforeEvaluation;
-        _comparisonCandidates = _comparisonCandidatesBeforeEvaluation;
-        _comparisonSelectionReason = _comparisonSelectionReasonBeforeEvaluation;
-        _matchReason = _matchReasonBeforeEvaluation;
-        var priorStatus = _statusMessageBeforeEvaluation;
-        var priorDifferences = _draftDifferencesBeforeEvaluation;
-        ClearEvaluationSnapshot();
-        IsEvaluatingBundledAiDraft = false;
-        LoadRecord(record, metadataExists);
-        HasAiDraft = hasAiDraft;
-        DraftDifferences.Clear();
-        foreach (var difference in priorDifferences)
-        {
-            DraftDifferences.Add(difference);
-        }
-
-        _isDirty = isDirty;
-        RebuildComparison();
-        UpdateSecurityAssessmentContext();
-        StatusMessage = priorStatus;
-        NotifyCommandState();
-        return true;
-    }
-
-    private void ResetEvaluationForContextChange(bool restoreDisplayedRecord)
-    {
-        if (restoreDisplayedRecord)
-        {
-            _ = RestoreRecordBeforeEvaluation();
-        }
-
-        ClearEvaluationSnapshot();
-        IsEvaluatingBundledAiDraft = false;
-        ResetEvaluationAvailability();
-    }
-
-    private void ClearEvaluationSnapshot()
-    {
-        _recordBeforeEvaluation = null;
-        _metadataExistsBeforeEvaluation = false;
-        _isDirtyBeforeEvaluation = false;
-        _hasAiDraftBeforeEvaluation = false;
-        _comparisonCatalogProfileBeforeEvaluation = null;
-        _comparisonCandidatesBeforeEvaluation = [];
-        _comparisonSelectionReasonBeforeEvaluation = string.Empty;
-        _matchReasonBeforeEvaluation = string.Empty;
-        _statusMessageBeforeEvaluation = string.Empty;
-        _draftDifferencesBeforeEvaluation = [];
-    }
-
-    private bool IsCurrentAiDraftRequest(
-        long generation,
-        ProcessRowViewModel process,
-        CancellationTokenSource cancellation)
-        => generation == Volatile.Read(ref _aiDraftGeneration) &&
-           ReferenceEquals(_selectedProcess, process) &&
-           ReferenceEquals(_activeAiDraftRequest, cancellation);
-
-    private void CancelAiDraftRequest()
-    {
-        Interlocked.Increment(ref _aiDraftGeneration);
-        var active = Interlocked.Exchange(ref _activeAiDraftRequest, null);
-        active?.Cancel();
-        active?.Dispose();
-    }
-
-    private ApplicationMetadataRecord ResolveDiscardBaseline(ApplicationMetadataRecord current)
-    {
-        return CloneRecord(_resolvedRecordBeforeAiDraft ?? current);
-    }
-
-    private static AnnotationTarget CreateProcessAnnotationTarget(ProcessRowViewModel row) => new()
-    {
-        TargetKind = "Process",
-        TargetTable = "Processes",
-        TargetId = row.ProcessKey,
-        ProcessKey = row.ProcessKey,
-        ProcessId = row.ProcessId,
-        ProcessName = row.ProcessName,
-        Label = $"{row.ProcessName} (PID {row.ProcessId})",
-        DisplayPath = row.ProcessPath,
-        CaseId = row.ProcessInfo.CaseId,
-        EvidenceSessionId = row.ProcessInfo.EvidenceSessionId,
-        CaptureId = row.ProcessInfo.CaptureId,
-        SourceIdentityId = row.ProcessInfo.SourceIdentityId,
-        HostId = row.ProcessInfo.HostId
-    };
 
     private static string FormatAiSourceClaims(ApplicationMetadataRecord record)
     {

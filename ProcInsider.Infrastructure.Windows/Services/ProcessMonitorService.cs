@@ -24,10 +24,17 @@ public sealed class ProcessMonitorService
     private const string SourceDisplayName = "Sysinternals Process Monitor";
 
     private readonly InvestigationSessionPaths _sessionPaths;
+    private readonly OwnedAnalysisProcessRunner _processRunner;
+    private int _unconfirmedCaptureCleanup;
+    public bool HasUnconfirmedCaptureCleanup => Volatile.Read(ref _unconfirmedCaptureCleanup) != 0 || _processRunner.ExitConfirmationFailed;
 
     public ProcessMonitorService(InvestigationSessionPaths sessionPaths)
+        : this(sessionPaths, new OwnedAnalysisProcessRunner()) { }
+
+    internal ProcessMonitorService(InvestigationSessionPaths sessionPaths, OwnedAnalysisProcessRunner processRunner)
     {
         _sessionPaths = sessionPaths;
+        _processRunner = processRunner;
     }
 
     public async Task<ProcessMonitorCaptureStartResult> StartCaptureAsync(
@@ -71,14 +78,7 @@ public sealed class ProcessMonitorService
         int maxRows,
         CancellationToken cancellationToken)
     {
-        await AppendTranscriptAsync(capture.TranscriptPath, "Stopping Procmon capture.", CancellationToken.None).ConfigureAwait(false);
-        await RunProcmonAsync(
-                capture.ProcmonPath,
-                ["/Terminate"],
-                capture.TranscriptPath,
-                TimeSpan.FromSeconds(30),
-                CancellationToken.None)
-            .ConfigureAwait(false);
+        await StopOwnedCaptureAsync(capture.ProcmonPath, capture.TranscriptPath).ConfigureAwait(false);
 
         await ExportPmlToCsvAsync(
                 capture.ProcmonPath,
@@ -590,25 +590,65 @@ public sealed class ProcessMonitorService
             throw new InvalidOperationException("Procmon did not start.");
         }
 
-        var delay = Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
-        var exit = process.WaitForExitAsync(cancellationToken);
-        var completed = await Task.WhenAny(exit, delay).ConfigureAwait(false);
-        if (completed == exit)
+        await CompleteStartedCaptureAsync(async token =>
         {
-            await exit.ConfigureAwait(false);
-            if (process.ExitCode != 0)
+            var delay = Task.Delay(TimeSpan.FromSeconds(5), token);
+            var exit = process.WaitForExitAsync(token);
+            var completed = await Task.WhenAny(exit, delay).ConfigureAwait(false);
+            if (completed == exit)
             {
-                throw new InvalidOperationException($"Procmon exited during startup with code {process.ExitCode}.");
+                await exit.ConfigureAwait(false);
+                if (process.ExitCode != 0)
+                    throw new InvalidOperationException($"Procmon exited during startup with code {process.ExitCode}.");
+                await AppendTranscriptAsync(transcriptPath, "Procmon startup command exited successfully.", token).ConfigureAwait(false);
+                return;
             }
-
-            await AppendTranscriptAsync(transcriptPath, "Procmon startup command exited successfully.", cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        await AppendTranscriptAsync(transcriptPath, $"Procmon process {process.Id} is still running after startup.", cancellationToken).ConfigureAwait(false);
+            await delay.ConfigureAwait(false);
+            await AppendTranscriptAsync(transcriptPath, $"Procmon process {process.Id} is still running after startup.", token).ConfigureAwait(false);
+        }, _ => StopOwnedCaptureAsync(procmonPath, transcriptPath), cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<ProcessRunResult> RunProcmonAsync(
+    /// <summary>Owns cleanup after a successful native start and before returning the capture receipt.</summary>
+    internal async Task CompleteStartedCaptureAsync(
+        Func<CancellationToken, Task> finishStartup,
+        Func<CancellationToken, Task> stopStartedCapture,
+        CancellationToken cancellationToken)
+    {
+        try { await finishStartup(cancellationToken).ConfigureAwait(false); }
+        catch (Exception startupError)
+        {
+            try { await stopStartedCapture(CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception cleanupError)
+            {
+                Interlocked.Exchange(ref _unconfirmedCaptureCleanup, 1);
+                throw new InvalidOperationException("Procmon startup failed and its owned capture cleanup was not confirmed.",
+                    new AggregateException(startupError, cleanupError));
+            }
+            throw;
+        }
+    }
+
+    // Shared by receipt teardown and failed startup: logging cannot prevent the exact native stop.
+    internal async Task StopOwnedCaptureAsync(string procmonPath, string transcriptPath,
+        Func<CancellationToken, Task<int>>? stopCommand = null)
+    {
+        int exitCode;
+        try
+        {
+            exitCode = stopCommand == null
+                ? (await RunProcmonNativeAsync(procmonPath, ["/Terminate"], TimeSpan.FromSeconds(30), CancellationToken.None).ConfigureAwait(false)).ExitCode
+                : await stopCommand(CancellationToken.None).ConfigureAwait(false);
+            if (exitCode != 0) throw new InvalidOperationException($"Procmon stop failed with exit code {exitCode}.");
+        }
+        catch
+        {
+            Interlocked.Exchange(ref _unconfirmedCaptureCleanup, 1);
+            throw;
+        }
+        await AppendTranscriptAsync(transcriptPath, $"Procmon /Terminate completed. ExitCode: {exitCode}", CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private async Task<ProcessRunResult> RunProcmonAsync(
         string procmonPath,
         IReadOnlyList<string> arguments,
         string transcriptPath,
@@ -616,60 +656,28 @@ public sealed class ProcessMonitorService
         CancellationToken cancellationToken)
     {
         await AppendTranscriptAsync(transcriptPath, $"Command: {Quote(procmonPath)} {string.Join(" ", arguments.Select(Quote))}", cancellationToken).ConfigureAwait(false);
-        using var process = new Process
-        {
-            StartInfo = CreateProcessStartInfo(procmonPath, arguments, redirectOutput: true),
-            EnableRaisingEvents = true
-        };
-        var stdout = new StringBuilder();
-        var stderr = new StringBuilder();
-        process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data != null)
-            {
-                stdout.AppendLine(e.Data);
-            }
-        };
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data != null)
-            {
-                stderr.AppendLine(e.Data);
-            }
-        };
-
-        if (!process.Start())
-        {
-            throw new InvalidOperationException("Procmon did not start.");
-        }
-
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var waitTask = process.WaitForExitAsync(timeoutCts.Token);
-        var completed = await Task.WhenAny(waitTask, Task.Delay(timeout, cancellationToken)).ConfigureAwait(false);
-        if (completed != waitTask)
-        {
-            try
-            {
-                process.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-            }
-
-            throw new TimeoutException($"Procmon command did not complete within {timeout}.");
-        }
-
-        await waitTask.ConfigureAwait(false);
-        var result = new ProcessRunResult(process.ExitCode, stdout.ToString(), stderr.ToString());
-        await AppendTranscriptAsync(
-                transcriptPath,
-                $"ExitCode: {result.ExitCode}{Environment.NewLine}Stdout:{Environment.NewLine}{result.StandardOutput}{Environment.NewLine}Stderr:{Environment.NewLine}{result.StandardError}",
-                cancellationToken)
-            .ConfigureAwait(false);
+        var result = await RunProcmonNativeAsync(procmonPath, arguments, timeout, cancellationToken).ConfigureAwait(false);
+        await AppendTranscriptAsync(transcriptPath,
+            $"ExitCode: {result.ExitCode}{Environment.NewLine}Stdout:{Environment.NewLine}{result.StandardOutput}{Environment.NewLine}Stderr:{Environment.NewLine}{result.StandardError}",
+            cancellationToken).ConfigureAwait(false);
         return result;
+    }
+
+    private async Task<ProcessRunResult> RunProcmonNativeAsync(
+        string procmonPath, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(timeout);
+        try
+        {
+            var result = await _processRunner.RunAsync(
+                CreateProcessStartInfo(procmonPath, arguments, redirectOutput: true), deadline.Token).ConfigureAwait(false);
+            return new ProcessRunResult(result.ExitCode, result.StandardOutput, result.StandardError);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Procmon command did not complete within {timeout}; its owned process exit was confirmed.");
+        }
     }
 
     private static ProcessStartInfo CreateProcessStartInfo(

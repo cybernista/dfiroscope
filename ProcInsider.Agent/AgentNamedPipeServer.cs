@@ -10,6 +10,7 @@ using ProcInsider.Services;
 using ProcInsider.Services.AgentIpc;
 using ProcInsider.Services.EvidenceSources;
 using ProcInsider.Services.Features;
+using ProcInsider.Services.Forensics;
 
 namespace ProcInsider.Agent;
 
@@ -18,6 +19,7 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
     private readonly AgentOptions _options;
     private readonly AgentJobQueue _jobQueue;
     private readonly AgentConfiguredCapturePauseCoordinator? _configuredCapturePause;
+    private readonly AgentPersistenceCaptureWorkflow? _persistence;
     private readonly AgentStagingWriter _stagingWriter;
     private readonly AgentRuntimeDiagnosticsSampler _diagnosticsSampler;
     private readonly NetworkCaptureService _networkCaptureService;
@@ -33,6 +35,7 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
     private readonly Func<string, bool> _requestLiveCaptureSourceStop;
     private readonly Func<string, bool> _requestLiveCaptureSourceStart;
     private readonly Action _requestShutdown;
+    private readonly AgentRunLifetime? _runLifetime;
     private readonly TextWriter _log;
     private readonly string _pipeName;
     private readonly bool _shutdownOnly;
@@ -43,6 +46,9 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
     private static readonly DateTime ProcessStartedAtUtc = GetProcessStartedAtUtc();
     private readonly CancellationTokenSource _shutdown = new();
     private readonly ConcurrentDictionary<int, Task> _connections = new();
+    // Process-lifetime replay admission only. Durable forensic receipts remain the authority after restart.
+    private readonly PrefetchCommandAdmissionCache _prefetchCommandAdmissions = new();
+    private readonly ConcurrentDictionary<Guid, Lazy<Task<AgentIpcResponse>>> _configuredPrefetchStarts = new();
     private readonly Task _serverTask;
     private volatile DatabaseChangedNotification? _latestDatabaseChanged;
     private int _nextConnectionId;
@@ -72,10 +78,13 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
         IAgentPipeConnectionAuthorizer? connectionAuthorizer = null,
         AgentConfiguredCapturePauseCoordinator? configuredCapturePause = null,
         bool commandRuntimeOnly = false,
-        AgentTelemetryAuditAutomationService? telemetryAudit = null)
+        AgentTelemetryAuditAutomationService? telemetryAudit = null,
+        AgentPersistenceCaptureWorkflow? persistence = null,
+        AgentRunLifetime? runLifetime = null)
     {
         _options = options;
         _jobQueue = jobQueue;
+        _persistence = persistence;
         _configuredCapturePause = configuredCapturePause;
         _stagingWriter = stagingWriter;
         _diagnosticsSampler = diagnosticsSampler;
@@ -93,6 +102,7 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
         _requestLiveCaptureSourceStop = requestLiveCaptureSourceStop;
         _requestLiveCaptureSourceStart = requestLiveCaptureSourceStart;
         _requestShutdown = requestShutdown;
+        _runLifetime = runLifetime;
         _log = log;
         _pairingRuntime = commandRuntimeOnly
             ? pairingRuntime
@@ -531,6 +541,9 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
             AgentCommandKind.PauseJob => await PauseConfiguredCaptureAsync(request, cancellationToken).ConfigureAwait(false),
             AgentCommandKind.ResumeJob => await ResumeConfiguredCaptureAsync(request, cancellationToken).ConfigureAwait(false),
             AgentCommandKind.RunTelemetryAuditTest => await RunTelemetryAuditTestAsync(request, cancellationToken).ConfigureAwait(false),
+            AgentCommandKind.CollectPersistenceNow => await CollectPersistenceAsync(request, false, cancellationToken).ConfigureAwait(false),
+            AgentCommandKind.RebaselinePersistence => await CollectPersistenceAsync(request, true, cancellationToken).ConfigureAwait(false),
+            AgentCommandKind.CollectPrefetch => await CollectPrefetchAsync(request, cancellationToken).ConfigureAwait(false),
             _ => AgentIpcResponse.Failure(request.RequestId, "UnknownCommand", $"Unknown agent command kind: {request.CommandKind}.")
         };
     }
@@ -620,9 +633,22 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
     private AgentIpcResponse SaveCaptureConfiguration(AgentIpcRequest request)
     {
         var command = DeserializeCommand<SaveCaptureConfigurationCommand>(request);
+        if (command.RunDurationMinutes is <= 0 ||
+            !command.ApplyRunDuration && command.RunDurationMinutes is not null)
+            return AgentIpcResponse.Failure(request.RequestId, "AgentRunDurationInvalid",
+                "Run duration must be indefinitely or a positive whole number of minutes in explicit setup.");
+        if (command.ApplyRunDuration && _runLifetime is null)
+            return AgentIpcResponse.Failure(request.RequestId, "AgentRunDurationUnavailable",
+                "This Agent host does not support foreground run-duration setup.");
+        var configuration = _captureConfiguration.SaveCaptureConfiguration(command);
+        if (command.ApplyRunDuration && !_runLifetime!.TryConfigure(command.RunDurationMinutes))
+            return AgentIpcResponse.Failure(request.RequestId, "AgentRunDurationExpired",
+                "Capture settings were saved, but shutdown has already begun; the Agent lifetime was not changed.");
         return AgentIpcResponse.Ok(request.RequestId) with
         {
-            CaptureConfiguration = _captureConfiguration.SaveCaptureConfiguration(command)
+            CaptureConfiguration = configuration,
+            RunDurationApplied = command.ApplyRunDuration,
+            RunDurationMinutes = command.ApplyRunDuration ? command.RunDurationMinutes : null
         };
     }
 
@@ -682,6 +708,7 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
                 command.CollectPowerShellEvents,
                 command.CollectOtherWindowsEvents,
                 command.CollectSysmonEvents,
+                command.CollectOsNetworkEndpoints,
                 sources = new[]
                     {
                         command.CollectRuntimeEvents ? "Runtime" : string.Empty,
@@ -689,7 +716,8 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
                         command.CollectSecurityEvents ? "Security" : string.Empty,
                         command.CollectPowerShellEvents ? "PowerShell" : string.Empty,
                         command.CollectOtherWindowsEvents ? "WindowsOther" : string.Empty,
-                        command.CollectSysmonEvents ? "Sysmon" : string.Empty
+                        command.CollectSysmonEvents ? "Sysmon" : string.Empty,
+                        command.CollectOsNetworkEndpoints ? "OS endpoints" : string.Empty
                     }
                     .Where(source => !string.IsNullOrWhiteSpace(source))
                     .ToArray(),
@@ -700,7 +728,8 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
                     command.CollectSecurityEvents,
                     command.CollectPowerShellEvents,
                     command.CollectOtherWindowsEvents,
-                    command.CollectSysmonEvents
+                    command.CollectSysmonEvents,
+                    command.CollectOsNetworkEndpoints
                 }
             }
         }, cancellationToken).ConfigureAwait(false);
@@ -1711,6 +1740,26 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
             }
         }
 
+        if (savedConfiguration?.CollectPrefetchOnStart != true)
+            return await StartConfiguredCaptureCoreAsync(request, command, savedConfiguration, cancellationToken).ConfigureAwait(false);
+
+        var admission = _configuredPrefetchStarts.GetOrAdd(command.CommandId, _ => new(
+            () => StartConfiguredCaptureCoreAsync(request, command, savedConfiguration, cancellationToken),
+            LazyThreadSafetyMode.ExecutionAndPublication));
+        try
+        {
+            var response = await admission.Value.ConfigureAwait(false);
+            if (!response.Success && response.AcceptedJobs.Count == 0) RemoveAdmission();
+            return response with { RequestId = request.RequestId, DatabaseChanged = LatestDatabaseChanged };
+        }
+        catch { RemoveAdmission(); throw; }
+        void RemoveAdmission() => ((ICollection<KeyValuePair<Guid, Lazy<Task<AgentIpcResponse>>>>)_configuredPrefetchStarts)
+            .Remove(new(command.CommandId, admission));
+    }
+
+    private async Task<AgentIpcResponse> StartConfiguredCaptureCoreAsync(AgentIpcRequest request,
+        StartConfiguredCaptureCommand command, AgentCaptureConfiguration? savedConfiguration, CancellationToken cancellationToken)
+    {
         var existingConfiguredWork = _jobQueue.GetConfiguredCaptureWork(command.CaptureId);
         if (existingConfiguredWork.Count == 0 && string.IsNullOrWhiteSpace(command.CaptureId))
         {
@@ -1770,6 +1819,12 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
             };
         }
 
+        if (savedConfiguration?.CollectPrefetchOnStart == true && _jobQueue.TryGetInFlightJob(JobKind.PrefetchCollection, out var prefetchInFlight))
+        {
+            return AgentIpcResponse.Failure(request.RequestId, "PrefetchCollectionActive",
+                $"Prefetch collection job {prefetchInFlight.JobId:D} is already active; configured capture was not started.") with
+            { Job = prefetchInFlight, DatabaseChanged = LatestDatabaseChanged };
+        }
         var plan = _captureConfiguration.CreateStartPlan(command);
         if (!plan.CanStart)
         {
@@ -1784,6 +1839,14 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
         _jobQueue.AllowConfiguredCapture(plan.Lifecycle.CaptureId);
         try
         {
+            if (plan.CollectPrefetchOnStart)
+            {
+                var jobId = await _prefetchCommandAdmissions.AdmitAsync(command.CommandId,
+                    token => EnqueuePrefetchAsync(new CollectPrefetchCommand { CommandId = command.CommandId }, token,
+                        plan.Lifecycle.CaptureId, AgentJobOwnership.ConfiguredCapture), cancellationToken).ConfigureAwait(false);
+                acceptedJobs.Add(CreateConfiguredJobReference(jobId, JobKind.PrefetchCollection, plan.Lifecycle.CaptureId, isLiveSource: false));
+            }
+
             if (plan.LiveCaptureCommand != null)
             {
                 var liveResponse = await StartLiveCaptureCoreAsync(
@@ -1831,6 +1894,14 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
                     JobKind.NetworkCapture,
                     plan.Lifecycle.CaptureId,
                     isLiveSource: true));
+            }
+
+            if (plan.Persistence.Enabled)
+            {
+                var persistence = _persistence ?? throw new InvalidOperationException("Persistence acquisition is unavailable in this release/capture.");
+                var jobId = await persistence.StartAsync(CreateEvidenceIdentity(AgentPersistenceCaptureWorkflow.SourceIdentityId, plan.Lifecycle.CaptureId),
+                    plan.Persistence, command.CommandId, cancellationToken).ConfigureAwait(false);
+                acceptedJobs.Add(CreateConfiguredJobReference(jobId, JobKind.PersistenceCapture, plan.Lifecycle.CaptureId, isLiveSource: true));
             }
 
             if (plan.QueueArtifactEnrichment)
@@ -1950,6 +2021,49 @@ internal sealed class AgentNamedPipeServer : IAsyncDisposable
             captureWork.Select(item => item with { StopRequested = true }).ToArray(),
             result,
             accepted: false);
+    }
+
+    private async Task<AgentIpcResponse> CollectPersistenceAsync(AgentIpcRequest request, bool rebaseline, CancellationToken token)
+    {
+        if (_persistence == null) return AgentIpcResponse.Failure(request.RequestId, "PersistenceUnavailable", "Persistence acquisition is unavailable in this capture/release.");
+        var command = rebaseline ? (AgentCommand)DeserializeCommand<RebaselinePersistenceCommand>(request) : DeserializeCommand<CollectPersistenceNowCommand>(request);
+        var captureId = command is RebaselinePersistenceCommand reset ? reset.CaptureId : ((CollectPersistenceNowCommand)command).CaptureId;
+        var reason = rebaseline ? ProcInsider.Models.Persistence.PersistenceCollectionReason.Rebaseline : ProcInsider.Models.Persistence.PersistenceCollectionReason.UserRequested;
+        var resetReason = command is RebaselinePersistenceCommand resetCommand ? resetCommand.ResetReason : "";
+        var jobId = await _persistence.RequestCollectionAsync(captureId, reason, resetReason, command.CommandId, token).ConfigureAwait(false);
+        return new AgentIpcResponse
+        {
+            RequestId = request.RequestId, Success = true, AcceptedJobId = jobId,
+            Job = jobId != null && _jobQueue.TryGetJobStatus(jobId.Value, out var progress) ? progress : null,
+            DatabaseChanged = LatestDatabaseChanged
+        };
+    }
+
+    private async Task<AgentIpcResponse> CollectPrefetchAsync(AgentIpcRequest request, CancellationToken cancellationToken)
+    {
+        var command = DeserializeCommand<CollectPrefetchCommand>(request);
+        var jobId = await _prefetchCommandAdmissions.AdmitAsync(
+            command.CommandId,
+            token => EnqueuePrefetchAsync(command, token),
+            cancellationToken).ConfigureAwait(false);
+        return Accepted(request, jobId);
+    }
+
+    private async Task<Guid> EnqueuePrefetchAsync(CollectPrefetchCommand command, CancellationToken cancellationToken,
+        string captureId = "prefetch-live", AgentJobOwnership ownership = AgentJobOwnership.AnalystInitiated)
+    {
+        if (_jobQueue.TryGetInFlightJob(JobKind.PrefetchCollection, out var active)) throw new InvalidOperationException($"Prefetch collection job {active.JobId:D} is already active.");
+        var parser = new PrefetchParser();
+        return await _jobQueue.EnqueueAsync(new AgentJobRequest
+            {
+                OriginatingCommandId = command.CommandId, JobKind = JobKind.PrefetchCollection,
+                SourceType = "WindowsPrefetch", SourceDisplayName = "Agent local Windows Prefetch examination",
+                SourceProvider = "GetSystemWindowsDirectoryW", EvidenceSourceAdapterId = "windows.prefetch.live.v1",
+                EvidenceSourceAdapterVersion = "1", ParserVersion = parser.Identity.ParserVersion, CaptureId = captureId,
+                EvidenceIdentity = CreateEvidenceIdentity("windows.prefetch.live.v1", captureId),
+                Ownership = ownership, IsCaptureScoped = ownership == AgentJobOwnership.ConfiguredCapture,
+                Parameters = new { FixedRoot = "GetSystemWindowsDirectoryW\\Prefetch", MaxFiles = PrefetchLocalReader.MaximumFiles, MaxBytes = PrefetchLocalReader.MaximumBytes }
+            }, cancellationToken).ConfigureAwait(false);
     }
 
     private Task<AgentIpcResponse> PauseConfiguredCaptureAsync(

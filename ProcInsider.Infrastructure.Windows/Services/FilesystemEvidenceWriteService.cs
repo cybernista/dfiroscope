@@ -87,6 +87,13 @@ internal sealed class FilesystemEvidenceWriteService : IFilesystemEvidenceWriteS
         SqliteCommand insertProperty)
     {
         artifact.ArtifactId = NormalizeIdentifier(artifact.ArtifactId);
+        // Current live stores have migration 035. An imported legacy ID must not replace an immutable structured body.
+        using (var collision = _context.CreateCommand("SELECT 1 FROM Artifacts WHERE ArtifactId=$id AND StructuredPayloadVersion IS NOT NULL LIMIT 1"))
+        {
+            collision.Parameters.AddWithValue("$id", artifact.ArtifactId);
+            if (collision.ExecuteScalar() != null)
+                throw new InvalidDataException("A legacy filesystem import cannot replace an immutable structured forensic result.");
+        }
         var sourceId = _context.EnsureTelemetrySource(artifact.Source, "FilesystemArtifact");
         var identity = _context.ResolveEvidenceIdentity(artifact, "FilesystemArtifact", artifact.Source);
         ApplyEvidenceIdentity(artifact, identity);

@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ProcInsider.Compatibility;
+using ProcInsider.Features.NetworkWorkspace;
 using ProcInsider.Models;
 using ProcInsider.Models.Agent;
 
@@ -899,6 +900,25 @@ public static class SessionPathService
     internal static string GetEventsStatisticsPath() => Path.Combine(AppContext.BaseDirectory,
         "Sessions", "Derived", "events-statistics-" + Guid.NewGuid().ToString("N") + ".sqlite");
 
+    /// <summary>
+    /// Persistent, rebuildable Network examination state sits beside (never inside) a selected
+    /// capture package. This only allocates a deterministic path; it creates no directory/database.
+    /// </summary>
+    public static string GetNetworkAnalysisStorePath(InvestigationSessionPaths paths, string packageContextId)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        if (string.IsNullOrWhiteSpace(paths.SessionId) || string.IsNullOrWhiteSpace(packageContextId))
+            throw new ArgumentException("Network analysis requires the exact session and selected package identities.");
+        var identity = NetworkAnalysisBinding.Hash("network-analysis-store", paths.SessionId,
+            packageContextId);
+        var output = Path.Combine(Path.GetFullPath(AppContext.BaseDirectory), "Sessions", "Derived",
+            "network-analysis-" + identity + ".sqlite");
+        var packageRoot = Path.GetFullPath(paths.SessionRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (output.StartsWith(packageRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Network derived output would be inside the selected capture package; no fallback is permitted.");
+        return output;
+    }
+
     /// <summary>Machine-monitoring backups belong to the portable package, independently of captures.</summary>
     public static string GetMonitoringConfigurationDirectory(string? applicationBaseDirectory = null)
     {
@@ -906,6 +926,20 @@ public static class SessionPathService
         var portable = PortablePackageLocationService.TryResolve(applicationDirectory);
         return Path.Combine(portable?.PackageRoot ?? applicationDirectory, "settings", "SecurityConfig");
     }
+
+    /// <summary>Application provider configuration is shared across sessions, outside capture packages.</summary>
+    public static string GetAiProviderConfigurationDirectory(string? applicationBaseDirectory = null)
+    {
+        var applicationDirectory = Path.GetFullPath(applicationBaseDirectory ?? AppContext.BaseDirectory);
+        var portable = PortablePackageLocationService.TryResolve(applicationDirectory);
+        return Path.Combine(portable?.PackageRoot ?? applicationDirectory, "settings", "AI");
+    }
+
+    public static string GetAiProviderProfilesPath(string? applicationBaseDirectory = null) =>
+        Path.Combine(GetAiProviderConfigurationDirectory(applicationBaseDirectory), "ai-provider-profiles.json");
+
+    public static string GetAiProviderSecretsPath(string? applicationBaseDirectory = null) =>
+        Path.Combine(GetAiProviderConfigurationDirectory(applicationBaseDirectory), "ai-provider-secrets.dpapi.json");
 
     public static string GetDefaultDumpsDirectory() => CreateDefaultSession().DumpsDirectory;
 

@@ -4,13 +4,14 @@ namespace ProcInsider.Services.Ai;
 
 public sealed class AiProviderFactory
 {
-    public IAiProvider Create(AiProviderSettings settings)
+    public IModelProvider Create(AiProviderSettings settings, string apiKey = "")
     {
         return settings.ProviderKind switch
         {
-            AiProviderKind.LocalOpenAiCompatible => new OpenAiCompatibleAiProvider(),
-            AiProviderKind.CommercialOpenAiCompatible => new OpenAiCompatibleAiProvider(),
-            _ => new DisabledAiProvider()
+            AiProviderKind.LocalOpenAiCompatible => new OpenAiCompatibleAiProvider(settings, apiKey),
+            AiProviderKind.CommercialOpenAiCompatible => new OpenAiCompatibleAiProvider(settings, apiKey),
+            AiProviderKind.Anthropic => new AnthropicModelProvider(settings, apiKey),
+            _ => new DisabledModelProvider()
         };
     }
 }

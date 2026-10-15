@@ -31,11 +31,20 @@ public partial class AddAgentDialog : Window
     {
         ArgumentNullException.ThrowIfNull(catalog);
 
-        var publishedOptions = AgentCaptureOptionViewModel.CreateDefaultOptions(catalog)
+        var allOptions = AgentCaptureOptionViewModel.CreateDefaultOptions(catalog);
+        var publishedOptions = allOptions
             .Where(option => option.IsPublished)
             .ToArray();
-        ApplyInitialCaptureSelections(publishedOptions, initialCaptureOptions);
-        CaptureOptions = new ObservableCollection<AgentCaptureOptionViewModel>(publishedOptions);
+        if (!isExistingAgentSetup)
+            foreach (var option in publishedOptions)
+                option.IsIncluded = option.CanConfigure && option.Kind != AgentCaptureOptionKind.EtwEvents;
+        if (isExistingAgentSetup) ApplyInitialCaptureSelections(publishedOptions, initialCaptureOptions);
+        _allCaptureOptions = publishedOptions;
+        PersistenceOption = allOptions.Single(option => option.Kind == AgentCaptureOptionKind.Persistence);
+        var hasLiveForensics = publishedOptions.Any(option => option.Kind == AgentCaptureOptionKind.FilesystemArtifactImport);
+        CaptureOptions = new ObservableCollection<AgentCaptureOptionViewModel>(publishedOptions.Where(option =>
+            option.Kind != AgentCaptureOptionKind.ProcessMonitorCapture &&
+            (option.Kind != AgentCaptureOptionKind.Persistence || !hasLiveForensics)));
         InitializeComponent();
         SelectAgentMemory(selectedAgentMemoryMegabytes);
         if (isExistingAgentSetup)
@@ -50,6 +59,23 @@ public partial class AddAgentDialog : Window
 
     public ObservableCollection<AgentCaptureOptionViewModel> CaptureOptions { get; }
 
+    public AgentCaptureOptionViewModel PersistenceOption { get; }
+
+    private readonly IReadOnlyList<AgentCaptureOptionViewModel> _allCaptureOptions;
+
+    public int? SelectedRunDurationMinutes { get; private set; }
+
+    internal static bool TryParseRunDuration(string? text, out int? minutes)
+    {
+        minutes = null;
+        var value = text?.Trim();
+        if (string.Equals(value, "Indefinitely", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!int.TryParse(value, System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var parsed) || parsed <= 0) return false;
+        minutes = parsed;
+        return true;
+    }
+
     public int SelectedAgentMemoryMegabytes
     {
         get
@@ -62,7 +88,7 @@ public partial class AddAgentDialog : Window
     }
 
     public IReadOnlyList<AgentCaptureOptionViewModel> GetCaptureOptions()
-        => CaptureOptions.Select(option => option.Clone()).ToList();
+        => _allCaptureOptions.Select(option => option.Clone()).ToList();
 
     private static void ApplyInitialCaptureSelections(
         IEnumerable<AgentCaptureOptionViewModel> publishedOptions,
@@ -110,6 +136,14 @@ public partial class AddAgentDialog : Window
         {
             return;
         }
+
+        if (!TryParseRunDuration(AgentRunDurationComboBox.Text, out var minutes))
+        {
+            RunDurationValidation.Text = "Choose Indefinitely or enter a positive whole number of minutes.";
+            AgentRunDurationComboBox.Focus();
+            return;
+        }
+        SelectedRunDurationMinutes = minutes;
 
         DialogResult = true;
     }

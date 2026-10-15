@@ -85,11 +85,13 @@ public partial class ProcessRowViewModel : ViewModelBase
 
     public int ProcessId => _processInfo.ProcessId;
     public int ParentProcessId => _processInfo.ParentProcessId;
+    public string ParentProcessIdDisplay => ParentProcessId < 0 ? "<not available>" : ParentProcessId.ToString();
     public string ParentProcessName => _processInfo.ParentProcessName;
     public string ProcessPath => _processInfo.ProcessPath;
     public string CommandLine => _processInfo.CommandLine;
     public string UserName => _processInfo.UserName;
     public int SessionId => _processInfo.SessionId;
+    public string SessionIdDisplay => SessionId < 0 ? "<not available>" : SessionId.ToString();
     public string Architecture => _processInfo.Architecture;
 
     public string StartTimeDisplay => _processInfo.StartTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "<not available>";
@@ -194,6 +196,8 @@ public partial class ProcessRowViewModel : ViewModelBase
         _processInfo.HandleLastCaptured = updated.HandleLastCaptured;
         _processInfo.HandleCaptureError = updated.HandleCaptureError;
         _processInfo.TreeDepth = updated.TreeDepth;
+        _processInfo.ParentProcessId = updated.ParentProcessId;
+        _processInfo.SessionId = updated.SessionId;
         _processInfo.ParentProcessKey = updated.ParentProcessKey;
         _processInfo.ParentProcessName = updated.ParentProcessName;
         _processInfo.CaseId = updated.CaseId;
@@ -239,7 +243,7 @@ public partial class ProcessRowViewModel : ViewModelBase
             new("Identity", "Process", ProcessName),
             new("Identity", "PID", ProcessId.ToString()),
             new("Identity", "Process Key", ProcessKey),
-            new("Parent", "Parent PID", ParentProcessId.ToString()),
+            new("Parent", "Parent PID", ParentProcessIdDisplay),
             new("Parent", "Parent Process Key", string.IsNullOrWhiteSpace(_processInfo.ParentProcessKey) ? "<not available>" : _processInfo.ParentProcessKey),
             new("Parent", "Parent Name", ParentProcessName),
             new("Image", "Path", ProcessPath),
@@ -248,7 +252,7 @@ public partial class ProcessRowViewModel : ViewModelBase
             new("Image", "Description", FileDescription),
             new("Image", "SHA256", Sha256Hash),
             new("Runtime", "User", UserName),
-            new("Runtime", "Session", SessionId.ToString()),
+            new("Runtime", "Session", SessionIdDisplay),
             new("Runtime", "Architecture", Architecture),
             new("Runtime", "Start Time", StartTimeDisplay),
             new("Runtime", "End Time", EndTimeDisplay),

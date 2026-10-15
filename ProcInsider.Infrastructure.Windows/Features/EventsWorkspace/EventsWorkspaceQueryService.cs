@@ -434,6 +434,11 @@ internal sealed partial class EventsWorkspaceQueryService : IEventsWorkspaceQuer
     private string Predicate(EventsFilter filter)
     {
         var sql = "e.Source IN (SELECT value FROM json_each($publishedSources)) AND ($case IS NULL OR COALESCE(e.CaseId,'')=$case) AND COALESCE(e.EvidenceSessionId,'')=$session AND ($capture IS NULL OR COALESCE(e.CaptureId,'')=$capture)";
+        if (filter.ReadScope is not null)
+            sql += " AND COALESCE(e.CaseId,'')=$readCase AND e.EvidenceSessionId=$readSession" +
+                " AND e.CaptureId=$readCapture AND e.HostId=$readHost" +
+                " AND ($readSource='' OR e.SourceIdentityId=$readSource)" +
+                " AND ($readRoot='' OR e.ExecutionRootId=$readRoot OR ($readCompatible=1 AND events_read_root_matches(e.ExecutionRootId)))";
         if (filter.Source != null)
         {
             if (!_publishedSourceNames.Contains(filter.Source)) throw new InvalidOperationException("The requested event source is not published.");
@@ -636,6 +641,15 @@ internal sealed partial class EventsWorkspaceQueryService : IEventsWorkspaceQuer
         }
         if (filter.AuditCategoryKey != null) command.Parameters.AddWithValue("$auditCategory", filter.AuditCategoryKey);
         if (filter.AuditSubcategoryKey != null) command.Parameters.AddWithValue("$auditSubcategory", filter.AuditSubcategoryKey);
+        if (filter.ReadScope is { } readScope)
+        {
+            _connection!.CreateFunction<string?, bool>("events_read_root_matches", root =>
+                EvidenceIdentity.ExecutionRootsCompatible(readScope.ExecutionRootId, root, readScope.EvidenceSessionId), true);
+            foreach (var (key, value) in new[] { ("Case", readScope.CaseId), ("Session", readScope.EvidenceSessionId),
+                ("Capture", readScope.CaptureId), ("Host", readScope.HostId), ("Source", readScope.SourceIdentityId),
+                ("Root", readScope.ExecutionRootId) }) command.Parameters.AddWithValue("$read" + key, value);
+            command.Parameters.AddWithValue("$readCompatible", filter.IncludeCompatibleExecutionRoots ? 1 : 0);
+        }
         if (filter.ExactEvent is { } r)
         {
             command.Parameters.AddWithValue("$sequence", r.SequenceId);
@@ -664,6 +678,10 @@ internal sealed partial class EventsWorkspaceQueryService : IEventsWorkspaceQuer
         ArgumentNullException.ThrowIfNull(filter);
         if (offset < 0 || size is < 1 or > MaximumPageSize || !Enum.IsDefined(filter.IdentityRole))
             throw new ArgumentOutOfRangeException(nameof(size));
+        if (filter.IncludeCompatibleExecutionRoots && filter.ReadScope is null ||
+            filter.ReadScope is { } readScope && (string.IsNullOrWhiteSpace(readScope.EvidenceSessionId) ||
+                string.IsNullOrWhiteSpace(readScope.CaptureId) || string.IsNullOrWhiteSpace(readScope.HostId)))
+            throw new ArgumentException("Events read scope requires a qualified host/capture.", nameof(filter));
         if (filter.IdentitySessionKey != null && filter.IdentityKey == null || filter.AuditSubcategoryKey != null && filter.AuditCategoryKey == null)
             throw new ArgumentException("A session/subcategory filter requires its parent.", nameof(filter));
         if ((filter.Source != null && string.IsNullOrWhiteSpace(filter.Source)) || filter.EventIds.Any(id => id < 0) ||

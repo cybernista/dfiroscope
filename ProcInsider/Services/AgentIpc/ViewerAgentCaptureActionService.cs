@@ -23,7 +23,9 @@ public enum ViewerAgentCaptureActionKind
     WaitForJob = 10,
     CancelJob = 11,
     PauseConfiguredCapture = 12,
-    ResumeConfiguredCapture = 13
+    ResumeConfiguredCapture = 13,
+    CollectPersistence = 14,
+    RebaselinePersistence = 15
 }
 
 public enum ViewerAgentCaptureActionOutcome
@@ -155,7 +157,8 @@ public sealed class ViewerAgentCaptureActionService : IDisposable
         "Security",
         "PowerShell",
         "WindowsOther",
-        "Sysmon"
+        "Sysmon",
+        "OS endpoints"
     ];
 
     private readonly IViewerAgentCaptureActionRuntime _runtime;
@@ -171,6 +174,29 @@ public sealed class ViewerAgentCaptureActionService : IDisposable
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _utcNow = utcNow ?? (() => DateTime.UtcNow);
+    }
+
+    public async Task<ViewerAgentCaptureActionResult> CollectPersistenceAsync(ViewerAgentCaptureActionTarget target,
+        EvidenceIdentity scope, string expectedDatabasePath, string? resetReason = null, CancellationToken cancellationToken = default)
+    {
+        var action = resetReason == null ? ViewerAgentCaptureActionKind.CollectPersistence : ViewerAgentCaptureActionKind.RebaselinePersistence;
+        if (scope.SourceIdentityId != ProcInsider.Models.Persistence.PersistenceCollection.LocalSourceIdentityId || scope.EvidenceSessionId != target.SessionId || scope.HostId != target.HostId || string.IsNullOrWhiteSpace(scope.CaptureId) || string.IsNullOrWhiteSpace(expectedDatabasePath))
+            return Rejected(action, "PersistenceScopeMismatch", "The recorded persistence context does not match the active Agent target.");
+        var saved = await GetConfigurationAsync(target, cancellationToken).ConfigureAwait(false);
+        if (!saved.Succeeded || saved.Response?.CaptureConfiguration?.Persistence.Enabled != true)
+            return saved.Succeeded ? Rejected(action, "PersistenceDisabled", "Enable Persistence through capture configuration before collecting.") : saved with { Action = action };
+        var health = await GetCurrentControlAsync(action, target, cancellationToken).ConfigureAwait(false);
+        if (health.Result != null) return health.Result;
+        var current = health.Health!;
+        if (current.WorkspaceMode != CaptureWorkspaceMode.LiveCapture || current.CaptureSealed ||
+            current.CaptureCompatibility?.Allows(CaptureOpenCapability.WritePrimaryEvidence) != true ||
+            !string.Equals(Path.GetFullPath(current.DatabasePath), Path.GetFullPath(expectedDatabasePath), StringComparison.OrdinalIgnoreCase) ||
+            current.Control.CaptureState != AgentCaptureRunState.Running || current.Control.ActiveCaptureId != scope.CaptureId ||
+            !current.Control.ActiveWork.Any(work => work.JobKind == JobKind.PersistenceCapture && work.CaptureId == scope.CaptureId && work.State == JobState.Running))
+            return Rejected(action, "PersistenceCaptureUnavailable", "A fresh writable matching configured Persistence capture is required.");
+        AgentCommand command = resetReason == null ? new CollectPersistenceNowCommand { CaptureId = scope.CaptureId } :
+            new RebaselinePersistenceCommand { CaptureId = scope.CaptureId, ResetReason = resetReason };
+        return await ExecuteCommandAsync(action, target, command, "collect persistence", cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<ViewerAgentCaptureActionResult> GetConfigurationAsync(
@@ -232,8 +258,13 @@ public sealed class ViewerAgentCaptureActionService : IDisposable
     public Task<ViewerAgentCaptureActionResult> SaveConfigurationAsync(
         ViewerAgentCaptureActionTarget target,
         AgentCaptureConfiguration configuration,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool applyRunDuration = false,
+        int? runDurationMinutes = null)
     {
+        if (runDurationMinutes is <= 0 || !applyRunDuration && runDurationMinutes is not null)
+            return Task.FromResult(Rejected(ViewerAgentCaptureActionKind.SaveConfiguration,
+                "AgentRunDurationInvalid", "Run duration requires explicit setup and positive whole minutes or indefinitely."));
         var validation = ValidateConfiguration(target, configuration, allowNull: false);
         if (validation != null)
         {
@@ -243,7 +274,7 @@ public sealed class ViewerAgentCaptureActionService : IDisposable
             });
         }
 
-        return SaveConfigurationCoreAsync(target, configuration, cancellationToken);
+        return SaveConfigurationCoreAsync(target, configuration, cancellationToken, applyRunDuration, runDurationMinutes);
     }
 
     private async Task<ViewerAgentCaptureActionResult> CheckConfigurationCoreAsync(
@@ -277,7 +308,9 @@ public sealed class ViewerAgentCaptureActionService : IDisposable
     private async Task<ViewerAgentCaptureActionResult> SaveConfigurationCoreAsync(
         ViewerAgentCaptureActionTarget target,
         AgentCaptureConfiguration configuration,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool applyRunDuration,
+        int? runDurationMinutes)
     {
         var result = await ExecuteCommandAsync(
                 ViewerAgentCaptureActionKind.SaveConfiguration,
@@ -288,11 +321,17 @@ public sealed class ViewerAgentCaptureActionService : IDisposable
                     HostId = target.HostId,
                     ConfigurationVersion = configuration.ConfigurationVersion,
                     ConfigurationHash = configuration.ConfigurationHash,
-                    Configuration = configuration
+                    Configuration = configuration,
+                    ApplyRunDuration = applyRunDuration,
+                    RunDurationMinutes = runDurationMinutes
                 },
                 "save capture configuration",
                 cancellationToken)
             .ConfigureAwait(false);
+        if (result.Succeeded && applyRunDuration &&
+            (result.Response?.RunDurationApplied != true || result.Response.RunDurationMinutes != runDurationMinutes))
+            return MissingPayload(ViewerAgentCaptureActionKind.SaveConfiguration,
+                "AgentRunDurationUnconfirmed", "Capture save returned no matching Agent-owned run-duration acknowledgement.", result.Response);
         return result.Succeeded && result.Response?.CaptureConfiguration == null
             ? MissingPayload(
                 ViewerAgentCaptureActionKind.SaveConfiguration,

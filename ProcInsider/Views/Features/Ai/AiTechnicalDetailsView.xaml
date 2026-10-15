@@ -1,0 +1,27 @@
+<UserControl x:Class="ProcInsider.Views.Features.Ai.AiTechnicalDetailsView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <Grid Margin="6"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <StackPanel><TextBlock Text="Technical evidence details" FontWeight="SemiBold" TextWrapping="Wrap"/>
+   <TextBlock Text="{Binding LastSubmissionDestination}" TextWrapping="Wrap"/>
+   <TextBlock Text="{Binding SelectedMessage.Id, StringFormat=Message: {0}}" TextWrapping="Wrap"/>
+   <TextBlock Text="{Binding SelectedMessage.TimestampUtc, StringFormat={}{0:u}}" TextWrapping="Wrap"/>
+   <TextBlock Text="{Binding SelectedMessage.ModelId, StringFormat=Actual model: {0}}" TextWrapping="Wrap"/>
+   <TextBlock Text="Checked citations for selected answer" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,8,0,4"/>
+   <TextBlock Text="{Binding EvidenceStatus}" TextWrapping="Wrap" Foreground="#805000" Margin="0,0,0,4"/>
+  </StackPanel>
+  <ListBox Grid.Row="1" ItemsSource="{Binding SelectedMessageReferences}" SelectedItem="{Binding SelectedReference}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+   <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4">
+    <TextBlock Text="{Binding DisplayName}" TextWrapping="Wrap" FontWeight="SemiBold"/>
+    <TextBlock Text="{Binding ReferenceId}" TextWrapping="Wrap"/>
+    <TextBlock Text="{Binding SourceRunId, StringFormat=Source run: {0}}" TextWrapping="Wrap"/>
+    <TextBlock Text="{Binding SourceRevision, StringFormat=Revision: {0}}" TextWrapping="Wrap"/>
+    <TextBlock Text="{Binding Identity.HostId, StringFormat=Host: {0}}" TextWrapping="Wrap"/>
+    <TextBlock Text="{Binding Identity.CaptureId, StringFormat=Capture: {0}}" TextWrapping="Wrap"/>
+    <TextBlock Text="{Binding CompactSnapshot}" TextWrapping="Wrap" Margin="0,5,0,0"/>
+    <TextBlock Text="{Binding SnapshotProvenance}" TextWrapping="Wrap" Foreground="#666666"/>
+   </StackPanel></DataTemplate></ListBox.ItemTemplate>
+  </ListBox>
+  <Button Grid.Row="2" Content="Open selected original" Command="{Binding OpenOriginalCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" Margin="0,5,0,0"/>
+ </Grid>
+</UserControl>

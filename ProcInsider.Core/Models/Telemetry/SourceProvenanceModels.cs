@@ -31,7 +31,12 @@ public sealed record SourceRunDescriptor
     public DateTime StartedUtc { get; init; } = DateTime.UtcNow;
 }
 
-public sealed record SourceRunRegistration(int SourceId, string SourceRunId);
+public sealed record SourceRunRegistration(int SourceId, string SourceRunId)
+{
+    /// <summary>Store-resolved registration scope; absent on legacy manually constructed results.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public EvidenceIdentity? ResolvedEvidenceIdentity { get; init; }
+}
 
 /// <summary>Exact provenance captured by an agent writer work item.</summary>
 public sealed record EvidenceWriteProvenance(string SourceRunId, Guid IngestionJobId);

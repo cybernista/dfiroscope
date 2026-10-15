@@ -200,6 +200,7 @@ public sealed record AgentSqliteBenchmarkPhaseResult
 /// </summary>
 public sealed record CaptureHealthReport : AgentStatusMessage
 {
+    public IReadOnlyList<AgentPersistenceSourceHealth> PersistenceSources { get; init; } = [];
     public override AgentStatusKind Kind => AgentStatusKind.CaptureHealthReport;
 
     /// <summary>Overall pipeline health.</summary>
@@ -219,6 +220,9 @@ public sealed record CaptureHealthReport : AgentStatusMessage
     /// has durably committed its first complete runtime process inventory.
     /// </summary>
     public InitialProcessInventoryState InitialProcessInventory { get; init; }
+
+    /// <summary>The first OS endpoint family cycle has durably committed; independent of process inventory.</summary>
+    public bool InitialNetworkEndpointInventoryCommitted { get; init; }
 
     /// <summary>Cumulative events dropped during the current or most recently completed run.</summary>
     public long TotalEventsDropped { get; init; }

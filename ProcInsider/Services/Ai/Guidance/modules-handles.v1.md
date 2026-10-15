@@ -1,0 +1,3 @@
+# Modules and handles
+Module observations describe recorded mappings and their qualified process lifetime, path and capture time. A loaded module is not proof that every exported function executed. Handle observations describe a sampled reference to an object; they do not prove file content access, write completion or sustained ownership. Retain object type, access flags and source coverage; protected or exited processes can yield partial results.
+Inspect this family only through a suitable currently offered Tool. Process metadata or tree results do not implicitly include modules or handles. No suitable offered Tool means these records were not inspected in this execution.

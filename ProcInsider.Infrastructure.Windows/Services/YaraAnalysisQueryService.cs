@@ -38,7 +38,12 @@ public sealed record YaraAnalysisReadResult
 public interface IYaraAnalysisQueryService
 {
     YaraAnalysisReadResult GetExactScan(YaraAnalysisScanQuery query);
+    YaraAnalysisReadResult GetExactScanForReference(EvidenceIdentity scope, string sourceRunId, string scanId);
+    YaraScanDiscoveryPage GetScanPage(YaraAnalysisScanQuery target, long offset = 0, int pageSize = 50, CancellationToken cancellationToken = default);
 }
+
+public sealed record YaraScanDiscoveryRow(string ScanId, string PayloadHashSha256, DateTime CompletedUtc, AnalysisSourceAvailability Availability);
+public sealed record YaraScanDiscoveryPage(YaraAnalysisReadState State, IReadOnlyList<YaraScanDiscoveryRow> Rows, long MatchingRows);
 
 /// <summary>
 /// Bounded read-only owner for one exact normalized YARA scan and evidence scope.
@@ -52,6 +57,66 @@ internal sealed class YaraAnalysisQueryService : IYaraAnalysisQueryService
     internal YaraAnalysisQueryService(SqliteReadQueryContext context)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
+    }
+
+    public YaraAnalysisReadResult GetExactScanForReference(EvidenceIdentity scope, string sourceRunId, string scanId)
+    {
+        using var connection = _context.OpenReadOnlyConnection();
+        if (!TableExists(connection, "YaraAnalysisScans")) return Result(YaraAnalysisReadState.Unsupported, "Normalized scan schema unavailable.");
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT TargetKind,EvidenceReferenceKind,EvidenceReferenceId FROM YaraAnalysisScans
+                WHERE ScanId=$ScanId AND CaseId=$CaseId AND EvidenceSessionId=$EvidenceSessionId AND CaptureId=$CaptureId
+                AND SourceIdentityId=$SourceIdentityId AND HostId=$HostId AND ExecutionRootId=$ExecutionRootId AND SourceRunId=$SourceRunId LIMIT 2
+                """;
+            var query = new YaraAnalysisScanQuery { ScanId = scanId, EvidenceIdentity = scope, SourceRunId = sourceRunId };
+            AddQueryParameters(command, query);
+            using var reader = command.ExecuteReader();
+            if (!reader.Read()) return Result(YaraAnalysisReadState.NotFound, "Exact scan unavailable.");
+            var kind = (YaraScanTargetKind)reader.GetInt32(0); var evidenceKind = (EvidenceReferenceKind)reader.GetInt32(1); var evidenceId = reader.GetString(2);
+            if (!Enum.IsDefined(kind) || !Enum.IsDefined(evidenceKind) || reader.Read()) return Result(YaraAnalysisReadState.Corrupt, "Exact scan target malformed or ambiguous.");
+            reader.Close();
+            return GetExactScan(query with { TargetKind = kind, EvidenceReference = new(evidenceKind, evidenceId) });
+        }
+        catch (Exception error) when (error is SqliteException or InvalidDataException) { return Result(YaraAnalysisReadState.Corrupt, "Exact scan reference unreadable."); }
+    }
+
+    public YaraScanDiscoveryPage GetScanPage(YaraAnalysisScanQuery target, long offset = 0, int pageSize = 50, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (offset < 0 || offset > int.MaxValue || pageSize is < 1 or > 50 || !Enum.IsDefined(target.TargetKind)) throw new ArgumentException("Invalid scan page.");
+        cancellationToken.ThrowIfCancellationRequested();
+        using var connection = _context.OpenReadOnlyConnection();
+        if (!TableExists(connection, "YaraAnalysisScans")) return new(YaraAnalysisReadState.Unsupported, [], 0);
+        try
+        {
+            using var snapshot = connection.BeginTransaction(deferred: true);
+            using var command = connection.CreateCommand(); command.Transaction = snapshot;
+            const string where = """
+                CaseId=$CaseId AND EvidenceSessionId=$EvidenceSessionId AND CaptureId=$CaptureId AND SourceIdentityId=$SourceIdentityId
+                AND HostId=$HostId AND ExecutionRootId=$ExecutionRootId AND SourceRunId=$SourceRunId
+                AND TargetKind=$TargetKind AND EvidenceReferenceKind=$EvidenceReferenceKind AND EvidenceReferenceId=$EvidenceReferenceId
+                """;
+            AddQueryParameters(command, target);
+            using var cancellation = cancellationToken.Register(command.Cancel);
+            command.CommandText = "SELECT COUNT(*) FROM YaraAnalysisScans WHERE " + where;
+            var matching = Convert.ToInt64(command.ExecuteScalar());
+            command.CommandText = "SELECT ScanId,PayloadHashSha256,CompletedUtc,Availability FROM YaraAnalysisScans WHERE " + where +
+                " ORDER BY CompletedUtc DESC,ScanId ASC LIMIT $Take OFFSET $Skip";
+            command.Parameters.AddWithValue("$Take", pageSize); command.Parameters.AddWithValue("$Skip", offset);
+            using var reader = command.ExecuteReader(); var rows = new List<YaraScanDiscoveryRow>();
+            while (reader.Read())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var availability = reader.GetInt32(3);
+                if (!Enum.IsDefined(typeof(AnalysisSourceAvailability), availability)) throw new InvalidDataException();
+                rows.Add(new(reader.GetString(0), reader.GetString(1), ParseUtc(reader.GetString(2)), (AnalysisSourceAvailability)availability));
+            }
+            return new(YaraAnalysisReadState.Available, rows.AsReadOnly(), matching);
+        }
+        catch (Exception error) when (error is SqliteException or InvalidDataException) { cancellationToken.ThrowIfCancellationRequested(); return new(YaraAnalysisReadState.Corrupt, [], 0); }
     }
 
     public YaraAnalysisReadResult GetExactScan(YaraAnalysisScanQuery query)

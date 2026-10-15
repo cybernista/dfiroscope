@@ -7,7 +7,11 @@ namespace ProcInsider.Agent;
 
 internal sealed class AgentProcessMonitorCaptureJobHandler : IAgentJobHandler
 {
-    private readonly ProcessMonitorService _processMonitorService;
+    private readonly Func<ProcessMonitorCaptureOptions, Guid, CancellationToken, Task<ProcessMonitorCaptureStartResult>> _startCapture;
+    private readonly Func<ProcessMonitorCaptureStartResult, int, CancellationToken, Task<ProcessMonitorImportResult>> _stopCaptureAndImport;
+    private readonly Func<bool> _hasUnconfirmedServiceCleanup;
+    private int _unconfirmedProducerTeardown;
+    internal bool HasUnconfirmedProducerTeardown => Volatile.Read(ref _unconfirmedProducerTeardown) != 0 || _hasUnconfirmedServiceCleanup();
     private readonly ProcessMonitorEvidenceSourceAdapter _adapter;
     private readonly IEvidenceSourcePublisher _publisher;
 
@@ -15,8 +19,21 @@ internal sealed class AgentProcessMonitorCaptureJobHandler : IAgentJobHandler
         ProcessMonitorService processMonitorService,
         ProcessMonitorEvidenceSourceAdapter adapter,
         IEvidenceSourcePublisher publisher)
+        : this(processMonitorService.StartCaptureAsync, processMonitorService.StopCaptureAndImportAsync, adapter, publisher,
+            () => processMonitorService.HasUnconfirmedCaptureCleanup)
     {
-        _processMonitorService = processMonitorService;
+    }
+
+    internal AgentProcessMonitorCaptureJobHandler(
+        Func<ProcessMonitorCaptureOptions, Guid, CancellationToken, Task<ProcessMonitorCaptureStartResult>> startCapture,
+        Func<ProcessMonitorCaptureStartResult, int, CancellationToken, Task<ProcessMonitorImportResult>> stopCaptureAndImport,
+        ProcessMonitorEvidenceSourceAdapter adapter,
+        IEvidenceSourcePublisher publisher,
+        Func<bool>? hasUnconfirmedServiceCleanup = null)
+    {
+        _hasUnconfirmedServiceCleanup = hasUnconfirmedServiceCleanup ?? (() => false);
+        _startCapture = startCapture;
+        _stopCaptureAndImport = stopCaptureAndImport;
         _adapter = adapter;
         _publisher = publisher;
     }
@@ -39,38 +56,42 @@ internal sealed class AgentProcessMonitorCaptureJobHandler : IAgentJobHandler
         ProcessMonitorCaptureStartResult capture;
         try
         {
-            capture = await _processMonitorService.StartCaptureAsync(
+            capture = await _startCapture(
                     options,
                     context.Request.JobId,
                     context.CancellationToken)
                 .ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             throw new InvalidOperationException($"Process Monitor capture did not start: {ex.Message}", ex);
         }
 
-        await context.ReportProgressAsync(
-                0,
-                1,
-                $"Process Monitor capture running. Backing file: {capture.BackingFilePath}; transcript: {capture.TranscriptPath}")
-            .ConfigureAwait(false);
-
         try
         {
+            await context.ReportProgressAsync(
+                    0,
+                    1,
+                    $"Process Monitor capture running. Backing file: {capture.BackingFilePath}; transcript: {capture.TranscriptPath}")
+                .ConfigureAwait(false);
             await Task.Delay(Timeout.InfiniteTimeSpan, context.CancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+        catch (Exception captureError)
         {
+            // A successful start always owns stop/export/import, even if initial progress publication fails.
             try
             {
-                await context.ReportProgressAsync(
-                        0,
-                        1,
-                        "Stopping Process Monitor capture, exporting CSV, and importing rows.",
-                        CancellationToken.None)
-                    .ConfigureAwait(false);
-                var result = await _processMonitorService.StopCaptureAndImportAsync(
+                Exception? diagnosticFailure = null;
+                try
+                {
+                    await context.ReportProgressAsync(
+                            0, 1, "Stopping Process Monitor capture, exporting CSV, and importing rows.", CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception error) { diagnosticFailure = error; }
+                // A failed progress write cannot prevent stop/export/import of this owned capture.
+                var result = await _stopCaptureAndImport(
                         capture,
                         parameters.MaxRows,
                         CancellationToken.None)
@@ -84,11 +105,16 @@ internal sealed class AgentProcessMonitorCaptureJobHandler : IAgentJobHandler
                         $"{adapterResult.DuplicateCount:N0} replay duplicate(s). CSV: {result.CsvPath}",
                         CancellationToken.None)
                     .ConfigureAwait(false);
+                if (diagnosticFailure != null) throw new InvalidOperationException(
+                    "Process Monitor stopped/imported, but its stopping diagnostic could not be persisted.", diagnosticFailure);
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException($"Process Monitor capture stop/import failed: {ex.Message}", ex);
+                Interlocked.Exchange(ref _unconfirmedProducerTeardown, 1);
+                throw new InvalidOperationException($"Process Monitor capture stop/import failed: {ex.Message}",
+                    new AggregateException(captureError, ex));
             }
+            if (captureError is not OperationCanceledException || !context.CancellationToken.IsCancellationRequested) throw;
         }
     }
 

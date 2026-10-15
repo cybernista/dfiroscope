@@ -282,6 +282,11 @@ public sealed class SystemViewerSnapshotFollowClock : IViewerSnapshotFollowClock
 /// </summary>
 public sealed class ViewerSnapshotFollowCoordinator : IDisposable
 {
+    internal static bool HasCommittedInitialInventory(CaptureHealthReport? health) =>
+        health?.InitialProcessInventory == InitialProcessInventoryState.Ready ||
+        health?.InitialProcessInventory == InitialProcessInventoryState.NotExpected &&
+        health.InitialNetworkEndpointInventoryCommitted;
+
     public static readonly TimeSpan MinimumFollowInterval = TimeSpan.FromMinutes(1);
     public static readonly TimeSpan MaximumAutomaticBackoff = TimeSpan.FromMinutes(15);
 

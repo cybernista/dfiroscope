@@ -4,7 +4,8 @@ public enum AiProviderKind
 {
     Disabled = 0,
     LocalOpenAiCompatible = 1,
-    CommercialOpenAiCompatible = 2
+    CommercialOpenAiCompatible = 2,
+    Anthropic = 3
 }
 
 public enum AiInvestigationStatus

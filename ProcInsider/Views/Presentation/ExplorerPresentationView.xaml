@@ -53,7 +53,7 @@
                                 <searchViews:ExplorerSigmaView/>
                             </DataTemplate>
                             <DataTemplate DataType="{x:Type vm:ProcessPresentationViewModel}">
-                                <aiViews:ExplorerAiView/>
+                                <aiViews:ExplorerAiView DataContext="{Binding AiInvestigationViewModel}"/>
                             </DataTemplate>
                             <DataTemplate DataType="{x:Type vm:NetworkCapturesViewModel}">
                                 <networkViews:ExplorerNetworkView/>

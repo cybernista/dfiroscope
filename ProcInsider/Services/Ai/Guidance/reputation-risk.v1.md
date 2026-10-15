@@ -1,0 +1,3 @@
+# Reputation and risk
+Stored reputation responses and risk scores are derived context, not primary evidence or a malware verdict. Retain lookup time, checked hash/identity, provider or rule/version, contributing signals and unavailable sources. Reputation can become stale and scores depend on input coverage. A low score or absent response does not prove safety; a high score does not prove malicious intent.
+Inspect only checked stored results supplied by suitable offered Tools. This guide grants no external lookup, URL access or live reputation request. Separate general knowledge, score interpretation and inference from capture observations and exact citations. Do not invent provider responses, thresholds or checked findings.

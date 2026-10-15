@@ -63,6 +63,20 @@
                     </ComboBox>
                 </Grid>
 
+                <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="120"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <TextBlock Text="Run duration" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1">
+                        <ComboBox x:Name="AgentRunDurationComboBox" IsEditable="True" MinWidth="160" HorizontalAlignment="Left"
+                                  Text="Indefinitely" ToolTip="Minutes until the Agent shuts down gracefully, including idle time. It continues after the Viewer disconnects.">
+                            <ComboBoxItem Content="Indefinitely"/>
+                            <ComboBoxItem Content="5"/><ComboBoxItem Content="10"/><ComboBoxItem Content="15"/>
+                        </ComboBox>
+                        <TextBlock Text="Minutes, or Indefinitely" Foreground="#666666"/>
+                        <TextBlock x:Name="RunDurationValidation" Foreground="#A00000" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
+
                 <Grid x:Name="RemoteOptionsPanel"
                       Margin="0,0,0,14"
                       IsEnabled="False"
@@ -123,11 +137,35 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
+                                <StackPanel>
                                 <CheckBox Content="{Binding DisplayName}"
                                           IsChecked="{Binding IsIncluded, Mode=TwoWay}"
                                           IsEnabled="{Binding CanConfigure}"
                                           ToolTip="{Binding Description}"
                                           Margin="0,0,14,6"/>
+                                <CheckBox Content="Prefetch" Margin="20,0,14,6" IsChecked="{Binding IsIncluded, Mode=TwoWay}" IsEnabled="{Binding CanConfigure}" ToolTip="Collect execution timestamps, run count, referenced files and volume details at capture startup.">
+                                    <CheckBox.Style><Style TargetType="CheckBox"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasPrefetchChild}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></CheckBox.Style>
+                                </CheckBox>
+                                <CheckBox Content="Persistence" Margin="20,0,14,6"
+                                          IsChecked="{Binding PersistenceOption.IsIncluded, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
+                                          IsEnabled="{Binding PersistenceOption.CanConfigure, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          ToolTip="{Binding PersistenceOption.Description, RelativeSource={RelativeSource AncestorType=Window}}">
+                                    <CheckBox.Style>
+                                        <Style TargetType="CheckBox">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding HasPrefetchChild}" Value="True"/>
+                                                        <Condition Binding="{Binding PersistenceOption.IsPublished, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </CheckBox.Style>
+                                </CheckBox>
+                                </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

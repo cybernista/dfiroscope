@@ -162,7 +162,8 @@ public sealed class AgentCaptureControlProjectionService
         "Security",
         "PowerShell",
         "WindowsOther",
-        "Sysmon"
+        "Sysmon",
+        "OS endpoints"
     ];
 
     private readonly TimeSpan _freshnessWindow;
@@ -369,7 +370,8 @@ public sealed class AgentCaptureControlProjectionService
 
         var canStart = _pendingCapture == null &&
                        state is AgentCaptureRunState.Off or AgentCaptureRunState.Failed;
-        var canPause = _pendingCapture == null && state == AgentCaptureRunState.Running;
+        var canPause = _pendingCapture == null && state == AgentCaptureRunState.Running &&
+                       _lastSnapshot.ActiveWork.Any(work => work.IsLiveSource && work.CaptureId == activeCaptureId);
         var canResume = _pendingCapture == null && state == AgentCaptureRunState.Paused;
         var canEnd = _pendingCapture == null &&
                      state is AgentCaptureRunState.Running or AgentCaptureRunState.Paused;
@@ -469,14 +471,22 @@ public sealed class AgentCaptureControlProjectionService
         }
 
         var active = source.IsActive && source.IsEnabled;
+        var state = sourceName == "OS endpoints" ? source.Status switch
+        {
+            "Stopping" => AgentCaptureRunState.Stopping,
+            "Pending" => AgentCaptureRunState.Starting,
+            "Error" => AgentCaptureRunState.Failed,
+            _ => active ? AgentCaptureRunState.Running : AgentCaptureRunState.Off
+        } : active ? AgentCaptureRunState.Running : AgentCaptureRunState.Off;
         var status = string.IsNullOrWhiteSpace(source.Detail)
             ? source.Status
             : $"{source.Status}: {source.Detail}";
         return new AgentCaptureSourceControlState
         {
-            State = active ? AgentCaptureRunState.Running : AgentCaptureRunState.Off,
-            CanStart = !active,
-            CanStop = active,
+            State = state,
+            CanStart = state == AgentCaptureRunState.Off && (sourceName != "OS endpoints" || source.Status == "Stopped"),
+            CanStop = state is AgentCaptureRunState.Running or AgentCaptureRunState.Starting ||
+                sourceName == "OS endpoints" && state == AgentCaptureRunState.Failed && !source.IsEnabled,
             StatusText = status,
             JobIds = liveCapture.JobIds
         };
@@ -808,6 +818,7 @@ public sealed class AgentCaptureControlProjectionService
             "PowerShell" => "PowerShell events",
             "WindowsOther" => "Windows logs (other)",
             "Sysmon" => "Sysmon events",
+            "OS endpoints" => "Live network snapshots",
             _ => sourceName
         };
 

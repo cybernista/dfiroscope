@@ -3,6 +3,7 @@ using ProcInsider.Models.Agent;
 using ProcInsider.Models.EvidenceSources;
 using ProcInsider.Services;
 using ProcInsider.Services.EvidenceSources;
+using ProcInsider.Features.NetworkWorkspace;
 
 namespace ProcInsider.Agent;
 
@@ -58,6 +59,19 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
     private bool _etwLifecycleStopping;
     private bool _etwPauseStopUnconfirmed;
     private bool _isPaused;
+    private readonly SemaphoreSlim _endpointPollGate = new(1, 1);
+    private readonly TimeProvider _endpointClock;
+    private readonly Func<ConfigurableEtwService, bool> _stopEtwForTeardown;
+    private readonly Func<AgentJobContext, AgentLiveEventBuffer, LiveProcessWriteCoordinator, ProcessWriteThrottle, Task>? _captureBuffersReady;
+    private int _unconfirmedProducerTeardown;
+    internal bool HasUnconfirmedProducerTeardown => Volatile.Read(ref _unconfirmedProducerTeardown) != 0;
+    private readonly Dictionary<EndpointFamily, NetworkEndpointFamilyResult> _endpointOutcomes = [];
+    private int _endpointContinuityGeneration;
+    private bool _endpointInitialInventoryCommitted;
+    private int _endpointStopping;
+    private bool _endpointSourceFailed;
+    private string? _endpointStopFailure;
+    private AgentJobRequest? _activeEndpointRequest;
 
     /// <summary>Raised after process rows have been committed to the live database.</summary>
     public event Action<IReadOnlyList<ProcessRecord>>? ProcessRecordsPersisted;
@@ -68,7 +82,10 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         AgentLiveEventBufferOptions bufferOptions,
         RuntimeProcessSnapshotEvidenceSourceAdapter? runtimeProcessAdapter = null,
         ProcessLifecycleEvidenceSourceAdapter? lifecycleProcessAdapter = null,
-        SysmonProcessEvidenceSourceAdapter? sysmonProcessAdapter = null)
+        SysmonProcessEvidenceSourceAdapter? sysmonProcessAdapter = null,
+        TimeProvider? endpointClock = null,
+        Func<ConfigurableEtwService, bool>? stopEtwForTeardown = null,
+        Func<AgentJobContext, AgentLiveEventBuffer, LiveProcessWriteCoordinator, ProcessWriteThrottle, Task>? captureBuffersReady = null)
     {
         _writer = writer;
         _log = log;
@@ -76,6 +93,9 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         _runtimeProcessAdapter = runtimeProcessAdapter ?? new RuntimeProcessSnapshotEvidenceSourceAdapter();
         _lifecycleProcessAdapter = lifecycleProcessAdapter ?? new ProcessLifecycleEvidenceSourceAdapter();
         _sysmonProcessAdapter = sysmonProcessAdapter ?? new SysmonProcessEvidenceSourceAdapter();
+        _endpointClock = endpointClock ?? TimeProvider.System;
+        _stopEtwForTeardown = stopEtwForTeardown ?? (etw => etw.Stop());
+        _captureBuffersReady = captureBuffersReady;
     }
 
     public CaptureHealthReport GetHealthSnapshot()
@@ -85,9 +105,13 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             var buffer = _activeEventBuffer?.GetSnapshot();
             return _health with
             {
+                Sources = _health.Sources.Count == 0 ? [new CaptureSourceHealthReport {
+                    Source="OS endpoints",Status="NotStarted",Detail="Live network snapshots have not started; recorded coverage is unavailable.",
+                    UpdatedUtc=_endpointClock.GetUtcNow().UtcDateTime }] : _health.Sources,
                 TotalEventsReceived = Interlocked.Read(ref _eventsReceived),
                 TotalProcessRecordsWritten = Interlocked.Read(ref _processRecordsWritten),
                 InitialProcessInventory = _initialProcessInventory.State,
+                InitialNetworkEndpointInventoryCommitted = _endpointInitialInventoryCommitted,
                 TotalEventsDropped = Interlocked.Read(ref _eventsDropped),
                 TotalProcessRecordsDropped = Interlocked.Read(ref _processRecordsDropped),
                 EventBatchesDropped = Interlocked.Read(ref _eventBatchesDropped),
@@ -114,8 +138,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                 LiveBufferDrainActive = buffer?.IsDrainActive ?? _health.LiveBufferDrainActive,
                 LiveBufferDirectory = buffer?.SpillDirectory ?? _health.LiveBufferDirectory,
                 LiveBufferLastError = buffer?.LastError ?? _health.LiveBufferLastError,
-                LiveBufferLastErrorUtc = buffer?.LastErrorUtc ?? _health.LiveBufferLastErrorUtc,
-                Sources = _health.Sources.ToList()
+                LiveBufferLastErrorUtc = buffer?.LastErrorUtc ?? _health.LiveBufferLastErrorUtc
             };
         }
     }
@@ -187,6 +210,22 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             await Task.Delay(25, cancellationToken).ConfigureAwait(false);
         }
 
+        await _endpointPollGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Interlocked.Increment(ref _endpointContinuityGeneration);
+            if (_activeEndpointRequest is { } endpointRequest)
+            {
+                var utc=_endpointClock.GetUtcNow().UtcDateTime;
+                using var scope=_writer.BeginSourceRunScope(endpointRequest.SourceRunId,endpointRequest.JobId);
+                foreach(var family in Enum.GetValues<EndpointFamily>())
+                    await _writer.AppendNetworkEndpointsAsync(new EvidenceSourceEmissionBatch { SourceRunId=endpointRequest.SourceRunId,
+                        IngestionJobId=endpointRequest.JobId,Sequence=1,IsFinalBatch=true,NetworkEndpointPolls=[new(Guid.NewGuid().ToString("N"),
+                            endpointRequest.EvidenceIdentity,endpointRequest.SourceRunId,endpointRequest.JobId,Guid.NewGuid().ToString("N"),family,
+                            utc,utc,EndpointPollOutcome.Cancelled,false,0,"Explicit pause: acquisition continuity ended; no absence is inferred.")] },cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally { _endpointPollGate.Release(); }
         var pausedUtc = DateTime.UtcNow;
         var pausedSources = GetHealthSnapshot().Sources
             .Select(source => source with
@@ -238,7 +277,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                 return Task.FromResult(false);
             }
 
-            processTracker.StartRealtimeTracking();
+            if(options.CollectRuntimeEvents)processTracker.StartRealtimeTracking();
             eventCollector.SetSecurityCollectionEnabled(IsSourceEnabled("Security", options.CollectSecurityEvents));
             eventCollector.SetPowerShellCollectionEnabled(IsSourceEnabled("PowerShell", options.CollectPowerShellEvents));
             eventCollector.SetOtherWindowsCollectionEnabled(IsSourceEnabled("WindowsOther", options.CollectOtherWindowsEvents));
@@ -274,6 +313,9 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         {
             return RequestEtwStop();
         }
+
+        if (normalizedSource == "OS endpoints")
+            return RequestEndpointStopAsync().GetAwaiter().GetResult();
 
         lock (_activeCaptureLock)
         {
@@ -320,6 +362,21 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             return RequestEtwStart();
         }
 
+        if (normalizedSource == "OS endpoints")
+        {
+            if (!_endpointPollGate.Wait(TimeSpan.FromSeconds(5))) return false;
+            try
+            {
+                lock (_activeCaptureLock)
+                {
+                    if (!_activeJobId.HasValue || _isPaused || _endpointSourceFailed || !_stoppedSources.Remove(normalizedSource)) return false;
+                    Interlocked.Increment(ref _endpointContinuityGeneration);
+                    return true;
+                }
+            }
+            finally { _endpointPollGate.Release(); }
+        }
+
         lock (_activeCaptureLock)
         {
             if (!_activeJobId.HasValue || !_stoppedSources.Remove(normalizedSource))
@@ -345,6 +402,47 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
 
             return true;
         }
+    }
+
+    private async Task<bool> RequestEndpointStopAsync()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try { await _endpointPollGate.WaitAsync(timeout.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return false; }
+        try
+        {
+            lock (_activeCaptureLock)
+            {
+                if (!_activeJobId.HasValue || _isPaused || _activeLiveOptions?.CollectOsNetworkEndpoints != true) return false;
+                if (!_stoppedSources.Add("OS endpoints") && _endpointStopFailure == null) return true;
+                Volatile.Write(ref _endpointStopping, 1);
+            }
+            Interlocked.Increment(ref _endpointContinuityGeneration);
+            if (_activeEndpointRequest is { } request)
+            {
+                var utc = _endpointClock.GetUtcNow().UtcDateTime;
+                using var scope = _writer.BeginSourceRunScope(request.SourceRunId, request.JobId);
+                foreach (var family in Enum.GetValues<EndpointFamily>())
+                    await _writer.AppendNetworkEndpointsAsync(new EvidenceSourceEmissionBatch
+                    {
+                        SourceRunId = request.SourceRunId, IngestionJobId = request.JobId, Sequence = 1,
+                        IsFinalBatch = true, NetworkEndpointPolls = [new(Guid.NewGuid().ToString("N"),
+                            request.EvidenceIdentity, request.SourceRunId, request.JobId, Guid.NewGuid().ToString("N"),
+                            family, utc, utc, EndpointPollOutcome.Cancelled, false, 0,
+                            "Explicit source stop: acquisition continuity ended; no absence is inferred.")]
+                    }, timeout.Token).ConfigureAwait(false);
+            }
+            _endpointStopFailure = null;
+            return true;
+        }
+        catch (Exception error)
+        {
+            _endpointStopFailure = "Source stopped but its explicit coverage gap could not be committed: " + error.Message;
+            AddSourceWriteFailure("OS endpoints");
+            await _log.WriteLineAsync("Endpoint stop gap publication failed: " + error.Message).ConfigureAwait(false);
+            return false;
+        }
+        finally { Volatile.Write(ref _endpointStopping, 0); _endpointPollGate.Release(); }
     }
 
     private bool RequestEtwStop()
@@ -509,11 +607,8 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             count => AddSourceRecordsQueued("Runtime", count),
             OnProcessWriteCompleted,
             OnProcessWriteFailed);
-        var options = EventCollectionOptions.CreateDefault();
         var runtimeEnabled = IsSourceEnabled("Runtime", liveOptions.CollectRuntimeEvents);
-        options.CollectProcessEvents = runtimeEnabled;
-        options.CollectNetworkEvents = runtimeEnabled && options.CollectNetworkEvents;
-        options.CollectDnsEvents = runtimeEnabled && options.CollectDnsEvents;
+        var options = CreateRuntimeEventOptions(runtimeEnabled);
         options.HonorSysmonIntegrationToggle = false;
         var processTracker = new ProcessTracker(new ProcessDataCollector());
         using var processEventContext = new AgentProcessEventContext(processTracker);
@@ -567,12 +662,12 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         etwStore.EventsAdded += (_, e) => PersistEventsWhenEnabled("ETW", e.Events);
 
         var cancellationRequested = false;
+        Exception? collectionFailure = null;
         var finalEtwStopConfirmed = true;
         try
         {
             SetHealth(CaptureHealth.Healthy, "Live capture is starting.");
-            processTracker.StartRealtimeTracking();
-            await processTracker.RefreshAsync(context.CancellationToken).ConfigureAwait(false);
+            if(liveOptions.CollectRuntimeEvents){processTracker.StartRealtimeTracking();await processTracker.RefreshAsync(context.CancellationToken).ConfigureAwait(false);}
             eventCollector.Start();
             lock (_etwControlLock)
             {
@@ -583,9 +678,12 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             }
 
             PublishSourceHealth(context, liveOptions, configurableEtw, eventCollector, writeThrottle, eventBuffer);
+            if (_captureBuffersReady != null)
+                await _captureBuffersReady(context, eventBuffer, processWrites, writeThrottle).ConfigureAwait(false);
             await context.ReportProgressAsync(0, -1, BuildProgressMessage(liveOptions, writeThrottle, eventBuffer.GetSnapshot(), 0, 0, 0, 0, 0)).ConfigureAwait(false);
 
             await Task.WhenAll(
+                    RunEndpointCollectionAsync(liveOptions, context, collectionCancellation.Token),
                     RunPeriodicProcessRefreshAsync(processTracker, liveOptions, context, collectionCancellation.Token),
                     RunProgressLoopAsync(liveOptions, configurableEtw, eventCollector, writeThrottle, context, eventBuffer, collectionCancellation.Token))
                 .ConfigureAwait(false);
@@ -600,42 +698,86 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         }
         catch (Exception ex)
         {
+            collectionFailure = ex;
             SetHealth(CaptureHealth.Error, $"Live capture failed: {ex.Message}");
-            ClearActiveCapture(context.Request.JobId);
-            throw;
         }
         finally
         {
             processTracker.ProcessesUpdated -= OnProcessesUpdated;
             processTracker.ProcessChangesDetected -= OnProcessChangesDetected;
             processTracker.ExternalProcessObserved -= OnExternalProcessObserved;
-            eventCollector.Stop();
-            lock (_etwControlLock)
+            var cleanupErrors = new List<Exception>();
+            try { eventCollector.Stop(); }
+            catch (Exception error) { cleanupErrors.Add(error); }
+            try
             {
-                lock (_activeCaptureLock)
+                lock (_etwControlLock)
                 {
-                    _etwLifecycleStopping = true;
+                    lock (_activeCaptureLock) _etwLifecycleStopping = true;
+                    finalEtwStopConfirmed = _stopEtwForTeardown(configurableEtw);
                 }
-                finalEtwStopConfirmed = configurableEtw.Stop();
             }
-            processTracker.StopRealtimeTracking();
+            catch (Exception error)
+            {
+                finalEtwStopConfirmed = false;
+                cleanupErrors.Add(error);
+            }
+            finally
+            {
+                // ETW stop failures cannot skip the separately owned process watcher teardown.
+                try { processTracker.StopRealtimeTracking(); }
+                catch (Exception error) { cleanupErrors.Add(error); }
+            }
+            if (cleanupErrors.Count != 0)
+            {
+                Interlocked.Exchange(ref _unconfirmedProducerTeardown, 1);
+                if (collectionFailure != null) cleanupErrors.Insert(0, collectionFailure);
+                collectionFailure = new AggregateException("Live capture producer teardown failed.", cleanupErrors);
+            }
+
         }
 
         try
         {
             eventBuffer.MarkDrainingAfterStop();
-            PublishSourceHealth(context, liveOptions, configurableEtw, eventCollector, writeThrottle, eventBuffer);
-            await context.ReportProgressAsync(
-                Interlocked.Read(ref _eventsReceived),
-                -1,
-                BuildDrainProgressMessage(eventBuffer.GetSnapshot()),
-                CancellationToken.None).ConfigureAwait(false);
-            await Task.WhenAll(
-                    // Collection cancellation stops new observations above.  The durable writer must
-                    // still drain batches it already accepted, including a CancelJob terminal path.
-                    eventBuffer.CompleteAndDrainAsync(CancellationToken.None).AsTask(),
-                    processWrites.CompleteAndDrainAsync(CancellationToken.None))
-                .ConfigureAwait(false);
+            try
+            {
+                PublishSourceHealth(context, liveOptions, configurableEtw, eventCollector, writeThrottle, eventBuffer);
+                await context.ReportProgressAsync(
+                    Interlocked.Read(ref _eventsReceived),
+                    -1,
+                    BuildDrainProgressMessage(eventBuffer.GetSnapshot()),
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception diagnosticFailure)
+            {
+                // Stopping diagnostics must not discard observations the capture already accepted.
+                collectionFailure = collectionFailure == null ? diagnosticFailure :
+                    new AggregateException("Live capture collection and stopping diagnostics failed.", collectionFailure, diagnosticFailure);
+            }
+            try
+            {
+                await Task.WhenAll(
+                        // Collection cancellation stops admission; accepted event and process writes
+                        // retain their independent drain lifetime through the serialized writer.
+                        eventBuffer.CompleteAndDrainAsync(CancellationToken.None).AsTask(),
+                        processWrites.CompleteAndDrainAsync(CancellationToken.None))
+                    .ConfigureAwait(false);
+            }
+            catch (Exception drainFailure)
+            {
+                Interlocked.Exchange(ref _unconfirmedProducerTeardown, 1);
+                SetHealth(CaptureHealth.Error, $"Live capture stopped; accepted buffer drain failed: {drainFailure.Message}");
+                if (collectionFailure != null)
+                    throw new AggregateException("Live capture failed and accepted buffer drain did not complete.", collectionFailure, drainFailure);
+                throw;
+            }
+            if (!finalEtwStopConfirmed)
+            {
+                // Retry only this owned producer after accepted buffers drain; Stop remains bounded.
+                lock (_etwControlLock) finalEtwStopConfirmed = _stopEtwForTeardown(configurableEtw);
+            }
+            if (!finalEtwStopConfirmed) Interlocked.Exchange(ref _unconfirmedProducerTeardown, 1);
             var transitionUtc = DateTime.UtcNow;
             var terminalStatuses = AgentLiveCaptureHealthTracker.ProjectTerminalStatuses(
                 BuildSourceHealth(liveOptions, configurableEtw, eventCollector, Volatile.Read(ref _etwStoppedByUser) != 0),
@@ -652,25 +794,41 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                     : source)
                 .ToArray();
             SetHealth(
-                finalEtwStopConfirmed ? CaptureHealth.Idle : CaptureHealth.Degraded,
-                finalEtwStopConfirmed
+                collectionFailure != null ? CaptureHealth.Error : finalEtwStopConfirmed ? CaptureHealth.Idle : CaptureHealth.Degraded,
+                collectionFailure != null ? $"Live capture failed; accepted writes drained: {collectionFailure.Message}" : finalEtwStopConfirmed
                     ? "Live capture stopped; accepted live event buffer has been loaded to SQLite."
                     : "Live event writes drained, but ETW stop was not confirmed; its session may still be active.",
                 drainedSourceReports,
-                isTerminal: finalEtwStopConfirmed);
-            await context.ReportProgressAsync(
-                Interlocked.Read(ref _eventsReceived),
-                -1,
-                finalEtwStopConfirmed
-                    ? "Live capture stopped; SQLite load complete."
-                    : "SQLite load complete; ETW stop was not confirmed and its session may still be active.",
-                CancellationToken.None).ConfigureAwait(false);
+                isTerminal: finalEtwStopConfirmed && collectionFailure == null);
+            try
+            {
+                await context.ReportProgressAsync(
+                    Interlocked.Read(ref _eventsReceived),
+                    -1,
+                    collectionFailure != null
+                        ? $"Live capture stopped; accepted writes drained, but capture diagnostics failed: {collectionFailure.Message}"
+                        : finalEtwStopConfirmed
+                            ? "Live capture stopped; SQLite load complete."
+                            : "SQLite load complete; ETW stop was not confirmed and its session may still be active.",
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception diagnosticFailure)
+            {
+                collectionFailure = collectionFailure == null ? diagnosticFailure :
+                    new AggregateException("Live capture and terminal diagnostics failed.", collectionFailure, diagnosticFailure);
+                SetHealth(CaptureHealth.Error, $"Live capture stopped; accepted writes drained, but final diagnostics failed: {collectionFailure.Message}",
+                    drainedSourceReports);
+            }
         }
         finally
         {
+            if (!finalEtwStopConfirmed) Interlocked.Exchange(ref _unconfirmedProducerTeardown, 1);
             ClearActiveCapture(context.Request.JobId);
         }
 
+        if (!finalEtwStopConfirmed)
+            throw new InvalidOperationException("Live capture teardown failed: ETW stop was not confirmed; its session may still be active.", collectionFailure);
+        if (collectionFailure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(collectionFailure).Throw();
         if (cancellationRequested)
         {
             throw new OperationCanceledException(context.CancellationToken);
@@ -853,6 +1011,15 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         return new ProcessEventStore(options, retainEvents: false);
     }
 
+    private static EventCollectionOptions CreateRuntimeEventOptions(bool runtimeEnabled)
+    {
+        var options=EventCollectionOptions.CreateDefault();
+        options.CollectProcessEvents=runtimeEnabled;
+        options.CollectNetworkEvents=runtimeEnabled && options.CollectNetworkEvents;
+        options.CollectDnsEvents=runtimeEnabled && options.CollectDnsEvents;
+        return options;
+    }
+
     private static LiveCaptureOptions ReadLiveCaptureOptions(AgentJobRequest request)
     {
         try
@@ -864,6 +1031,103 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         catch
         {
             return new LiveCaptureOptions();
+        }
+    }
+
+    private async Task RunEndpointCollectionAsync(LiveCaptureOptions options, AgentJobContext context, CancellationToken token)
+    {
+        try { await RunEndpointCollectionCoreAsync(options,context,token).ConfigureAwait(false); }
+        catch(OperationCanceledException) when(token.IsCancellationRequested){throw;}
+        catch(Exception error)
+        {
+            _endpointSourceFailed = true;
+            var now=_endpointClock.GetUtcNow().UtcDateTime;
+            lock(_healthLock)foreach(var family in Enum.GetValues<EndpointFamily>())
+                _endpointOutcomes[family]=new(family,now,now,EndpointPollOutcome.Failed,[],"Endpoint source failed: "+error.Message);
+            AddSourceWriteFailure("OS endpoints");await _log.WriteLineAsync("OS endpoint source failed: "+error.Message).ConfigureAwait(false);
+        }
+    }
+    private async Task RunEndpointCollectionCoreAsync(LiveCaptureOptions options, AgentJobContext context, CancellationToken token)
+    {
+        if (!options.CollectOsNetworkEndpoints) return;
+        var endpointRequest = context.Request with
+        {
+            SourceRunId = "srun_" + Guid.NewGuid().ToString("N"), ParentSourceRunId = context.Request.SourceRunId,
+            SourceType = "WindowsOsNetworkEndpoints", SourceDisplayName = "Windows OS endpoint inventory",
+            EvidenceSourceAdapterId = NetworkEndpointEvidenceSourceAdapter.Id, EvidenceSourceAdapterVersion = NetworkEndpointEvidenceSourceAdapter.Version,
+            ParserVersion = NetworkEndpointEvidenceSourceAdapter.Version, SourceProvider = "Windows IP Helper",
+            EvidenceIdentity = context.Request.EvidenceIdentity with { SourceIdentityId = NetworkAnalysisBinding.Hash(NetworkEndpointEvidenceSourceAdapter.Id,
+                context.Request.EvidenceIdentity.EvidenceSessionId,context.Request.EvidenceIdentity.HostId), CaptureId = context.Request.CaptureId }
+        };
+        var registration = await _writer.CreateSourceRunAsync(endpointRequest, token).ConfigureAwait(false);
+        endpointRequest = endpointRequest with
+        {
+            EvidenceIdentity = registration.ResolvedEvidenceIdentity
+                ?? throw new InvalidOperationException("Endpoint source registration did not return its resolved evidence identity.")
+        };
+        _activeEndpointRequest=endpointRequest;
+        using var sourceScope = _writer.BeginSourceRunScope(endpointRequest.SourceRunId, endpointRequest.JobId);
+        var collector = new NetworkEndpointCollector(_endpointClock);
+        var tracker = new NetworkEndpointHistoryTracker();
+        var cadence = new NetworkEndpointCadence();
+        var adapter = new NetworkEndpointEvidenceSourceAdapter();
+        var publisher = new AgentEvidenceSourcePublisher(_writer);
+        var generation = Volatile.Read(ref _endpointContinuityGeneration);
+        var sourceFailed=false;
+        try
+        {
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                await _endpointPollGate.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    if (generation != Volatile.Read(ref _endpointContinuityGeneration))
+                    { generation = Volatile.Read(ref _endpointContinuityGeneration); tracker.Reset(); cadence.Reset(); }
+                    var now = _endpointClock.GetUtcNow().UtcDateTime;
+                    if (IsSourceEnabled("OS endpoints",true) && now >= cadence.NextListenersUtc)
+                    {
+                        var connections = cadence.ConnectionsDue(now);
+                        var snapshotId = connections ? Guid.NewGuid().ToString("N") : "";
+                        using var metadataCycle = collector.BeginCycle();
+                        foreach (var family in Enum.GetValues<EndpointFamily>())
+                        {
+                            token.ThrowIfCancellationRequested();
+                            var result = collector.Collect(family, connections, endpointRequest.EvidenceIdentity, token);
+                            var input = tracker.Prepare(result,connections,endpointRequest.EvidenceIdentity,endpointRequest.SourceRunId,endpointRequest.JobId,snapshotId,connections ? now : null);
+                            try
+                            {
+                                var publication = await adapter.ExecuteAsync(new EvidenceSourceAdapterRequest { SourceRunId = endpointRequest.SourceRunId,
+                                    IngestionJobId = endpointRequest.JobId, EvidenceIdentity = endpointRequest.EvidenceIdentity, Payload = input }, publisher,null,token).ConfigureAwait(false);
+                                if(input.Poll.Outcome==EndpointPollOutcome.Complete && publication.State!=EvidenceSourceCompletionState.Completed)
+                                    throw new IOException("Endpoint publication was partial; no complete poll visibility was established.");
+                                tracker.Commit(input,result);
+                                AddSourceRecordsWritten("OS endpoints",input.Observations.Count);
+                            }
+                            catch(Exception error) when(error is not OperationCanceledException)
+                            {
+                                sourceFailed=true;tracker.Reset();AddSourceWriteFailure("OS endpoints");
+                                result=result with {Outcome=EndpointPollOutcome.Failed,Endpoints=[],Diagnostic="Durable publication failed: "+error.Message};
+                                await _log.WriteLineAsync("OS endpoint publication failed: "+error.Message).ConfigureAwait(false);
+                            }
+                            lock (_healthLock) _endpointOutcomes[family] = result;
+                        }
+                        cadence.Complete(_endpointClock.GetUtcNow().UtcDateTime,connections,now);
+                        lock (_healthLock)
+                            _endpointInitialInventoryCommitted |= _endpointOutcomes.Values.Any(result => result.Outcome == EndpointPollOutcome.Complete);
+                    }
+                }
+                finally { _endpointPollGate.Release(); }
+                await Task.Delay(TimeSpan.FromMilliseconds(100),_endpointClock,token).ConfigureAwait(false);
+            }
+        }
+        catch(Exception error) when(error is not OperationCanceledException){sourceFailed=true;throw;}
+        finally
+        {
+            _activeEndpointRequest=null;
+            var terminal=sourceFailed?"Partial":context.CancellationToken.IsCancellationRequested?"Cancelled":_endpointOutcomes.Values.Any(p=>p.Outcome!=EndpointPollOutcome.Complete)?"Partial":"Stopped";
+            await _writer.UpdateSourceRunStatusAsync(endpointRequest.SourceRunId,terminal,_endpointClock.GetUtcNow().UtcDateTime,
+                "{\"continuity\":\"ended; stop is not endpoint absence\"}",CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -1141,6 +1405,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                 TotalEventsReceived = Interlocked.Read(ref _eventsReceived),
                 TotalProcessRecordsWritten = Interlocked.Read(ref _processRecordsWritten),
                 InitialProcessInventory = _initialProcessInventory.State,
+                InitialNetworkEndpointInventoryCommitted = _endpointInitialInventoryCommitted,
                 TotalEventsDropped = Interlocked.Read(ref _eventsDropped),
                 TotalProcessRecordsDropped = Interlocked.Read(ref _processRecordsDropped),
                 EventBatchesDropped = Interlocked.Read(ref _eventBatchesDropped),
@@ -1239,17 +1504,28 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                 Volatile.Read(ref _etwStartFailure))
         };
         statuses.AddRange(eventCollector.GetSourceHealthSnapshots());
+        {
+            lock (_healthLock)
+            {
+                var outcomes = _endpointOutcomes.Values.ToArray();
+                var complete = outcomes.Length == 4 && outcomes.All(o=>o.Outcome==EndpointPollOutcome.Complete);
+                var detail = outcomes.Length == 0 ? "Awaiting initial OS endpoint inventory." : string.Join("; ",outcomes.Select(o=>$"{o.Family}: {o.Outcome} [{o.WindowStartUtc:O}, {o.WindowEndUtc:O}] {o.Diagnostic}"));
+                if (_endpointInitialInventoryCommitted) detail = "Initial inventory committed. " + detail;
+                statuses.Add(new EventSourceHealthSnapshot("OS endpoints", !options.CollectOsNetworkEndpoints ? "Disabled" : _endpointSourceFailed ? "Error" : outcomes.Length == 0 ? "Pending" : complete ? "Active" : "Degraded",detail,options.CollectOsNetworkEndpoints, options.CollectOsNetworkEndpoints && !_endpointSourceFailed && outcomes.Length > 0,
+                    _endpointClock.GetUtcNow().UtcDateTime,complete ? "" : "Family coverage is incomplete; no absence is inferred."));
+            }
+        }
         var stoppedSources = GetStoppedSources();
         return statuses
             .Select(status => stoppedSources.Contains(status.Source) &&
                 !(status.Source == "ETW" && Volatile.Read(ref _etwStartFailure) != null)
                 ? status with
                 {
-                    Status = "Disabled",
-                    Detail = $"{status.Source} collection was stopped from the Agents tab; other live collectors remain active.",
+                    Status = status.Source == "OS endpoints" ? Volatile.Read(ref _endpointStopping) != 0 ? "Stopping" : _endpointStopFailure != null ? "Error" : "Stopped" : "Disabled",
+                    Detail = status.Source == "OS endpoints" ? (_endpointStopFailure ?? "Explicit source stop: acquisition continuity ended; no absence is inferred.") + " " + status.Detail : $"{status.Source} collection was stopped from the Agents tab; other live collectors remain active.",
                     IsEnabled = false,
                     IsActive = false,
-                    Error = string.Empty
+                    Error = status.Source == "OS endpoints" ? _endpointStopFailure ?? string.Empty : string.Empty
                 }
                 : status)
             .GroupBy(status => status.Source, StringComparer.OrdinalIgnoreCase)
@@ -1343,6 +1619,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             "PowerShell" => "PowerShell",
             "WindowsOther" => "WindowsOther",
             "Sysmon" => "Sysmon",
+            "OS endpoints" => "OS endpoints",
             _ => null
         };
     }
@@ -1357,6 +1634,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
             "PowerShell" => options.CollectPowerShellEvents,
             "WindowsOther" => options.CollectOtherWindowsEvents,
             "Sysmon" => options.CollectSysmonEvents,
+            "OS endpoints" => options.CollectOsNetworkEndpoints,
             _ => false
         };
     }
@@ -1519,6 +1797,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
 
     private static IEnumerable<string> GetEnabledSources(LiveCaptureOptions options)
     {
+        if (options.CollectOsNetworkEndpoints) yield return "OS endpoints";
         if (options.CollectRuntimeEvents)
         {
             yield return "Runtime";
@@ -1575,6 +1854,11 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
 
         lock (_healthLock)
         {
+            _endpointOutcomes.Clear();
+            _endpointInitialInventoryCommitted = false;
+            _endpointSourceFailed = false;
+            _endpointStopFailure = null;
+            Volatile.Write(ref _endpointStopping, 0);
             _health = _health with { Sources = Array.Empty<CaptureSourceHealthReport>() };
         }
     }
@@ -1637,6 +1921,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         public bool CollectOtherWindowsEvents { get; init; } = true;
 
         public bool CollectSysmonEvents { get; init; } = true;
+        public bool CollectOsNetworkEndpoints { get; init; }
     }
 
     private sealed class LiveCaptureSourceMetadata
@@ -1744,7 +2029,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         }
     }
 
-    private sealed class LiveProcessWriteCoordinator
+    internal sealed class LiveProcessWriteCoordinator
     {
         private static readonly TimeSpan ProcessWriteSlotRetryDelay = TimeSpan.FromMilliseconds(100);
 
@@ -1803,7 +2088,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                 if (isFullSnapshot)
                 {
                     _pendingFullSnapshot = FilterSnapshotForKnownExits(observations);
-                    _pendingFullSnapshotAliases = aliases.ToList();
+                    _pendingFullSnapshotAliases = FilterAliasesForRecords(aliases, _pendingFullSnapshot);
                     _pendingFullSnapshotStatistics = FilterStatisticsForRecords(statistics, _pendingFullSnapshot);
                 }
                 else
@@ -1848,7 +2133,9 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                 }
 
                 _drainScheduled = true;
-                _drainTask = DrainAsync(cancellationToken);
+                // The caller token guards admission above. Once accepted, observations must drain
+                // even when that collection is cancelled while waiting for a writer slot.
+                _drainTask = DrainAsync(CancellationToken.None);
             }
         }
 
@@ -1960,7 +2247,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                         ? Array.Empty<ProcessStatisticsRecord>()
                         : _pendingFullSnapshotStatistics;
                     var statistics = FilterStatisticsForRecords(fullSnapshotStatistics, observations);
-                    var aliases = _pendingFullSnapshotAliases ?? [];
+                    var aliases = FilterAliasesForRecords(_pendingFullSnapshotAliases ?? [], observations);
                     _pendingFullSnapshot = null;
                     _pendingFullSnapshotAliases = null;
                     _pendingFullSnapshotStatistics = null;
@@ -2000,6 +2287,15 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
                 .Where(observation =>
                     !_exitedProcessKeys.Contains(observation.Fields.ProcessKey) || IsExited(observation.Fields))
                 .ToList();
+        }
+
+        private static List<ProcessAlias> FilterAliasesForRecords(
+            IEnumerable<ProcessAlias> aliases,
+            IReadOnlyCollection<ProcessObservation> observations)
+        {
+            var entityIds = observations.Select(observation => observation.ProcessEntityId)
+                .ToHashSet(StringComparer.Ordinal);
+            return aliases.Where(alias => entityIds.Contains(alias.ProcessEntityId)).ToList();
         }
 
         private static List<ProcessStatisticsRecord> FilterStatisticsForRecords(
@@ -2084,7 +2380,7 @@ internal sealed class AgentLiveCaptureJobHandler : IAgentJobHandler
         }
     }
 
-    private sealed class ProcessWriteThrottle
+    internal sealed class ProcessWriteThrottle
     {
         private readonly SemaphoreSlim _processWriteSlots;
         private int _pendingProcessWrites;

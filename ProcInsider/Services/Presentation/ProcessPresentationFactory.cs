@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Data;
 using ProcInsider.Services.Ai;
 using ProcInsider.Models;
 using ProcInsider.Models.Features;
@@ -20,6 +21,9 @@ internal sealed class ProcessPresentationServices
     public required TelemetryProjectionService Projection { get; init; }
     public required FeaturePublicationViewModel Publication { get; init; }
     public required Func<long> CaptureGeneration { get; init; }
+    public Func<ProcInsider.Models.Ai.AiEvidenceReference, Task>? NavigateAiCitation { get; init; }
+    internal Func<IAgentRuntime?>? AiRuntimeFactory { get; init; }
+    public Func<ProcessPresentationViewModel, bool>? IsActivePresentation { get; init; }
     public required Func<AnnotationDatabaseService?> AnnotationStore { get; init; }
     public required Func<InvestigationSessionPaths> SessionPaths { get; init; }
     public required ApplicationCatalogService? ApplicationCatalog { get; init; }
@@ -130,9 +134,17 @@ internal sealed class ProcessPresentationFactory
         });
         registry.Register(FeatureIds.FilesystemArtifacts,
             () => new FilesystemArtifactsViewModel(services.Projection, p.InspectorPaneViewModel), viewModel => viewModel.Clear());
-        registry.Register(FeatureIds.AiAssistance, () => new AiFeatureModule(services.SessionPaths(), services.Projection,
+        registry.Register(FeatureIds.AiAssistance, () => { var module = new AiFeatureModule(services.SessionPaths(), services.Projection,
             services.AnnotationStore(), services.ApplicationCatalog, p.InspectorPaneViewModel, services.Access,
-            services.SharedModules.GetOrActivate<AiInvestigationService>(FeatureIds.AiAssistance)));
+            services.SharedModules.GetOrActivate<AiInvestigationService>(FeatureIds.AiAssistance),
+            services.AnnotationStore, services.CaptureGeneration,
+            () => p.IsAiPresentationCurrent,
+            services.NavigateAiCitation, p.ResolveInvestigationTargetAsync, () => services.SessionPaths().SessionId,
+            services.AiRuntimeFactory);
+            module.ConversationViewModel.IsProcessesOrigin = true;
+            module.DataInvestigationViewModel.IsProcessesOrigin = true;
+            module.ConversationViewModel.InvestigateCommand = p.InvestigateSelectedProcessCommand;
+            return module; });
     }
 
     internal ProcessPresentationViewModel Create(ProcessPresentationServices services)
@@ -166,22 +178,7 @@ internal sealed class ProcessPresentationFactory
                             MessageBoxImage.Warning) == MessageBoxResult.Yes);
                 });
         }
-        presentation.ProcessDescriptionViewModel = new ProcessDescriptionViewModel(
-            services.AnnotationStore(),
-            () => presentation.AiFeature?.Service,
-            services.Access,
-            services.ApplicationCatalog,
-            new ApplicationComparisonEvidenceService(services.Projection),
-            nsrlLookupViewModel,
-            aiEvidencePackBuilderFactory: () => presentation.AiFeature?.EvidencePackBuilder,
-            confirmReplace: message => MessageBox.Show(
-                message,
-                "Replace App Info Override",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning) == MessageBoxResult.Yes);
-        presentation.ProcessDescriptionViewModel.SetWorkspace(
-            services.SessionPaths(),
-            services.CaptureGeneration());
+        presentation.ProcessDescriptionViewModel = CreateProcessOverview(services, nsrlLookupViewModel);
         presentation.NotesViewModel = new ProcessNotesViewModel(services.AnnotationStore());
         presentation.NotesViewModel.NoteSaved += (_, _) => { _ = services.RefreshExplorerCounts(ExplorerCountRefreshTrigger.AnnotationMutation); };
         presentation.ProcessStatisticsViewModel = new ProcessStatisticsViewModel(services.Projection, presentation.InspectorPaneViewModel);
@@ -209,6 +206,18 @@ internal sealed class ProcessPresentationFactory
     }
 
 
+    internal static ProcessDescriptionViewModel CreateProcessOverview(ProcessPresentationServices services,
+        NsrlLookupViewModel? nsrl = null)
+    {
+        var overview = new ProcessDescriptionViewModel(services.AnnotationStore(),
+            services.Access, services.ApplicationCatalog, new ApplicationComparisonEvidenceService(services.Projection),
+            nsrl,
+            confirmReplace: message => MessageBox.Show(message, "Replace App Info Override",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes);
+        overview.SetWorkspace(services.SessionPaths(), services.CaptureGeneration());
+        return overview;
+    }
+
     private static FeatureTabSet CreateExplorerTabSet(ProcessPresentationViewModel presentation, ProcessPresentationServices services)
     {
         List<FeatureTabDescriptor> descriptors =
@@ -234,7 +243,7 @@ internal sealed class ProcessPresentationFactory
                 showCount: true),
             new(
                 ExplorerTabKeys.Ai,
-                "AI",
+                "AI providers",
                 FeatureIds.AiAssistance,
                 400,
                 () => presentation.AiFeature == null ? null : presentation),
@@ -285,7 +294,7 @@ internal sealed class ProcessPresentationFactory
             new(DataTabKeys.PowerShellEvents, "PowerShell Logs", FeatureIds.EventTelemetry, 1500, () => new ProcInsider.Views.Features.Events.DataEventListView { DataContext = presentation.PowerShellLogViewModel }, showCount: true),
             new(DataTabKeys.WindowsOtherEvents, "Windows Logs (Other)", FeatureIds.EventTelemetry, 1600, () => new ProcInsider.Views.Features.Events.DataEventListView { DataContext = presentation.WindowsOtherLogViewModel }, showCount: true),
             new(DataTabKeys.SysmonEvents, "Sysmon", FeatureIds.EventTelemetry, 1700, () => new ProcInsider.Views.Features.Events.DataEventListView { DataContext = presentation.SysmonEventsViewModel }, showCount: true),
-            new(DataTabKeys.Ai, "AI", FeatureIds.AiAssistance, 1800, () => new ProcInsider.Views.Features.Ai.DataAiInvestigationView { DataContext = presentation.AiInvestigationViewModel })
+            new(DataTabKeys.Ai, "AI", FeatureIds.AiAssistance, 1800, () => CreateProcessAiDataView(presentation))
         ];
         descriptors.AddRange(services.SharedDefinitions.CreateTabDescriptors(
             FeatureTabSurface.Data,
@@ -300,6 +309,19 @@ internal sealed class ProcessPresentationFactory
             descriptors,
             DataTabKeys.AppInfo,
             allowEmpty: true);
+    }
+
+    private static ProcInsider.Views.Features.Ai.AiConversationLayoutView CreateProcessAiDataView(
+        ProcessPresentationViewModel presentation)
+    {
+        var view = new ProcInsider.Views.Features.Ai.AiConversationLayoutView { DataContext = presentation };
+        view.SetBinding(ProcInsider.Views.Features.Ai.AiConversationLayoutView.ConversationProperty,
+            new Binding(nameof(ProcessPresentationViewModel.AiDataConversation)));
+        view.SetBinding(ProcInsider.Views.Features.Ai.AiConversationLayoutView.TechnicalDetailsVisibleProperty,
+            new Binding(nameof(ProcessPresentationViewModel.TechnicalDetailsVisible)));
+        view.SetBinding(ProcInsider.Views.Features.Ai.AiConversationLayoutView.ToggleTechnicalDetailsCommandProperty,
+            new Binding(nameof(ProcessPresentationViewModel.ToggleTechnicalDetailsCommand)));
+        return view;
     }
 
 }

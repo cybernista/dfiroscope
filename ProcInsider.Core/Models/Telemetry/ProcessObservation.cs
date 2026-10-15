@@ -30,7 +30,8 @@ public enum ProcessObservationKind
     SysmonProcessTerminate,
     ProcmonSyntheticProcess,
     VolatilityMemoryProcess,
-    LegacyCompatibility
+    LegacyCompatibility,
+    NetworkEndpointSnapshot
 }
 
 public sealed class ProcessObservation

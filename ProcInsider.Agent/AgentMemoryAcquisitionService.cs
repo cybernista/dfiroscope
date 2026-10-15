@@ -126,6 +126,11 @@ internal sealed class AgentMemoryAcquisitionService
 
     private readonly InvestigationSessionPaths _sessionPaths;
     private readonly IAgentMemoryAcquisitionRuntime _runtime;
+    private int _ownedProcessExitConfirmationFailed;
+
+    // A prior unconfirmed owned producer must continue to block a later shutdown proof.
+    public bool OwnedProcessExitConfirmationFailed =>
+        Volatile.Read(ref _ownedProcessExitConfirmationFailed) != 0;
 
     public AgentMemoryAcquisitionService(
         InvestigationSessionPaths sessionPaths,
@@ -389,17 +394,19 @@ internal sealed class AgentMemoryAcquisitionService
 
         using (process)
         {
-            var stdoutTask = process.ReadStandardOutputAsync(MaximumTranscriptCharacters);
-            var stderrTask = process.ReadStandardErrorAsync(MaximumTranscriptCharacters);
+            Task<string> stdoutTask = Task.FromResult(string.Empty);
+            Task<string> stderrTask = Task.FromResult(string.Empty);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(plan.TimeoutSeconds));
             try
             {
+                stdoutTask = process.ReadStandardOutputAsync(MaximumTranscriptCharacters);
+                stderrTask = process.ReadStandardErrorAsync(MaximumTranscriptCharacters);
                 await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                await TryKillAndWaitAsync(process).ConfigureAwait(false);
+                var termination = await KillAndConfirmExitAsync(process).ConfigureAwait(false);
                 var diagnostics = await ReadDiagnosticsAsync(stdoutTask, stderrTask).ConfigureAwait(false);
                 var canceled = cancellationToken.IsCancellationRequested;
                 return await FailureWithCleanupAsync(
@@ -411,13 +418,14 @@ internal sealed class AgentMemoryAcquisitionService
                     standardOutput: diagnostics.StandardOutput,
                     standardError: diagnostics.StandardError,
                     detail: canceled
-                        ? "Memory acquisition was canceled and the process tree was terminated."
-                        : $"Memory acquisition exceeded {plan.TimeoutSeconds} seconds and the process tree was terminated.")
+                        ? $"Memory acquisition was canceled. {termination.Detail}"
+                        : $"Memory acquisition exceeded {plan.TimeoutSeconds} seconds. {termination.Detail}",
+                    ownedProcessExitConfirmed: termination.ExitConfirmed)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                await TryKillAndWaitAsync(process).ConfigureAwait(false);
+                var termination = await KillAndConfirmExitAsync(process).ConfigureAwait(false);
                 var diagnostics = await ReadDiagnosticsAsync(stdoutTask, stderrTask).ConfigureAwait(false);
                 return await FailureWithCleanupAsync(
                     AgentMemoryAcquisitionOutcome.ExecutionFailed,
@@ -425,7 +433,8 @@ internal sealed class AgentMemoryAcquisitionService
                     startedAtUtc,
                     standardOutput: diagnostics.StandardOutput,
                     standardError: diagnostics.StandardError,
-                    detail: $"Memory acquisition execution failed: {ex.Message}").ConfigureAwait(false);
+                    detail: $"Memory acquisition execution failed: {ex.Message} {termination.Detail}",
+                    ownedProcessExitConfirmed: termination.ExitConfirmed).ConfigureAwait(false);
             }
 
             var processDiagnostics = await ReadDiagnosticsAsync(stdoutTask, stderrTask).ConfigureAwait(false);
@@ -553,8 +562,23 @@ internal sealed class AgentMemoryAcquisitionService
         int? exitCode = null,
         string standardOutput = "",
         string standardError = "",
-        string detail = "")
+        string detail = "",
+        bool ownedProcessExitConfirmed = true)
     {
+        if (!ownedProcessExitConfirmed)
+        {
+            Interlocked.Exchange(ref _ownedProcessExitConfirmationFailed, 1);
+            return Failure(
+                AgentMemoryAcquisitionOutcome.CleanupFailed,
+                plan,
+                startedAtUtc,
+                exitCode,
+                standardOutput,
+                standardError,
+                $"{detail} Partial output cleanup was skipped because the owned process may still be writing.",
+                "Cleanup failed: owned process exit unconfirmed; output path retained");
+        }
+
         var cleanup = CleanupPartialOutput(plan.OutputPath);
         if (!cleanup.Succeeded)
         {
@@ -674,26 +698,31 @@ internal sealed class AgentMemoryAcquisitionService
     private static string QuoteArgument(string value) =>
         $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
 
-    private static async Task TryKillAndWaitAsync(IAgentMemoryAcquisitionProcessHandle process)
+    private static async Task<(bool ExitConfirmed, string Detail)> KillAndConfirmExitAsync(
+        IAgentMemoryAcquisitionProcessHandle process)
     {
+        string killFailure = string.Empty;
         try
         {
             process.Kill(entireProcessTree: true);
         }
-        catch
+        catch (Exception ex)
         {
-            // Termination is best-effort; the bounded wait and cleanup still run.
+            killFailure = $" Process-tree termination failed: {ex.Message}";
         }
 
         try
         {
-            await process.WaitForExitAsync(CancellationToken.None)
+            using var exitTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await process.WaitForExitAsync(exitTimeout.Token)
                 .WaitAsync(TimeSpan.FromSeconds(2))
                 .ConfigureAwait(false);
+            return (true, $"The owned memory acquisition process exited.{killFailure}");
         }
-        catch
+        catch (Exception ex)
         {
-            // A tool that does not exit after forced termination is surfaced through cleanup disposition.
+            return (false,
+                $"The owned memory acquisition process exit could not be confirmed after the termination attempt: {ex.Message}.{killFailure}");
         }
     }
 

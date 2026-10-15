@@ -49,6 +49,11 @@ public sealed record AgentIpcResponse
 
     public AgentCaptureConfiguration? CaptureConfiguration { get; init; }
 
+    /// <summary>Additive acknowledgement; absent on older Agents, so duration setup fails closed.</summary>
+    public bool RunDurationApplied { get; init; }
+
+    public int? RunDurationMinutes { get; init; }
+
     public AgentConfigurationCheckResult? ConfigurationCheck { get; init; }
 
     public AgentMonitoringDeploymentResult? MonitoringDeployment { get; init; }
@@ -230,6 +235,8 @@ public sealed record AgentRuntimeSnapshot
     public int PeakQueuedJobCount { get; init; }
 
     public int RunningJobCount { get; init; }
+    /// <summary>Scheduling-only lifecycle slots, excluded from finite-worker utilization.</summary>
+    public int PersistenceLifecycleJobCount { get; init; }
 
     public int CompletedJobCount { get; init; }
 

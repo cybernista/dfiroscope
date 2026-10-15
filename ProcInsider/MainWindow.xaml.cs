@@ -44,7 +44,17 @@ public partial class MainWindow : Window
     {
         if (_viewModel != null)
         {
-            await _viewModel.InitializeAsync();
+            // Startup attachment runs only after the analyst has chosen whether
+            // to remove eligible portable program-file download markers.
+            if (Application.Current is App app)
+            {
+                await app.OfferPortableDownloadMarkRemovalAsync(this);
+            }
+
+            if (IsVisible)
+            {
+                await _viewModel.InitializeAsync();
+            }
         }
     }
 

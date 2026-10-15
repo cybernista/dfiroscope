@@ -1,0 +1,18 @@
+<UserControl x:Class="ProcInsider.Views.Features.Ai.DataProcessConversationView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <DockPanel Margin="8">
+  <TextBlock DockPanel.Dock="Top" Text="Saved record Chats" FontWeight="SemiBold" Margin="0,0,0,6"/>
+  <TextBlock DockPanel.Dock="Bottom" Text="{Binding HistoryStatus}" TextWrapping="Wrap"/>
+  <Grid DockPanel.Dock="Top" Margin="4"><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <TextBlock Text="Title" FontWeight="SemiBold"/><TextBlock Grid.Column="1" Text="Started" FontWeight="SemiBold"/><TextBlock Grid.Column="2" Text="Model used" FontWeight="SemiBold"/>
+  </Grid>
+  <ListBox ItemsSource="{Binding Conversations}" SelectedItem="{Binding SelectedConversation}" HorizontalContentAlignment="Stretch">
+   <ListBox.ItemTemplate><DataTemplate><Grid Margin="4"><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}"/>
+    <TextBlock Grid.Column="1" Text="{Binding StartedUtc, StringFormat={}{0:g}}"/>
+    <TextBlock Grid.Column="2" Text="{Binding Model}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Model}"/>
+   </Grid></DataTemplate></ListBox.ItemTemplate>
+  </ListBox>
+ </DockPanel>
+</UserControl>

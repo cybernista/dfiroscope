@@ -81,9 +81,9 @@ internal static class CliCommandDispositionCatalog
             Hidden(AgentCommandKind.QueueZeekAnalysis, CliCommandKind.AgentZeekRun,
                 CliSharedServiceBoundary.ViewerAgentToolActionService, FeatureIds.NetworkAndZeek,
                 "Zeek analysis is typed but hidden until Network and Zeek is published."),
-            Hidden(AgentCommandKind.QueueArtifactImport, CliCommandKind.AgentFilesystemImport,
+            Runnable(AgentCommandKind.QueueArtifactImport, CliCommandKind.AgentFilesystemImport,
                 CliSharedServiceBoundary.ViewerAgentEvidenceActionService, FeatureIds.FilesystemArtifacts,
-                "Bounded filesystem import is typed but hidden until Filesystem Artifacts is published."),
+                "Published bounded filesystem import uses the typed shared evidence action service and selected path."),
             Runnable(AgentCommandKind.ShutdownAgent, CliCommandKind.AgentStop,
                 CliSharedServiceBoundary.LocalAgentControlCoordinator, FeatureIds.AgentsAndCapture,
                 "Graceful shutdown and verified fallback are exposed only through the shared lifecycle coordinator."),
@@ -147,7 +147,13 @@ internal static class CliCommandDispositionCatalog
                 CliSharedServiceBoundary.ViewerMemoryActionService, FeatureIds.SystemMemoryAndVolatility,
                 "System-memory acquisition is typed and confirmation-gated but hidden until its domain feature is published."),
             GuiOnly(AgentCommandKind.RunTelemetryAuditTest,
-                "Only the separate Telemetrios GUI may request a catalog-registered fixed audit test through an exact paired disposable local Agent; the DFIRoscope CLI exposes no audit executor.")
+                "Only the separate Telemetrios GUI may request a catalog-registered fixed audit test through an exact paired disposable local Agent; the DFIRoscope CLI exposes no audit executor."),
+            new(AgentCommandKind.CollectPersistenceNow, CliAgentCommandDispositionKind.DeliberatelyGuiOnly, null, null, FeatureIds.Persistence,
+                "Published Persistence collection is an authenticated exact-capture Agent control exposed through the WPF capture workflow; no Viewer CLI surface is defined."),
+            new(AgentCommandKind.RebaselinePersistence, CliAgentCommandDispositionKind.DeliberatelyGuiOnly, null, null, FeatureIds.Persistence,
+                "Published Persistence reset is an authenticated exact-capture Agent control exposed through the WPF capture workflow; no Viewer CLI surface is defined."),
+            new(AgentCommandKind.CollectPrefetch, CliAgentCommandDispositionKind.DeliberatelyGuiOnly, null, null, FeatureIds.FilesystemArtifacts,
+                "Published pathless local Prefetch collection is an authenticated Agent control exposed through the WPF Artifacts workflow; no Viewer CLI surface is defined.")
         ]);
 
     private static readonly IReadOnlyList<CliSurfaceOperationDisposition> SurfaceOperationsValue =

@@ -28,6 +28,9 @@ public static class CaptureWritePolicy
             AgentCommandKind.StopProcessMonitorCapture or
             AgentCommandKind.QueueProcessDump or
             AgentCommandKind.QueueMemoryAcquisition or
+            AgentCommandKind.CollectPersistenceNow or
+            AgentCommandKind.RebaselinePersistence or
+            AgentCommandKind.CollectPrefetch or
             AgentCommandKind.RunTelemetryAuditTest => CaptureWriteCategory.PrimaryAcquisition,
 
             AgentCommandKind.QueueBackfill or

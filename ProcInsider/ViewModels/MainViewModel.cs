@@ -143,14 +143,12 @@ public partial class MainViewModel : ViewModelBase,
     public InspectorPaneViewModel InspectorPaneViewModel { get => _presentationHost?.ActiveDetailsPresentation!; private set { if (_activeProcessPresentation is { } p) p.InspectorPaneViewModel = value; } }
     public ProcessRiskDetailsViewModel? ProcessRiskDetailsViewModel { get => _activeProcessPresentation?.ProcessRiskDetailsViewModel!; private set { if (_activeProcessPresentation is { } p) p.ProcessRiskDetailsViewModel = value; } }
     public AiInvestigationViewModel AiInvestigationViewModel { get => _activeProcessPresentation?.AiInvestigationViewModel!; }
-    public AiDetailsInvestigationViewModel AiDetailsInvestigationViewModel { get => _activeProcessPresentation?.AiDetailsInvestigationViewModel!; }
-    public AiChatViewModel AiChatViewModel { get => _activeProcessPresentation?.AiChatViewModel!; }
+    public AiChatViewModel AiChatViewModel { get => (_presentationHost as ProcInsider.Features.InvestigationWorkspaces.InvestigationWorkspaceFeatureModule)?.Manager.ExplorerSections.Assistant!; }
     public IReadOnlyList<FeatureTabDescriptor> ExplorerTabs { get => _activeProcessPresentation?.ExplorerTabs ?? []; }
     public IReadOnlyList<FeatureTabDescriptor> DataTabs { get => _activeProcessPresentation?.DataTabs ?? []; }
     public IReadOnlyList<FeatureTabDescriptor> AppInfoExtensionTabs { get => _activeProcessPresentation?.AppInfoExtensionTabs!; private set { if (_activeProcessPresentation is { } p) p.AppInfoExtensionTabs = value; } }
     public FeatureTabDescriptor? SelectedDataTab { get => _activeProcessPresentation?.SelectedDataTab!; set { if (_activeProcessPresentation is { } p) p.SelectedDataTab = value; } }
     public FeatureTabDescriptor? SelectedExplorerTab { get => _activeProcessPresentation?.SelectedExplorerTab!; set { if (_activeProcessPresentation is { } p) p.SelectedExplorerTab = value; } }
-    public ExplorerAiSection SelectedExplorerAiSection { get => _activeProcessPresentation?.SelectedExplorerAiSection ?? default; set { if (_activeProcessPresentation is { } p) p.SelectedExplorerAiSection = value; } }
     public bool IsNetworkDataTabVisible { get => _activeProcessPresentation?.IsNetworkDataTabVisible ?? false; set { if (_activeProcessPresentation is { } p) p.IsNetworkDataTabVisible = value; } }
     public bool IsFilesystemDataTabVisible { get => _activeProcessPresentation?.IsFilesystemDataTabVisible ?? false; set { if (_activeProcessPresentation is { } p) p.IsFilesystemDataTabVisible = value; } }
     public bool IsSelectedProcessBookmarked { get => _activeProcessPresentation?.IsSelectedProcessBookmarked ?? false; set { if (_activeProcessPresentation is { } p) p.IsSelectedProcessBookmarked = value; } }
@@ -271,6 +269,7 @@ public partial class MainViewModel : ViewModelBase,
     private readonly DispatcherTimer _snapshotAgeTimer;
     private int _activeExplorerRefreshCount;
     private bool _hasActiveQueryDatabase;
+    private bool _aiAllowsLegacySecretMigration = true;
     private long _explorerCountInputGeneration;
     private AgentFeatureModule? AgentFeature =>
         _featureModules.GetOrActivate<AgentFeatureModule>(FeatureIds.AgentsAndCapture);
@@ -395,6 +394,8 @@ public partial class MainViewModel : ViewModelBase,
         get => _agentCaptureWorkflowCoordinator.GetTrackedJobId(JobKind.ProcessMonitorCapture);
         set => _agentCaptureWorkflowCoordinator.TrackCaptureJob(JobKind.ProcessMonitorCapture, value);
     }
+
+    private AgentPairingLeaseMetadata? _lastAuthenticatedAgentLifecycleLease;
 
     private sealed record AgentShutdownTarget(
         int ProcessId,
@@ -874,6 +875,13 @@ _viewerFeatures = new ViewerFeatureRegistry(
             SharedActions = CreateViewerSharedActions(),
             Projection = _telemetryProjectionService, Publication = FeaturePublication,
             CaptureGeneration = () => _captureWorkspaceCoordinator.Generation, AnnotationStore = () => _annotationStore,
+            IsActivePresentation = p => ReferenceEquals(p, _activeProcessPresentation),
+            NavigateAiCitation = async reference =>
+            {
+                if (_presentationHost is ProcInsider.Features.InvestigationWorkspaces.InvestigationWorkspaceFeatureModule host)
+                    await host.Manager.Navigation.NavigateCitationAsync(reference);
+                else StatusMessage = "Evidence navigation is unavailable in this workspace.";
+            },
             SessionPaths = () => _sessionPaths, ApplicationCatalog = _applicationCatalog,
             GetStatus = () => StatusMessage, SetStatus = message => StatusMessage = message, Sigma = () => SigmaViewModel,
             BuildExplorerScopeCounts = BuildExplorerScopeCountsFromMemory, RefreshExplorerCountsCallback = RefreshExplorerCountsForChangedInputsAsync,
@@ -896,7 +904,8 @@ _viewerFeatures = new ViewerFeatureRegistry(
         };
         Func<ProcessPresentationViewModel> createPresentation = () => new Services.Presentation.ProcessPresentationFactory().Create(presentationServices);
         var hostRegistration = new Services.Presentation.ViewerPresentationHostRegistration();
-        ConfigureCompiledViewerPresentation(hostRegistration, createPresentation);
+        ConfigureCompiledViewerPresentation(hostRegistration, createPresentation,
+            () => Services.Presentation.ProcessPresentationFactory.CreateProcessOverview(presentationServices));
         Services.Presentation.IViewerPresentationHost? activatedHost = null;
         try
         {
@@ -953,7 +962,11 @@ _viewerFeatures = new ViewerFeatureRegistry(
         _featureModules.Register(FeatureIds.SecurityMonitoringConfiguration, () => new SecurityMonitoringFeatureModule());
         _featureModules.Register(FeatureIds.WindowsSecurityEvents, () => new Services.Presentation.WindowsSecurityPresentationServices(nativeEventProfiles));
         _featureModules.Register(FeatureIds.EventTelemetry, () => new Services.Presentation.EventTelemetryPresentationServices(nativeEventProfiles));
-        _featureModules.Register(FeatureIds.AiAssistance, () => new AiInvestigationService(_sessionPaths.AiSettingsPath, _sessionPaths.AiSecretPath));
+        _featureModules.Register(FeatureIds.AiAssistance, () => new AiInvestigationService(
+            _sessionPaths.AiSettingsPath, _sessionPaths.AiSecretPath,
+            Services.SessionPathService.GetAiProviderProfilesPath(),
+            Services.SessionPathService.GetAiProviderSecretsPath(),
+            allowLegacySecretMigration: _aiAllowsLegacySecretMigration));
     }
 
 
@@ -1173,6 +1186,28 @@ _viewerFeatures = new ViewerFeatureRegistry(
             SessionPathService.NormalizeLiveDatabaseIdentity(_sessionPaths.LiveDatabasePath),
             StringComparison.OrdinalIgnoreCase);
 
+    private bool VerifyScheduledLocalAgentShutdown(AgentPairingDiscoveryRecord discovery)
+    {
+        var lease = discovery.Lease;
+        var authenticated = _lastAuthenticatedAgentLifecycleLease;
+        if (authenticated == null || !TryGetCachedAgentShutdownTarget(out var target) ||
+            lease.AgentProcessId != target.ProcessId || lease.AgentStartedAtUtc != target.StartedAtUtc ||
+            authenticated.AgentProcessId != target.ProcessId || authenticated.AgentStartedAtUtc != target.StartedAtUtc ||
+            !MatchesActiveLocalAgentLease(lease) || !MatchesActiveLocalAgentLease(authenticated) ||
+            lease.PairingGeneration != authenticated.PairingGeneration ||
+            !string.Equals(lease.ReleaseId, authenticated.ReleaseId, StringComparison.Ordinal) ||
+            !string.Equals(lease.ExecutableName, authenticated.ExecutableName, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(lease.ExecutablePath, authenticated.ExecutablePath, StringComparison.OrdinalIgnoreCase) ||
+            !lease.Endpoints.SequenceEqual(authenticated.Endpoints, StringComparer.Ordinal) ||
+            !GetCompatibleAgentExecutableCandidates().Any(path =>
+                string.Equals(path, lease.ExecutablePath, StringComparison.OrdinalIgnoreCase))) return false;
+        var verified = new AgentPairingStore(_sessionPaths).VerifyScheduledShutdownCompletion(
+            lease, CurrentEducationalReleaseProfile.RuntimeCatalog.ReleaseId, authenticated.PairingGeneration);
+        if (verified)
+            StatusMessage = "Agent stopped after its configured duration; capture work and SQLite writes drained. Use Start Agent to start it again.";
+        return verified;
+    }
+
     private async Task<bool> TryPromptForVerifiedAgentRecoveryAsync(
         LocalAgentDiscoveryResult discovery)
     {
@@ -1192,7 +1227,8 @@ _viewerFeatures = new ViewerFeatureRegistry(
             _sessionPaths.SessionId,
             SessionPathService.NormalizeLiveDatabaseIdentity(_sessionPaths.LiveDatabasePath),
             IsAgentConnected,
-            out var reason))
+            out var reason,
+            VerifyScheduledLocalAgentShutdown))
         {
             return false;
         }
@@ -1265,7 +1301,8 @@ _viewerFeatures = new ViewerFeatureRegistry(
                 IsAgentConnected,
                 stalled
                     ? LocalAgentRecoveryPromptReason.SustainedUnresponsive
-                    : LocalAgentRecoveryPromptReason.VerifiedExit);
+                    : LocalAgentRecoveryPromptReason.VerifiedExit,
+                VerifyScheduledLocalAgentShutdown);
             var contextChanged =
                 workspaceGeneration != _captureWorkspaceCoordinator.Generation ||
                 !TryGetCachedAgentShutdownTarget(out current) ||
@@ -1371,6 +1408,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
         }
 
         ClearPendingAgentTermination();
+        NotifyCompiledWorkspaceActionAvailability();
         DeployAgentCommand.NotifyCanExecuteChanged();
         RePairAgentCommand.NotifyCanExecuteChanged();
         RevokeAgentPairingCommand.NotifyCanExecuteChanged();
@@ -1832,7 +1870,9 @@ _viewerFeatures = new ViewerFeatureRegistry(
                     () => SaveAgentCaptureConfigurationAsync(
                         agent,
                         requireViewerConnection: true,
-                        captureOptions)),
+                        captureOptions,
+                        applyRunDuration: true,
+                        runDurationMinutes: dialog.SelectedRunDurationMinutes)),
                 () => DispatchLocalAgentSetup(() =>
                     {
                         var availability = EvaluateAgentConfiguredCaptureAvailability(agent);
@@ -2941,10 +2981,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
             var summary = deployment == null
                 ? FirstNonEmpty(result.Diagnostic, "The Agent did not return a deployment result.")
                 : $"Overall: {deployment.Status}";
-            MessageBox.Show(GetDialogOwner(), $"{summary}{Environment.NewLine}{Environment.NewLine}{areaDetails}",
-                "Configure Sysmon and event telemetry", MessageBoxButton.OK,
-                result.Succeeded && deployment?.Status == AgentConfigurationOperationStatus.Success
-                    ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            new EventTelemetryResultDialog(summary, areaDetails) { Owner = GetDialogOwner() }.ShowDialog();
         }
         return result.Succeeded &&
                response?.MonitoringDeployment?.Status == AgentConfigurationOperationStatus.Success;
@@ -3509,12 +3546,16 @@ _viewerFeatures = new ViewerFeatureRegistry(
     private async Task<bool> SaveAgentCaptureConfigurationAsync(
         AgentRegistryEntryViewModel targetAgent,
         bool requireViewerConnection,
-        IReadOnlyList<AgentCaptureOptionViewModel>? captureOptions = null)
+        IReadOnlyList<AgentCaptureOptionViewModel>? captureOptions = null,
+        bool applyRunDuration = false,
+        int? runDurationMinutes = null)
     {
         var draft = CreateCaptureConfigurationDraft(targetAgent, captureOptions);
         var result = await _agentCaptureActionService.SaveConfigurationAsync(
             CreateAgentCaptureActionTarget(targetAgent, requireViewerConnection),
-            draft);
+            draft,
+            applyRunDuration: applyRunDuration,
+            runDurationMinutes: runDurationMinutes);
         var response = result.Response;
         if (!result.Succeeded)
         {
@@ -3523,7 +3564,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
 
         ApplyCaptureConfigurationResponse(targetAgent, response);
         UpdateAgentCaptureRuntimeRows();
-        return response?.CaptureConfiguration != null;
+        return result.Succeeded && response?.CaptureConfiguration != null;
     }
 
     private async Task<bool> SaveAgentMonitoringConfigurationAsync(
@@ -5525,13 +5566,10 @@ _viewerFeatures = new ViewerFeatureRegistry(
     [RelayCommand(CanExecute = nameof(CanUseAiFeature))]
     private void OpenAiInvestigationTab()
     {
-        if (!TryNavigateToExplorerTab(ExplorerTabKeys.Ai, "Open AI Investigation"))
-        {
-            return;
-        }
-
-        SelectedExplorerAiSection = ExplorerAiSection.Investigation;
-        StatusMessage = "Explorer AI investigation tab selected.";
+        if (!CanUseAiFeature() || _activeProcessPresentation is not { IsAiPresentationCurrent: true } presentation ||
+            presentation.SelectedProcess is null) return;
+        presentation.SelectedDetailsTabKey = ViewerDetailsTabKey.Ai;
+        StatusMessage = "Record Chats selected in Details.";
     }
 
     private bool CanToggleSelectedProcessBookmark()
@@ -7346,6 +7384,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
         string? directArchivedDatabasePath = null)
     {
         CloseHeaderFilters();
+        _aiAllowsLegacySecretMigration = string.IsNullOrWhiteSpace(directArchivedDatabasePath);
         _sessionPaths = sessionPaths;
         _activeCapturePackageInfo = capturePackageInfo;
         _annotationStore = annotationStore;
@@ -7361,7 +7400,10 @@ _viewerFeatures = new ViewerFeatureRegistry(
             directArchivedDatabasePath ?? string.Empty);
 
         if (_featureModules.TryGetActivated<AiInvestigationService>(FeatureIds.AiAssistance, out var sharedAi))
-            sharedAi.SetStoragePaths(sessionPaths.AiSettingsPath, sessionPaths.AiSecretPath);
+            sharedAi.SetStoragePaths(sessionPaths.AiSettingsPath, sessionPaths.AiSecretPath,
+                Services.SessionPathService.GetAiProviderProfilesPath(),
+                Services.SessionPathService.GetAiProviderSecretsPath(),
+                allowLegacySecretMigration: _aiAllowsLegacySecretMigration);
         _presentationHost.BindCapture(new ViewerCaptureBinding(_captureWorkspaceCoordinator.Generation,
             sessionPaths, annotationStore, queryService, listingService));
 
@@ -7679,6 +7721,12 @@ _viewerFeatures = new ViewerFeatureRegistry(
             AgentId = agent.AgentId,
             HostId = FirstNonEmpty(agent.HostId, Environment.MachineName),
             ConfigurationVersion = "viewer-current-capture",
+            CollectPrefetchOnStart = AgentCaptureOptionViewModel.IsSelected(captureOptions, AgentCaptureOptionKind.FilesystemArtifactImport, false),
+            Persistence = new AgentPersistenceCapturePolicy
+            {
+                Enabled = AgentCaptureOptionViewModel.IsSelected(captureOptions, AgentCaptureOptionKind.Persistence, false),
+                IntervalMinutes = captureOptions?.FirstOrDefault(option => option.Kind == AgentCaptureOptionKind.Persistence)?.PersistenceIntervalMinutes ?? 60
+            },
             RuntimeProcessSnapshots = new AgentRuntimeSnapshotCapturePolicy
             {
                 Enabled = captureRuntime,
@@ -7691,7 +7739,8 @@ _viewerFeatures = new ViewerFeatureRegistry(
                 Security = captureSecurity,
                 PowerShell = capturePowerShell,
                 WindowsOther = captureWindowsOther,
-                Sysmon = captureSysmon
+                Sysmon = captureSysmon,
+                OsNetworkEndpoints = AgentCaptureOptionViewModel.IsSelected(captureOptions, AgentCaptureOptionKind.OsNetworkEndpoints, false)
             },
             Etw = new AgentEtwMonitoringIntent
             {
@@ -7822,6 +7871,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
             case AgentCaptureOptionKind.PowerShellEvents:
             case AgentCaptureOptionKind.WindowsOtherEvents:
             case AgentCaptureOptionKind.SysmonEvents:
+            case AgentCaptureOptionKind.OsNetworkEndpoints:
                 await StartLiveCaptureSourceOrConfiguredCaptureAsync(targetAgent, option);
                 return;
             case AgentCaptureOptionKind.ModuleEnrichment:
@@ -7891,6 +7941,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
             case AgentCaptureOptionKind.PowerShellEvents:
             case AgentCaptureOptionKind.WindowsOtherEvents:
             case AgentCaptureOptionKind.SysmonEvents:
+            case AgentCaptureOptionKind.OsNetworkEndpoints:
                 await StopLiveCaptureSourceAsync(option, GetLiveCaptureSourceName(option.Kind));
                 UpdateAgentCaptureRuntimeRows();
                 return;
@@ -7941,7 +7992,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
 
         if (response?.Success == true)
         {
-            option.StatusText = $"{option.DisplayName} stopped; other live collectors remain active.";
+            option.StatusText = option.Kind == AgentCaptureOptionKind.OsNetworkEndpoints ? "Live network snapshots stopped; recorded coverage has an explicit gap." : $"{option.DisplayName} stopped; other live collectors remain active.";
             StatusMessage = option.StatusText;
             await RefreshAgentRegistryHealthAsync();
         }
@@ -7968,7 +8019,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
 
         if (response?.Success == true)
         {
-            option.StatusText = $"{option.DisplayName} started; other live collectors remain active.";
+            option.StatusText = option.Kind == AgentCaptureOptionKind.OsNetworkEndpoints ? "Live network snapshots started; a new initial sample is due." : $"{option.DisplayName} started; other live collectors remain active.";
             StatusMessage = option.StatusText;
             await RefreshAgentRegistryHealthAsync();
         }
@@ -7979,6 +8030,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
         return kind switch
         {
             AgentCaptureOptionKind.ProcessLiveEvents => "Runtime",
+            AgentCaptureOptionKind.OsNetworkEndpoints => "OS endpoints",
             AgentCaptureOptionKind.EtwEvents => "ETW",
             AgentCaptureOptionKind.SecurityEvents => "Security",
             AgentCaptureOptionKind.PowerShellEvents => "PowerShell",
@@ -8072,7 +8124,8 @@ _viewerFeatures = new ViewerFeatureRegistry(
                 AgentCaptureOptionKind.SecurityEvents or
             AgentCaptureOptionKind.PowerShellEvents or
             AgentCaptureOptionKind.WindowsOtherEvents or
-                AgentCaptureOptionKind.SysmonEvents => !_activeSqliteBenchmarkJobId.HasValue,
+                AgentCaptureOptionKind.SysmonEvents or
+                AgentCaptureOptionKind.OsNetworkEndpoints => !_activeSqliteBenchmarkJobId.HasValue,
             AgentCaptureOptionKind.ModuleEnrichment or
                 AgentCaptureOptionKind.HandleEnrichment or
                 AgentCaptureOptionKind.PeAnalysis => !_activeSqliteBenchmarkJobId.HasValue,
@@ -8096,7 +8149,8 @@ _viewerFeatures = new ViewerFeatureRegistry(
                 AgentCaptureOptionKind.SecurityEvents or
             AgentCaptureOptionKind.PowerShellEvents or
             AgentCaptureOptionKind.WindowsOtherEvents or
-                AgentCaptureOptionKind.SysmonEvents => option.CanStop,
+                AgentCaptureOptionKind.SysmonEvents or
+                AgentCaptureOptionKind.OsNetworkEndpoints => option.CanStop,
             AgentCaptureOptionKind.ModuleEnrichment or
                 AgentCaptureOptionKind.HandleEnrichment => option.CanStop,
             AgentCaptureOptionKind.PeAnalysis => option.CanStop,
@@ -10150,6 +10204,17 @@ _viewerFeatures = new ViewerFeatureRegistry(
         }
 
         _lastVerifiedAgentShutdownTarget = CreateAgentShutdownTarget(health, activeDatabasePath);
+        var pairing = _agentClient.LastPairingStatus;
+        var lease = pairing.Lease;
+        // Retain identity only at accepted authenticated health; later unsigned discovery cannot replace it.
+        if (pairing.State is AgentPairingState.Ready or AgentPairingState.Connected &&
+            lease != null && pairing.PairingGeneration > 0 && lease.PairingGeneration == pairing.PairingGeneration &&
+            lease.AgentProcessId == health.ProcessId && lease.AgentStartedAtUtc == health.StartedAtUtc &&
+            string.Equals(lease.SessionId, health.SessionId, StringComparison.Ordinal) &&
+            string.Equals(lease.DatabaseIdentity, activeDatabasePath, StringComparison.OrdinalIgnoreCase) &&
+            lease.PairingContractVersion == AgentContracts.PairingContractVersion &&
+            lease.IpcContractVersion == AgentContracts.ContractVersion)
+            _lastAuthenticatedAgentLifecycleLease = lease;
     }
 
     private bool TryGetCachedAgentShutdownTarget(out AgentShutdownTarget target)
@@ -11300,7 +11365,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
             _snapshotFollowCoordinator.ObserveCursor(response.DatabaseChanged);
             var initialInventory = response.Health?.CaptureHealth.InitialProcessInventory ??
                                    InitialProcessInventoryState.Unknown;
-            if (initialInventory == InitialProcessInventoryState.Ready &&
+            if (ViewerSnapshotFollowCoordinator.HasCommittedInitialInventory(response.Health?.CaptureHealth) &&
                 response.Health != null &&
                 isActiveSession &&
                 IsAgentReleaseProfileCompatible(response.Health))
@@ -11319,8 +11384,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
     private void TryScheduleInitialSnapshotRefresh(AgentIpcResponse response)
     {
         if (response.DatabaseChanged == null ||
-            response.Health?.CaptureHealth.InitialProcessInventory !=
-                InitialProcessInventoryState.Ready)
+            !ViewerSnapshotFollowCoordinator.HasCommittedInitialInventory(response.Health?.CaptureHealth))
         {
             return;
         }
@@ -11351,7 +11415,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
             }
         }
 
-        StatusMessage = "Initial process inventory committed; publishing the first complete viewer snapshot...";
+        StatusMessage = "Initial source inventory committed; publishing the first viewer snapshot...";
         _ = PublishInitialSnapshotAsync(generation);
     }
 
@@ -12068,7 +12132,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
         FeatureId? featureId)
         => _activeProcessPresentation?.GetActivatedSelectedProcessConsumers(featureId) ?? [];
 
-    partial void ConfigureCompiledViewerPresentation(Services.Presentation.ViewerPresentationHostRegistration registration, Func<ProcessPresentationViewModel> createPresentation);
+    partial void ConfigureCompiledViewerPresentation(Services.Presentation.ViewerPresentationHostRegistration registration, Func<ProcessPresentationViewModel> createPresentation, Func<ProcessDescriptionViewModel> createProcessOverview);
 
     partial void ConfigureCompiledProcessPresentation(Services.Presentation.ViewerPresentationRegistrationContext context);
 
@@ -12089,8 +12153,10 @@ _viewerFeatures = new ViewerFeatureRegistry(
         Func<SelectedProcessContext?, CancellationToken, Task> apply)
         => ProcessPresentationViewModel.CreateSelectedProcessConsumer(key, apply);
 
+    partial void NotifyCompiledWorkspaceActionAvailability();
     private void NotifyAgentCommandCanExecuteChanged()
     {
+        NotifyCompiledWorkspaceActionAvailability();
         AddAgentCommand.NotifyCanExecuteChanged();
         ReconnectRunningLocalAgentCommand.NotifyCanExecuteChanged();
         DeployAgentCommand.NotifyCanExecuteChanged();
@@ -12419,6 +12485,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
             UpdateLiveSourceStatus(agent, AgentCaptureOptionKind.PowerShellEvents);
             UpdateLiveSourceStatus(agent, AgentCaptureOptionKind.WindowsOtherEvents);
             UpdateLiveSourceStatus(agent, AgentCaptureOptionKind.SysmonEvents);
+            UpdateLiveSourceStatus(agent, AgentCaptureOptionKind.OsNetworkEndpoints);
             UpdateConfiguredOneShotStatus(agent, AgentCaptureOptionKind.ModuleEnrichment);
             UpdateConfiguredOneShotStatus(agent, AgentCaptureOptionKind.HandleEnrichment);
             UpdateConfiguredOneShotStatus(agent, AgentCaptureOptionKind.PeAnalysis);
@@ -12433,7 +12500,7 @@ _viewerFeatures = new ViewerFeatureRegistry(
                 "Run after network capture or from a selected PCAP segment.");
             agent.SetCaptureOptionStatus(
                 AgentCaptureOptionKind.FilesystemArtifactImport,
-                "Use file/folder import; requires analyst-selected input.");
+                "Initial Prefetch collection follows the saved selection at capture startup; later collection: Artifacts > Collect Prefetch.");
             agent.SetCaptureOptionStatus(
                 AgentCaptureOptionKind.MemoryImageImport,
                 "Use memory import/acquisition; requires an image or configured tool.");

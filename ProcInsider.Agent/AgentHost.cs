@@ -8,6 +8,7 @@ using ProcInsider.Services;
 using ProcInsider.Services.AgentIpc;
 using ProcInsider.Services.EvidenceSources;
 using ProcInsider.Services.Features;
+using ProcInsider.Services.Forensics;
 
 namespace ProcInsider.Agent;
 
@@ -26,6 +27,19 @@ internal sealed class AgentHost
         CancellationToken cancellationToken,
         Action? runtimeReady = null)
     {
+        using var completion = new AgentShutdownCompletion();
+        var result = await RunCoreAsync(completion, cancellationToken, runtimeReady).ConfigureAwait(false);
+        // RunCoreAsync has disposed producers, job workers, writer and SQLite store before returning.
+        completion.Complete(result == 0);
+        Log($"{ProductIdentity.AgentDisplayName} stopped.");
+        return result;
+    }
+
+    private async Task<int> RunCoreAsync(
+        AgentShutdownCompletion completion,
+        CancellationToken cancellationToken,
+        Action? runtimeReady)
+    {
         var sessionPaths = _options.SessionPaths ?? ProcInsider.Services.SessionPathService.CreateForLiveDatabasePath(_options.DatabasePath);
         var databasePath = string.IsNullOrWhiteSpace(_options.DatabasePath)
             ? sessionPaths.LiveDatabasePath
@@ -35,7 +49,9 @@ internal sealed class AgentHost
         Log($"Host mode: {_options.Host.Mode}; effective identity: {_options.Host.EffectiveAccountName} ({_options.Host.EffectiveAccountSid}); " +
             $"LocalSystem={_options.Host.IsLocalSystem}; path scope={_options.Host.PathScope}.");
         Log($"Contract version: {AgentContracts.ContractVersion}");
-        IFeatureCatalog releaseCatalog = _options.ForegroundFiveSourceValidationSmoke
+        IFeatureCatalog releaseCatalog = _options.ForegroundPersistenceValidationSmoke || _options.ForegroundPersistenceValidationResume
+            ? CreatePersistenceValidationReleaseCatalog()
+            : _options.ForegroundFiveSourceValidationSmoke
             ? CreateFiveSourceValidationReleaseCatalog()
             : _options.ForegroundMemoryAcquisitionSmoke
             ? CreateMemoryActionSmokeReleaseCatalog()
@@ -47,7 +63,7 @@ internal sealed class AgentHost
                 ? CreateSelfTestReleaseCatalog()
                 : CurrentEducationalReleaseProfile.RuntimeCatalog;
         Log($"Educational release profile: {releaseCatalog.ReleaseId}");
-        using var preparedPairingRuntime = _options.PreparedPairingGeneration.HasValue
+        var preparedPairingRuntime = _options.PreparedPairingGeneration.HasValue
             ? AgentPairingRuntime.Start(
                 sessionPaths,
                 releaseCatalog.ReleaseId,
@@ -57,6 +73,7 @@ internal sealed class AgentHost
                 _options.CaptureSealed,
                 _options.PreparedPairingGeneration)
             : null;
+        completion.Pairing = preparedPairingRuntime;
         if (preparedPairingRuntime != null)
         {
             Log($"Local pairing contract {AgentContracts.PairingContractVersion} initialized; " +
@@ -170,7 +187,8 @@ internal sealed class AgentHost
             zeekNetworkAdapter,
             memoryImageAdapter,
             legacyProcessAdapter,
-            filesystemArtifactAdapter
+            filesystemArtifactAdapter,
+            new NetworkEndpointEvidenceSourceAdapter()
         ]);
         var evidenceSourcePublisher = new AgentEvidenceSourcePublisher(stagingWriter);
         var liveCaptureHandler = new AgentLiveCaptureJobHandler(
@@ -204,9 +222,10 @@ internal sealed class AgentHost
             networkCaptureService,
             networkCaptureAdapter,
             evidenceSourcePublisher);
+        var zeekProcessingService = new ZeekProcessingService(sessionPaths);
         var zeekAnalysisHandler = new AgentZeekAnalysisJobHandler(
             databasePath,
-            new ZeekProcessingService(sessionPaths),
+            zeekProcessingService,
             zeekNetworkAdapter,
             evidenceSourcePublisher);
         var artifactImportHandler = new AgentArtifactImportJobHandler(
@@ -222,9 +241,10 @@ internal sealed class AgentHost
             new MemoryImageImportService(sessionPaths),
             memoryImageAdapter,
             evidenceSourcePublisher);
+        var volatilityExecutionService = new VolatilityExecutionService(sessionPaths);
         var volatilityAnalysisHandler = new AgentVolatilityAnalysisJobHandler(
             databasePath,
-            new VolatilityExecutionService(sessionPaths),
+            volatilityExecutionService,
             volatilityProcessAdapter,
             evidenceSourcePublisher);
         var processMonitorService = new ProcessMonitorService(sessionPaths);
@@ -237,6 +257,8 @@ internal sealed class AgentHost
             processMonitorAdapter,
             evidenceSourcePublisher);
         var sqliteBenchmarkHandler = new AgentSqliteBenchmarkJobHandler(sessionPaths, _log);
+        var prefetchCollectionHandler = new AgentPrefetchAnalysisJobHandler(
+            new PrefetchLocalReader(), new PrefetchParser(), evidenceSourcePublisher);
         var configurationCheckService = new AgentConfigurationCheckService(_options, sessionPaths);
         var monitoringConfigurationService = new AgentMonitoringConfigurationService(
             sessionPaths,
@@ -246,6 +268,12 @@ internal sealed class AgentHost
             sessionPaths,
             configurationCheckService,
             _log);
+        var persistenceWorkflow = releaseCatalog.IsPublished(FeatureIds.Persistence) && !_options.CaptureSealed
+            ? new AgentPersistenceCaptureWorkflow(releaseCatalog, _options.CaptureSealed) : null;
+        var persistenceCollectionHandler = persistenceWorkflow == null ? null
+            : new AgentPersistenceCollectionJobHandler(stagingWriter, persistenceWorkflow, _log);
+        CaptureHealthReport GetCaptureHealthSnapshot() => liveCaptureHandler.GetHealthSnapshot() with
+        { PersistenceSources = persistenceWorkflow?.GetHealth() ?? [] };
         var jobHandler = new AgentJobHandlerRouter(
             liveCaptureHandler,
             enrichmentHandler,
@@ -264,13 +292,14 @@ internal sealed class AgentHost
             evidenceSourceAdapters,
             releaseCatalog,
             _options.CaptureSealed,
-            new StubAgentJobHandler());
+            new StubAgentJobHandler(), persistenceWorkflow, persistenceCollectionHandler, prefetchCollectionHandler);
         await using var jobQueue = new AgentJobQueue(stagingWriter, jobHandler, _options.WorkerOptions, _log, enrichmentStatistics);
+        persistenceWorkflow?.AttachQueue(jobQueue);
         var configuredCapturePause = new AgentConfiguredCapturePauseCoordinator(
             jobQueue,
             liveCaptureHandler,
-            networkCaptureHandler);
-        using var standalonePairingRuntime = _options.IsInteractiveHost &&
+            networkCaptureHandler, persistenceWorkflow);
+        var standalonePairingRuntime = _options.IsInteractiveHost &&
                                             preparedPairingRuntime == null &&
                                             (_options.IpcStressTest || (_options.Foreground && !_options.SelfTest))
             ? AgentPairingRuntime.Start(
@@ -282,6 +311,16 @@ internal sealed class AgentHost
                 _options.CaptureSealed)
             : null;
         var pairingRuntime = preparedPairingRuntime ?? standalonePairingRuntime;
+        completion.Pairing = pairingRuntime;
+        completion.DrainSucceeded = () => !jobQueue.ShutdownDrainFailed &&
+            !liveCaptureHandler.HasUnconfirmedProducerTeardown &&
+            !networkCaptureHandler.HasUnconfirmedProducerTeardown &&
+            !processMonitorCaptureHandler.HasUnconfirmedProducerTeardown &&
+            !memoryAcquisitionService.OwnedProcessExitConfirmationFailed &&
+            !zeekProcessingService.OwnedProcessExitConfirmationFailed &&
+            !volatilityExecutionService.OwnedProcessExitConfirmationFailed &&
+            stagingWriter.GetSnapshot().FailedWorkItemCount == 0 &&
+            stagingWriter.GetSnapshot().PendingWorkItemCount == 0;
         if (standalonePairingRuntime != null)
         {
             Log($"Local pairing contract {AgentContracts.PairingContractVersion} initialized; " +
@@ -293,7 +332,7 @@ internal sealed class AgentHost
                 sessionPaths,
                 jobQueue,
                 stagingWriter,
-                liveCaptureHandler.GetHealthSnapshot,
+                GetCaptureHealthSnapshot,
                 _log);
             using var stressShutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             await using var stressIpcServer = new AgentNamedPipeServer(
@@ -308,14 +347,14 @@ internal sealed class AgentHost
                 captureCompatibility,
                 releaseCatalog,
                 evidenceSourceAdapters.Descriptors,
-                liveCaptureHandler.GetHealthSnapshot,
+                GetCaptureHealthSnapshot,
                 liveCaptureHandler.RequestStop,
                 liveCaptureHandler.RequestSourceStop,
                 liveCaptureHandler.RequestSourceStart,
                 stressShutdown.Cancel,
                 _log,
                 pairingRuntime!,
-                configuredCapturePause: configuredCapturePause);
+                configuredCapturePause: configuredCapturePause, persistence: persistenceWorkflow);
             await using var stressLegacyIpcServer = new AgentNamedPipeServer(
                 _options,
                 jobQueue,
@@ -328,7 +367,7 @@ internal sealed class AgentHost
                 captureCompatibility,
                 releaseCatalog,
                 evidenceSourceAdapters.Descriptors,
-                liveCaptureHandler.GetHealthSnapshot,
+                GetCaptureHealthSnapshot,
                 liveCaptureHandler.RequestStop,
                 liveCaptureHandler.RequestSourceStop,
                 liveCaptureHandler.RequestSourceStart,
@@ -336,7 +375,7 @@ internal sealed class AgentHost
                 _log,
                 pairingRuntime!,
                 pipeName: AgentContracts.LegacyPipeName,
-                configuredCapturePause: configuredCapturePause);
+                configuredCapturePause: configuredCapturePause, persistence: persistenceWorkflow);
             await using var stressShutdownControlServer = new AgentNamedPipeServer(
                 _options,
                 jobQueue,
@@ -349,7 +388,7 @@ internal sealed class AgentHost
                 captureCompatibility,
                 releaseCatalog,
                 evidenceSourceAdapters.Descriptors,
-                liveCaptureHandler.GetHealthSnapshot,
+                GetCaptureHealthSnapshot,
                 liveCaptureHandler.RequestStop,
                 liveCaptureHandler.RequestSourceStop,
                 liveCaptureHandler.RequestSourceStart,
@@ -370,7 +409,7 @@ internal sealed class AgentHost
                 captureCompatibility,
                 releaseCatalog,
                 evidenceSourceAdapters.Descriptors,
-                liveCaptureHandler.GetHealthSnapshot,
+                GetCaptureHealthSnapshot,
                 liveCaptureHandler.RequestStop,
                 liveCaptureHandler.RequestSourceStop,
                 liveCaptureHandler.RequestSourceStart,
@@ -432,7 +471,7 @@ internal sealed class AgentHost
                 sessionPaths,
                 jobQueue,
                 stagingWriter,
-                liveCaptureHandler.GetHealthSnapshot,
+                GetCaptureHealthSnapshot,
                 _log);
             using var serviceShutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             await using var infrastructureCommandRuntime = preparedInfrastructure == null
@@ -449,7 +488,7 @@ internal sealed class AgentHost
                     captureCompatibility,
                     releaseCatalog,
                     evidenceSourceAdapters.Descriptors,
-                    liveCaptureHandler.GetHealthSnapshot,
+                    GetCaptureHealthSnapshot,
                     liveCaptureHandler.RequestStop,
                     liveCaptureHandler.RequestSourceStop,
                     liveCaptureHandler.RequestSourceStart,
@@ -457,7 +496,7 @@ internal sealed class AgentHost
                     _log,
                     pairingRuntime: null,
                     configuredCapturePause: configuredCapturePause,
-                    commandRuntimeOnly: true);
+                    commandRuntimeOnly: true, persistence: persistenceWorkflow);
             var infrastructureRuntime = preparedInfrastructure?.Activate(
                 releaseCatalog,
                 (target, writeCategory) =>
@@ -466,7 +505,7 @@ internal sealed class AgentHost
                     CaptureWritePolicy.IsAllowed(CaptureWorkspaceMode.LiveCapture, writeCategory) &&
                     captureCompatibility.Allows(CaptureOpenCapability.WritePrimaryEvidence),
                 infrastructureCommandRuntime!.ExecuteAuthenticatedCommandAsync,
-                () => jobQueue.GetControlSnapshot(liveCaptureHandler.GetHealthSnapshot()),
+                () => jobQueue.GetControlSnapshot(GetCaptureHealthSnapshot()),
                 cancellation => jobQueue.DrainAcceptedWorkAsync(cancellation));
             if (infrastructureRuntime != null)
             {
@@ -508,11 +547,16 @@ internal sealed class AgentHost
 
         Log("Foreground mode active. Press Ctrl+C to stop.");
         using var foregroundShutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var externalShutdownRegistration = cancellationToken.Register(
+            () => completion.RequestShutdown(false, foregroundShutdown.Cancel));
+        await using var runLifetime = new AgentRunLifetime(
+            () => completion.RequestShutdown(true, foregroundShutdown.Cancel));
+        completion.DurationExpired = () => runLifetime.HasExpired;
         await using var foregroundDiagnosticsSampler = new AgentRuntimeDiagnosticsSampler(
             sessionPaths,
             jobQueue,
             stagingWriter,
-            liveCaptureHandler.GetHealthSnapshot,
+            GetCaptureHealthSnapshot,
             _log);
         await using var ipcServer = new AgentNamedPipeServer(
             _options,
@@ -526,14 +570,14 @@ internal sealed class AgentHost
             captureCompatibility,
             releaseCatalog,
             evidenceSourceAdapters.Descriptors,
-            liveCaptureHandler.GetHealthSnapshot,
+            GetCaptureHealthSnapshot,
             liveCaptureHandler.RequestStop,
             liveCaptureHandler.RequestSourceStop,
             liveCaptureHandler.RequestSourceStart,
-            foregroundShutdown.Cancel,
+            () => completion.RequestShutdown(false, foregroundShutdown.Cancel),
             _log,
             pairingRuntime!,
-            configuredCapturePause: configuredCapturePause);
+            configuredCapturePause: configuredCapturePause, persistence: persistenceWorkflow, runLifetime: runLifetime);
         await using var legacyIpcServer = new AgentNamedPipeServer(
             _options,
             jobQueue,
@@ -546,15 +590,15 @@ internal sealed class AgentHost
             captureCompatibility,
             releaseCatalog,
             evidenceSourceAdapters.Descriptors,
-            liveCaptureHandler.GetHealthSnapshot,
+            GetCaptureHealthSnapshot,
             liveCaptureHandler.RequestStop,
             liveCaptureHandler.RequestSourceStop,
             liveCaptureHandler.RequestSourceStart,
-            foregroundShutdown.Cancel,
+            () => completion.RequestShutdown(false, foregroundShutdown.Cancel),
             _log,
             pairingRuntime!,
             pipeName: AgentContracts.LegacyPipeName,
-            configuredCapturePause: configuredCapturePause);
+            configuredCapturePause: configuredCapturePause, persistence: persistenceWorkflow, runLifetime: runLifetime);
         await using var shutdownControlServer = new AgentNamedPipeServer(
             _options,
             jobQueue,
@@ -567,11 +611,11 @@ internal sealed class AgentHost
             captureCompatibility,
             releaseCatalog,
             evidenceSourceAdapters.Descriptors,
-            liveCaptureHandler.GetHealthSnapshot,
+            GetCaptureHealthSnapshot,
             liveCaptureHandler.RequestStop,
             liveCaptureHandler.RequestSourceStop,
             liveCaptureHandler.RequestSourceStart,
-            foregroundShutdown.Cancel,
+            () => completion.RequestShutdown(false, foregroundShutdown.Cancel),
             _log,
             pairingRuntime!,
             pipeName: AgentContracts.ShutdownControlPipeName,
@@ -588,11 +632,11 @@ internal sealed class AgentHost
             captureCompatibility,
             releaseCatalog,
             evidenceSourceAdapters.Descriptors,
-            liveCaptureHandler.GetHealthSnapshot,
+            GetCaptureHealthSnapshot,
             liveCaptureHandler.RequestStop,
             liveCaptureHandler.RequestSourceStop,
             liveCaptureHandler.RequestSourceStart,
-            foregroundShutdown.Cancel,
+            () => completion.RequestShutdown(false, foregroundShutdown.Cancel),
             _log,
             pairingRuntime!,
             pipeName: AgentContracts.LegacyShutdownControlPipeName,
@@ -619,7 +663,6 @@ internal sealed class AgentHost
             Log("Shutdown requested.");
         }
 
-        Log($"{ProductIdentity.AgentDisplayName} stopped.");
         return 0;
     }
 
@@ -1107,6 +1150,13 @@ internal sealed class AgentHost
                         ? FeatureReleaseState.Published
                         : definition.State,
                 definition.Dependencies)));
+    }
+
+    private static IFeatureCatalog CreatePersistenceValidationReleaseCatalog()
+    {
+        var current = CurrentEducationalReleaseProfile.Catalog;
+        return new FeatureCatalog($"{current.ReleaseId}-persistence-validation", current.Features.Select(definition =>
+            new FeatureDefinition(definition.Id, definition.Id == FeatureIds.Persistence ? FeatureReleaseState.Published : definition.State, definition.Dependencies)));
     }
 
     private static IFeatureCatalog CreateFiveSourceValidationReleaseCatalog()

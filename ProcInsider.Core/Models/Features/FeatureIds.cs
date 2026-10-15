@@ -7,6 +7,7 @@ public static partial class FeatureIds
 {
     public static readonly FeatureId ProcessListing = new("process-listing");
     public static readonly FeatureId SelectedProcessDetails = new("selected-process-details");
+    public static readonly FeatureId NetworkWorkspace = new("network-workspace");
     public static readonly FeatureId EventsWorkspace = new("events-workspace");
     public static readonly FeatureId ProcessRiskScore = new("process-risk-score");
     public static readonly FeatureId ApplicationComparison = new("application-comparison");
@@ -19,6 +20,7 @@ public static partial class FeatureIds
     public static readonly FeatureId WindowsOtherEvents = new("windows-other-events");
     public static readonly FeatureId SysmonEvents = new("sysmon-events");
     public static readonly FeatureId AgentsAndCapture = new("agents-capture");
+    public static readonly FeatureId Persistence = new("persistence");
     public static readonly FeatureId SearchAndSigma = new("search-sigma");
     public static readonly FeatureId DumpsAndPeAnalysis = new("dumps-pe-analysis");
     public static readonly FeatureId FilesystemArtifacts = new("filesystem-artifacts");
@@ -41,6 +43,7 @@ public static partial class FeatureIds
             SelectedProcessDetails,
             InvestigationWorkspaces,
             EventsWorkspace,
+            NetworkWorkspace,
             ProcessRiskScore,
             ApplicationComparison,
             ModulesAndHandles,
@@ -52,6 +55,7 @@ public static partial class FeatureIds
             WindowsOtherEvents,
             SysmonEvents,
             AgentsAndCapture,
+            Persistence,
             SearchAndSigma,
             DumpsAndPeAnalysis,
             FilesystemArtifacts,

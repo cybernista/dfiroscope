@@ -1249,7 +1249,9 @@ public sealed class LocalAgentProcessLifecycleService : IDisposable
         var detail = outcome switch
         {
             LocalAgentProcessOutcome.ElevationCanceled =>
-                "The user declined the explicit UAC request. No local-agent process was started.",
+                "Windows reported the local-agent elevation launch as canceled (error 1223). " +
+                "DFIRoscope cannot tell whether a UAC prompt was declined or Windows stopped " +
+                "the launch before showing one. No local-agent start was verified.",
             LocalAgentProcessOutcome.ExecutableNotFound =>
                 "The supported local-agent executable was not found.",
             LocalAgentProcessOutcome.CredentialsUnavailable =>

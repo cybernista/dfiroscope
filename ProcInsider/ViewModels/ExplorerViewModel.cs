@@ -107,6 +107,14 @@ public partial class ExplorerViewModel : ViewModelBase
             return;
         }
 
+        if (node.Scope.Kind == ExplorerScopeKind.ArtifactRoot)
+        {
+            ResetSelection();
+            StatusMessage = "Process artifacts navigation is no longer available; showing All Processes.";
+            _scopeSelected(CurrentScope);
+            return;
+        }
+
         if (!FeatureNavigationPolicy.IsScopePublished(_featureAccess, node.Scope))
         {
             StatusMessage =
@@ -176,17 +184,6 @@ public partial class ExplorerViewModel : ViewModelBase
         SetCount(ExplorerScopeKind.CorrelationEvidence, counts.UnresolvedEvidenceCount + counts.AmbiguousEvidenceCount);
         SetCount(ExplorerScopeKind.UnresolvedEvidence, counts.UnresolvedEvidenceCount);
         SetCount(ExplorerScopeKind.AmbiguousEvidence, counts.AmbiguousEvidenceCount);
-        SetCount(ExplorerScopeKind.ArtifactRoot, counts.ModuleProcesses + counts.HandleProcesses + counts.MemoryDumpCount + counts.PeAnalysisCount);
-        SetCount(ExplorerScopeKind.Modules, counts.ModuleProcesses);
-        SetCount(ExplorerScopeKind.Handles, counts.HandleProcesses);
-        SetCount(ExplorerScopeKind.MemoryDumps, counts.MemoryDumpCount);
-        SetCount(ExplorerScopeKind.PeAnalyses, counts.PeAnalysisCount);
-        SetCount(ExplorerScopeKind.RuntimeEvents, CountSource(counts, "Runtime"));
-        SetCount(ExplorerScopeKind.EtwEvents, CountSource(counts, "ETW"));
-        SetCount(ExplorerScopeKind.SecurityEvents, CountSource(counts, "Security"));
-        SetCount(ExplorerScopeKind.PowerShellEvents, CountSource(counts, "PowerShell"));
-        SetCount(ExplorerScopeKind.WindowsOtherEvents, CountSource(counts, "WindowsOther"));
-        SetCount(ExplorerScopeKind.SysmonEvents, CountSource(counts, "Sysmon"));
         SetCount(ExplorerScopeKind.SystemActivityRoot, counts.SystemActivityCount);
         SetCount(ExplorerScopeKind.ActivityAuthentication, CountSystemActivity(counts, SystemActivityScopeKind.Authentication));
         SetCount(ExplorerScopeKind.ActivitySuccessfulLogons, CountSystemActivity(counts, SystemActivityScopeKind.SuccessfulLogons));
@@ -526,61 +523,12 @@ public partial class ExplorerViewModel : ViewModelBase
         correlation.Children.Add(ambiguous);
         analysis.Children.Add(correlation);
 
-        var artifacts = Node(new ExplorerScope
-        {
-            Kind = ExplorerScopeKind.ArtifactRoot,
-            ScopeId = "root:artifacts",
-            Title = "Artifacts",
-            Description = "Process-linked artifacts and future evidence roots."
-        });
-        artifacts.Children.Add(Node(new ExplorerScope
-        {
-            Kind = ExplorerScopeKind.Modules,
-            ScopeId = "artifacts:modules",
-            Title = "Modules",
-            Description = "Processes with staged module observations.",
-            ArtifactScope = ExplorerArtifactScope.Modules
-        }));
-        artifacts.Children.Add(Node(new ExplorerScope
-        {
-            Kind = ExplorerScopeKind.Handles,
-            ScopeId = "artifacts:handles",
-            Title = "Handles",
-            Description = "Processes with staged handle observations.",
-            ArtifactScope = ExplorerArtifactScope.Handles
-        }));
-        artifacts.Children.Add(Node(new ExplorerScope
-        {
-            Kind = ExplorerScopeKind.MemoryDumps,
-            ScopeId = "artifacts:memory-dumps",
-            Title = "Memory Dumps",
-            Description = "Process dump metadata rows."
-        }));
-        artifacts.Children.Add(Node(new ExplorerScope
-        {
-            Kind = ExplorerScopeKind.PeAnalyses,
-            ScopeId = "artifacts:pe-analyses",
-            Title = "PE Analyses",
-            Description = "Processes with on-disk process-image PE analysis metadata.",
-            RequiredPeAnalysisSourceKind = PeAnalysisSourceKind.ProcessImage
-        }));
-
-        var eventSources = Branch("Event Sources", "Processes with events from a telemetry source.");
-        eventSources.Children.Add(EventNode(ExplorerScopeKind.RuntimeEvents, "Runtime Events", "Runtime"));
-        eventSources.Children.Add(EventNode(ExplorerScopeKind.EtwEvents, "ETW Providers", "ETW"));
-        eventSources.Children.Add(EventNode(ExplorerScopeKind.SecurityEvents, "Windows Audit Log", "Security"));
-        eventSources.Children.Add(EventNode(ExplorerScopeKind.PowerShellEvents, "PowerShell Logs", "PowerShell"));
-        eventSources.Children.Add(EventNode(ExplorerScopeKind.WindowsOtherEvents, "Windows Logs (Other)", "WindowsOther"));
-        eventSources.Children.Add(EventNode(ExplorerScopeKind.SysmonEvents, "Sysmon", "Sysmon"));
-        artifacts.Children.Add(eventSources);
-
         RootNodes.Add(processTrees);
         RootNodes.Add(systemActivity);
         RootNodes.Add(_usersRoot);
         RootNodes.Add(filesystem);
         RootNodes.Add(network);
         RootNodes.Add(analysis);
-        RootNodes.Add(artifacts);
         PruneUnpublishedNodes(RootNodes);
 
         RefreshEvidenceRoots([]);
@@ -596,7 +544,7 @@ public partial class ExplorerViewModel : ViewModelBase
             var featureId = FeatureNavigationPolicy.GetFeatureForExplorerScope(node.Scope);
             var unpublished = featureId.HasValue && !_featureAccess.IsPublished(featureId.Value);
             var emptyFeatureBranch = node.Children.Count == 0 &&
-                                     (node.Scope.Kind is ExplorerScopeKind.AnalysisRoot or ExplorerScopeKind.ArtifactRoot ||
+                                     (node.Scope.Kind is ExplorerScopeKind.AnalysisRoot ||
                                       node.Scope.Kind == ExplorerScopeKind.Branch && node.Title == "Event Sources");
             if (unpublished || emptyFeatureBranch)
             {
@@ -747,18 +695,6 @@ public partial class ExplorerViewModel : ViewModelBase
         }, count: -1);
     }
 
-    private ExplorerNodeViewModel EventNode(ExplorerScopeKind kind, string title, string source)
-    {
-        return Node(new ExplorerScope
-        {
-            Kind = kind,
-            ScopeId = $"events:{source}",
-            Title = title,
-            Description = $"Processes with staged {title.ToLowerInvariant()} records.",
-            EventSource = source
-        });
-    }
-
     private ExplorerNodeViewModel ActivityNode(
         ExplorerScopeKind kind,
         string title,
@@ -788,13 +724,6 @@ public partial class ExplorerViewModel : ViewModelBase
         {
             node.UpdateCount(value);
         }
-    }
-
-    private static int CountSource(ExplorerScopeCounts counts, string source)
-    {
-        return counts.EventProcessesBySource.TryGetValue(source, out var count)
-            ? count
-            : 0;
     }
 
     private static int CountSystemActivity(ExplorerScopeCounts counts, SystemActivityScopeKind scope)

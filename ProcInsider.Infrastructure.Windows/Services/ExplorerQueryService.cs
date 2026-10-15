@@ -226,6 +226,23 @@ internal sealed class ExplorerQueryService : IExplorerQueryService
         AddRootCounts(connection, roots, "Modules", "ModuleCount");
         AddRootCounts(connection, roots, "Handles", "HandleCount");
         AddRootCounts(connection, roots, "NetworkCaptures", "NetworkCaptureCount");
+        if (TableExists(connection, "NetworkEndpointPolls"))
+            AddRootCounts(connection, roots, "NetworkEndpointPolls", "NetworkEndpointPollCount");
+        if (TableExists(connection, "PersistenceCollections"))
+        {
+            // Retain the recorded collection identity, independently of SourceRun metadata.
+            // These counts describe stored roots; Persistence Tools still validate their history.
+            const string collections = """
+                (SELECT json_extract(MetadataJson,'$.EvidenceIdentity.CaseId') AS CaseId,
+                    json_extract(MetadataJson,'$.EvidenceIdentity.EvidenceSessionId') AS EvidenceSessionId,
+                    json_extract(MetadataJson,'$.EvidenceIdentity.CaptureId') AS CaptureId,
+                    json_extract(MetadataJson,'$.EvidenceIdentity.SourceIdentityId') AS SourceIdentityId,
+                    json_extract(MetadataJson,'$.EvidenceIdentity.HostId') AS HostId,
+                    json_extract(MetadataJson,'$.EvidenceIdentity.ExecutionRootId') AS ExecutionRootId
+                 FROM PersistenceCollections)
+                """;
+            AddRootCounts(connection, roots, collections, "PersistenceCollectionCount");
+        }
         if (TableExists(connection, "SourceRuns"))
         {
             AddRootCounts(connection, roots, "SourceRuns", "SourceRunCount");
@@ -254,7 +271,7 @@ internal sealed class ExplorerQueryService : IExplorerQueryService
             roots,
             "Artifacts",
             "FilesystemArtifactCount",
-            "ArtifactType IN ('NtfsMft', 'NtfsUsnJournal', 'NtfsLogFile', 'Prefetch', 'FileMetadata')");
+            "ArtifactType IN ('NtfsMft', 'NtfsUsnJournal', 'NtfsLogFile', 'Prefetch', 'FileMetadata')" + (ColumnExists(connection, "Artifacts", "StructuredPayloadVersion") ? " AND StructuredPayloadVersion IS NULL" : string.Empty));
         return roots.Values
             .OrderBy(root => root.CaseId, StringComparer.OrdinalIgnoreCase)
             .ThenBy(root => root.EvidenceSessionId, StringComparer.OrdinalIgnoreCase)
@@ -429,7 +446,7 @@ internal sealed class ExplorerQueryService : IExplorerQueryService
             roots,
             "Artifacts",
             "FilesystemArtifactCount",
-            "ArtifactType IN ('NtfsMft', 'NtfsUsnJournal', 'NtfsLogFile', 'Prefetch', 'FileMetadata')");
+            "ArtifactType IN ('NtfsMft', 'NtfsUsnJournal', 'NtfsLogFile', 'Prefetch', 'FileMetadata')" + (ColumnExists(connection, "Artifacts", "StructuredPayloadVersion") ? " AND StructuredPayloadVersion IS NULL" : string.Empty));
 
         return roots.Values
             .Where(root => root.FilesystemArtifactCount > 0)
@@ -465,6 +482,7 @@ internal sealed class ExplorerQueryService : IExplorerQueryService
             SELECT a.Path
             FROM Artifacts a
             WHERE a.ArtifactType IN ('NtfsMft', 'NtfsUsnJournal', 'NtfsLogFile', 'Prefetch', 'FileMetadata')
+                          {(ColumnExists(connection, "Artifacts", "StructuredPayloadVersion") ? "AND a.StructuredPayloadVersion IS NULL" : string.Empty)}
                   {identityWhere}
                   {pathWhere}
             ORDER BY a.Path COLLATE NOCASE ASC
@@ -620,10 +638,11 @@ internal sealed class ExplorerQueryService : IExplorerQueryService
                     plans,
                     connection,
                     "explorer filesystem children",
-                    """
+                    $"""
                     SELECT a.Path
                     FROM Artifacts a
                     WHERE a.ArtifactType IN ('NtfsMft', 'NtfsUsnJournal', 'NtfsLogFile', 'Prefetch', 'FileMetadata')
+                          {(ColumnExists(connection, "Artifacts", "StructuredPayloadVersion") ? "AND a.StructuredPayloadVersion IS NULL" : string.Empty)}
                     ORDER BY a.Path COLLATE NOCASE
                     LIMIT $CandidateLimit;
                     """,
@@ -788,14 +807,15 @@ internal sealed class ExplorerQueryService : IExplorerQueryService
     private static IndependentArtifactCounts CountIndependentArtifacts(SqliteConnection connection)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT (SELECT COUNT(*) FROM MemoryDumps),
                    (SELECT COUNT(*) FROM MemoryImages),
                    (SELECT COUNT(*) FROM PeAnalyses),
                    (SELECT COUNT(*) FROM NetworkCaptures),
                    (SELECT COUNT(*) FROM ZeekNetworkArtifacts),
                    (SELECT COUNT(*) FROM Artifacts
-                    WHERE ArtifactType IN ('NtfsMft', 'NtfsUsnJournal', 'NtfsLogFile', 'Prefetch', 'FileMetadata'));
+                    WHERE ArtifactType IN ('NtfsMft', 'NtfsUsnJournal', 'NtfsLogFile', 'Prefetch', 'FileMetadata')
+                                  {(ColumnExists(connection, "Artifacts", "StructuredPayloadVersion") ? "AND StructuredPayloadVersion IS NULL" : string.Empty)});
             """;
         using var reader = command.ExecuteReader();
         return reader.Read()
@@ -949,6 +969,12 @@ internal sealed class ExplorerQueryService : IExplorerQueryService
                     break;
                 case "FilesystemArtifactCount":
                     root.FilesystemArtifactCount += count;
+                    break;
+                case "NetworkEndpointPollCount":
+                    root.NetworkEndpointPollCount += count;
+                    break;
+                case "PersistenceCollectionCount":
+                    root.PersistenceCollectionCount += count;
                     break;
                 case "SourceRunCount":
                     root.SourceRunCount += count;

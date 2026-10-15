@@ -38,6 +38,7 @@ public class TelemetryStoreStats
     public int MemoryImageCount { get; set; }
     public int VolatilityPluginRunCount { get; set; }
     public int PeAnalysisCount { get; set; }
+    public int OsNetworkEndpointCount { get; set; }
     public int NetworkCaptureCount { get; set; }
     public int ZeekNetworkArtifactCount { get; set; }
     public int FilesystemArtifactCount { get; set; }
@@ -63,6 +64,8 @@ public sealed class EvidenceRootSummary
     public int HandleCount { get; set; }
     public int NetworkCaptureCount { get; set; }
     public int FilesystemArtifactCount { get; set; }
+    public int NetworkEndpointPollCount { get; set; }
+    public int PersistenceCollectionCount { get; set; }
     public int SourceRunCount { get; set; }
     public int MissingSourceRunLinkCount { get; set; }
 }

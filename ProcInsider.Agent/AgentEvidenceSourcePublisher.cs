@@ -26,8 +26,16 @@ internal sealed class AgentEvidenceSourcePublisher : IEvidenceSourcePublisher
         ValidateBatch(batch, MaxBatchRowCount);
         var persisted = 0;
         var duplicates = 0;
+        var reused = 0;
         try
         {
+            if (batch.ForensicReads.Count > 0)
+            {
+                var result = await _writer.AppendForensicReadsAsync(batch.ForensicReads, cancellationToken).ConfigureAwait(false);
+                persisted += result.PersistedRowCount;
+                duplicates += result.DuplicateReadCount;
+                reused += result.ReusedResultCount;
+            }
             if (batch.ProcessObservations.Count > 0 || batch.ProcessAliases.Count > 0)
             {
                 var result = await _writer.AppendProcessObservationBatchAsync(
@@ -60,6 +68,12 @@ internal sealed class AgentEvidenceSourcePublisher : IEvidenceSourcePublisher
                 await _writer.UpsertFilesystemArtifactsAsync(batch.FilesystemArtifacts, cancellationToken)
                     .ConfigureAwait(false);
                 persisted += batch.FilesystemArtifacts.Count;
+            }
+
+            if (batch.NetworkEndpointObservations.Count + batch.NetworkEndpointPolls.Count > 0)
+            {
+                await _writer.AppendNetworkEndpointsAsync(batch, cancellationToken).ConfigureAwait(false);
+                persisted += batch.NetworkEndpointObservations.Count + batch.NetworkEndpointPolls.Count;
             }
 
             if (batch.NetworkCaptures.Count > 0)
@@ -107,7 +121,8 @@ internal sealed class AgentEvidenceSourcePublisher : IEvidenceSourcePublisher
             return new EvidenceSourcePublishResult
             {
                 PersistedRowCount = persisted,
-                DuplicateRowCount = duplicates
+                DuplicateRowCount = duplicates,
+                ReusedResultCount = reused
             };
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -135,6 +150,11 @@ internal sealed class AgentEvidenceSourcePublisher : IEvidenceSourcePublisher
         {
             throw new InvalidOperationException("Evidence source batch sequence numbers must be positive.");
         }
+        if (batch.ForensicReads.Any(read => read.SourceRunId != batch.SourceRunId || read.IngestionJobId != batch.IngestionJobId))
+            throw new InvalidOperationException("Forensic reads do not retain exact batch run/job provenance.");
+        if(batch.NetworkEndpointPolls.Any(p=>p.SourceRunId!=batch.SourceRunId || p.IngestionJobId!=batch.IngestionJobId) ||
+            batch.NetworkEndpointObservations.Any(r=>r.Provenance.SourceRunId!=batch.SourceRunId || r.Provenance.IngestionJobId!=batch.IngestionJobId))
+            throw new InvalidOperationException("Endpoint output does not retain exact batch run/job provenance.");
 
         if (batch.RowCount > Math.Max(1, maxBatchRowCount))
         {

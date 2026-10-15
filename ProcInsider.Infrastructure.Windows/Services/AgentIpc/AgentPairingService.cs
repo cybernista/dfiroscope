@@ -322,7 +322,8 @@ public sealed class AgentPairingStore
         string expectedReleaseId,
         DateTime nowUtc,
         out AgentPairingStoreResult result,
-        bool allowReleaseMismatch = false)
+        bool allowReleaseMismatch = false,
+        bool allowExitedLease = false)
     {
         lock (_gate)
         {
@@ -400,7 +401,8 @@ public sealed class AgentPairingStore
                     envelope.ExpiresAtUtc,
                     "The protected local-agent pairing is ready.",
                     nowUtc);
-                if (result.State != AgentPairingState.Ready)
+                if (result.State != AgentPairingState.Ready &&
+                    !(allowExitedLease && result.State == AgentPairingState.AgentExited))
                 {
                     CryptographicOperations.ZeroMemory(secret);
                     return null;
@@ -587,6 +589,44 @@ public sealed class AgentPairingStore
                 JsonSerializer.Serialize(lease, JsonOptions),
                 moveAttemptCount: 4);
         }
+    }
+
+    /// <summary>Verify a terminal lease against this account's protected secret; never trust discovery flags alone.</summary>
+    public bool VerifyScheduledShutdownCompletion(
+        AgentPairingLeaseMetadata lease, string expectedReleaseId, long expectedGeneration,
+        DateTime? nowUtc = null)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        var now = nowUtc ?? DateTime.UtcNow;
+        if (lease.State != AgentPairingState.AgentExited ||
+            lease.ShutdownReason != AgentShutdownReason.ScheduledDurationExpired ||
+            lease.ShutdownCompletedAtUtc is not { Kind: DateTimeKind.Utc } completed ||
+            completed < lease.AgentStartedAtUtc || completed > now ||
+            lease.WorkspaceMode != ProcInsider.Models.CaptureWorkspaceMode.LiveCapture || lease.CaptureSealed ||
+            lease.PairingGeneration <= 0 || lease.PairingGeneration != expectedGeneration ||
+            lease.PairingContractVersion != AgentContracts.PairingContractVersion ||
+            lease.IpcContractVersion != AgentContracts.ContractVersion ||
+            !string.Equals(lease.ReleaseId, expectedReleaseId, StringComparison.Ordinal) ||
+            string.IsNullOrEmpty(lease.ShutdownCompletionMac)) return false;
+        try
+        {
+            using var secret = LoadSecret(lease.SessionId, lease.DatabaseIdentity, expectedReleaseId, now,
+                out _, allowExitedLease: true);
+            if (secret == null || secret.Context.PairingGeneration != expectedGeneration) return false;
+            return CryptographicOperations.FixedTimeEquals(
+                Convert.FromBase64String(lease.ShutdownCompletionMac),
+                Convert.FromBase64String(ComputeShutdownCompletionMac(secret.Secret, lease)));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or
+            CryptographicException or FormatException or PlatformNotSupportedException) { return false; }
+    }
+
+    internal static string ComputeShutdownCompletionMac(byte[] secret, AgentPairingLeaseMetadata lease)
+    {
+        // Every lease field, including process/start/path/endpoints/release/workspace/generation, is signed.
+        var message = Encoding.UTF8.GetBytes("DFIRoscope.Agent.ShutdownCompletion.v1\n" +
+            JsonSerializer.Serialize(lease with { ShutdownCompletionMac = string.Empty }, JsonOptions));
+        return Convert.ToBase64String(HMACSHA256.HashData(secret, message));
     }
 
     public void DeleteSecret()
@@ -1380,6 +1420,19 @@ public sealed class AgentPairingRuntime : IDisposable
         }
     }
 
+    private DateTime? _scheduledShutdownCompletedAtUtc;
+
+    public void RecordScheduledShutdownCompletion()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_state != AgentPairingState.Ready || _secret == null)
+                throw new InvalidOperationException("Unavailable pairing cannot attest completed shutdown.");
+            _scheduledShutdownCompletedAtUtc = DateTime.UtcNow;
+        }
+    }
+
     public void Dispose()
     {
         lock (_gate)
@@ -1392,12 +1445,18 @@ public sealed class AgentPairingRuntime : IDisposable
             _disposed = true;
             _heartbeatTimer.Dispose();
             _challenges.Clear();
-            _secret?.Dispose();
-            _secret = null;
-            if (_state != AgentPairingState.Revoked)
+            try
             {
-                _state = AgentPairingState.AgentExited;
-                WriteLease(DateTime.UtcNow, _state);
+                if (_state != AgentPairingState.Revoked)
+                {
+                    _state = AgentPairingState.AgentExited;
+                    WriteLease(DateTime.UtcNow, _state);
+                }
+            }
+            finally
+            {
+                _secret?.Dispose();
+                _secret = null;
             }
         }
     }
@@ -1474,7 +1533,7 @@ public sealed class AgentPairingRuntime : IDisposable
 
     private void WriteLease(DateTime nowUtc, AgentPairingState state)
     {
-        _store.WriteLease(new AgentPairingLeaseMetadata
+        var lease = new AgentPairingLeaseMetadata
         {
             SessionId = _sessionId,
             DatabaseIdentity = _databaseIdentity,
@@ -1492,8 +1551,14 @@ public sealed class AgentPairingRuntime : IDisposable
             ExpiresAtUtc = state == AgentPairingState.Ready
                 ? nowUtc.Add(_leaseExpiryInterval)
                 : nowUtc,
-            State = state
-        });
+            State = state,
+            ShutdownReason = state == AgentPairingState.AgentExited && _scheduledShutdownCompletedAtUtc.HasValue
+                ? AgentShutdownReason.ScheduledDurationExpired : AgentShutdownReason.Unknown,
+            ShutdownCompletedAtUtc = state == AgentPairingState.AgentExited ? _scheduledShutdownCompletedAtUtc : null
+        };
+        if (lease.ShutdownReason == AgentShutdownReason.ScheduledDurationExpired && _secret != null)
+            lease = lease with { ShutdownCompletionMac = AgentPairingStore.ComputeShutdownCompletionMac(_secret.Secret, lease) };
+        _store.WriteLease(lease);
     }
 
     private AgentPairingStatusSnapshot Snapshot(AgentPairingState state, DateTime nowUtc)

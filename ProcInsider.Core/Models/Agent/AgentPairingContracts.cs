@@ -81,6 +81,13 @@ public sealed record AgentPairingStatusSnapshot
     public string Status { get; init; } = string.Empty;
 }
 
+/// <summary>Explicit cause of a completed Agent shutdown.</summary>
+public enum AgentShutdownReason
+{
+    Unknown = 0,
+    ScheduledDurationExpired = 1
+}
+
 /// <summary>
 /// Non-secret discovery lease. The DPAPI-protected secret is stored separately
 /// and outside capture packages.
@@ -118,4 +125,11 @@ public sealed record AgentPairingLeaseMetadata
     public DateTime LastHeartbeatUtc { get; init; }
 
     public AgentPairingState State { get; init; }
+
+    public AgentShutdownReason ShutdownReason { get; init; }
+
+    public DateTime? ShutdownCompletedAtUtc { get; init; }
+
+    /// <summary>Authenticated completion bound to the full exact pairing lease; discovery alone is not proof.</summary>
+    public string ShutdownCompletionMac { get; init; } = string.Empty;
 }

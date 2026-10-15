@@ -48,6 +48,7 @@
      <shared:ColumnHeaderFilterControl.Filter><MultiBinding Converter="{StaticResource ColumnFilterLookup}">
       <Binding Path="DataContext.HeaderFilters" RelativeSource="{RelativeSource AncestorType=DataGrid}"/>
       <Binding Path="Column.SortMemberPath" RelativeSource="{RelativeSource AncestorType=DataGridColumnHeader}"/>
+      <Binding Path="(shared:ColumnFilterLookupConverter.Filters)" RelativeSource="{RelativeSource AncestorType=DataGrid}"/>
      </MultiBinding></shared:ColumnHeaderFilterControl.Filter>
     </shared:ColumnHeaderFilterControl>
   </DataTemplate></Setter.Value></Setter>

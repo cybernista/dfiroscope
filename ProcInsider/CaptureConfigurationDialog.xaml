@@ -6,6 +6,7 @@
         MinWidth="520"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner">
+    <Window.Resources><BooleanToVisibilityConverter x:Key="Visible"/></Window.Resources>
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -27,11 +28,13 @@
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                        <CheckBox Content="{Binding DisplayName}"
+                        <StackPanel><CheckBox Content="{Binding DisplayName}"
                               IsChecked="{Binding IsIncluded, Mode=TwoWay}"
                               IsEnabled="{Binding CanConfigure}"
                               ToolTip="{Binding Description}"
                               Margin="0,0,14,6"/>
+                         <StackPanel Orientation="Horizontal" Visibility="{Binding HasPersistenceCadence,Converter={StaticResource Visible}}" Margin="18,0,8,6"><TextBlock Text="Every (minutes, 1–1440):" VerticalAlignment="Center"/><TextBox Text="{Binding PersistenceIntervalMinutes,UpdateSourceTrigger=PropertyChanged,ValidatesOnExceptions=True}" Width="60" Margin="5,0"/></StackPanel>
+                        </StackPanel>
                 </DataTemplate>
             </ItemsControl.ItemTemplate>
         </ItemsControl>

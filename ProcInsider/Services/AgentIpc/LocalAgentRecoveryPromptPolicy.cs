@@ -24,7 +24,8 @@ public static class LocalAgentRecoveryPromptPolicy
         string activeDatabaseIdentity,
         bool authenticatedHealthReachable,
         DateTime? disconnectedSinceUtc,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        Func<AgentPairingDiscoveryRecord, bool>? verifyScheduledShutdown = null)
     {
         ArgumentNullException.ThrowIfNull(discovery);
         ArgumentNullException.ThrowIfNull(target);
@@ -43,14 +44,15 @@ public static class LocalAgentRecoveryPromptPolicy
             string.Equals(lease.SessionId, activeSessionId, StringComparison.Ordinal) &&
             string.Equals(lease.DatabaseIdentity, activeDatabaseIdentity, StringComparison.OrdinalIgnoreCase);
 
-        if (discovery.Outcome == LocalAgentDiscoveryOutcome.Absent &&
-            discovery.Conflicts.Any(conflict =>
+        if (discovery.Outcome == LocalAgentDiscoveryOutcome.Absent)
+        {
+            var matching = discovery.Conflicts.Where(conflict =>
                 conflict.Kind == LocalAgentRecoveryConflictKind.ProcessExited &&
                 conflict.ProcessVerification?.IsStopped == true &&
-                conflict.Discovery is { } record &&
-                MatchesLease(record.Lease)))
-        {
-            return LocalAgentRecoveryPromptReason.VerifiedExit;
+                conflict.Discovery is { } record && MatchesLease(record.Lease)).ToArray();
+            if (matching.Length == 1 && verifyScheduledShutdown?.Invoke(matching[0].Discovery!) == true)
+                return LocalAgentRecoveryPromptReason.None;
+            if (matching.Length != 0) return LocalAgentRecoveryPromptReason.VerifiedExit;
         }
 
         if (!authenticatedHealthReachable &&

@@ -1,5 +1,6 @@
 ﻿using System.Configuration;
 using System.Data;
+using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 using ProcInsider.Services;
@@ -32,6 +33,107 @@ public partial class App : Application
         var window = new MainWindow();
         MainWindow = window;
         window.Show();
+    }
+
+    internal async Task OfferPortableDownloadMarkRemovalAsync(MainWindow window)
+    {
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(processPath))
+        {
+            return;
+        }
+
+        var service = new PortableDownloadMarkService(AppContext.BaseDirectory, processPath);
+        PortableDownloadMarkScan? scan;
+        try
+        {
+            scan = await Task.Run(service.Inspect);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Portable download-marker inspection failed: {ex}");
+            return;
+        }
+
+        if (scan == null || !window.IsVisible || MainWindow != window)
+        {
+            return;
+        }
+
+        if (scan.Files.Count == 0)
+        {
+            var details = string.Join(Environment.NewLine, scan.Warnings.Take(12));
+            MessageBox.Show(window,
+                "Windows download-marker inspection could not verify one or more packaged program files. " +
+                "No markers were removed. Check file access and the package before starting the Agent." +
+                (details.Length == 0 ? "" : Environment.NewLine + Environment.NewLine + details),
+                "Downloaded DFIRoscope files", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        bool? consent;
+        try
+        {
+            consent = new PortableDownloadMarkDialog(scan) { Owner = window }.ShowDialog();
+        }
+        catch (InvalidOperationException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Portable download-marker prompt could not open: {ex}");
+            return;
+        }
+
+        if (consent != true)
+        {
+            service.ApplyDecision(scan, PortableDownloadMarkDecision.Skip);
+            return;
+        }
+
+        PortableDownloadMarkRemovalResult result;
+        try
+        {
+            result = await Task.Run(() => service.ApplyDecision(
+                scan, PortableDownloadMarkDecision.Remove));
+        }
+        catch (Exception ex)
+        {
+            if (window.IsVisible)
+            {
+                MessageBox.Show(window,
+                    $"Windows download-marker removal stopped: {ex.Message}",
+                    "Downloaded DFIRoscope files", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            return;
+        }
+
+        if (!window.IsVisible)
+        {
+            return;
+        }
+
+        var message = new StringBuilder()
+            .AppendLine($"Removed Zone.Identifier from {result.Removed.Count} file(s).")
+            .AppendLine($"Already absent: {result.AlreadyAbsent.Count}.")
+            .AppendLine($"Failed: {result.Failed.Count}.");
+        if (result.Failed.Count > 0 || scan.Warnings.Count > 0)
+        {
+            message.AppendLine().AppendLine("Details:");
+            foreach (var detail in result.Failed.Concat(scan.Warnings).Take(12))
+            {
+                message.AppendLine(detail);
+            }
+
+            var remaining = result.Failed.Count + scan.Warnings.Count - 12;
+            if (remaining > 0)
+            {
+                message.AppendLine($"And {remaining} more item(s).");
+            }
+        }
+
+        MessageBox.Show(window, message.ToString(), "Downloaded DFIRoscope files",
+            MessageBoxButton.OK,
+            result.Failed.Count > 0 || scan.Warnings.Count > 0
+                ? MessageBoxImage.Warning
+                : MessageBoxImage.Information);
     }
 
     protected override void OnExit(ExitEventArgs e)

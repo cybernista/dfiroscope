@@ -978,16 +978,16 @@ internal sealed class ProcessEvidenceWriteService : IProcessEvidenceWriteService
                        ParentProcessId, ParentProcessKey, ParentProcessEntityId, ParentProcessName,
                        ProcessName, ProcessPath, CommandLine, UserName, SessionId, Architecture,
                        CpuUsage, MemoryUsageBytes, CompanyName, FileDescription, Sha256Hash, TreeDepth,
-                       FirstObservedUtc, LastObservedUtc, LastSource, ModuleCaptureStatus, ModuleCount,
-                       HandleCaptureStatus, HandleCount)
+                       FirstObservedUtc, LastObservedUtc, LastSource, ModuleCaptureStatus, ModuleCount, ModuleLastCapturedUtc, ModuleCaptureError,
+                       HandleCaptureStatus, HandleCount, HandleLastCapturedUtc, HandleCaptureError)
                    VALUES(
                        $ProcessKey, $ProcessEntityId, $CaseId, $EvidenceSessionId, $CaptureId, $SourceIdentityId,
                        $HostId, $ExecutionRootId, $ProcessId, $ProcessGuid, $StartTimeUtc, $EndTimeUtc, $Status,
                        $ParentProcessId, $ParentProcessKey, $ParentProcessEntityId, $ParentProcessName,
                        $ProcessName, $ProcessPath, $CommandLine, $UserName, $SessionId, $Architecture,
                        $CpuUsage, $MemoryUsageBytes, $CompanyName, $FileDescription, $Sha256Hash, $TreeDepth,
-                       $FirstObservedUtc, $LastObservedUtc, $LastSource, $ModuleCaptureStatus, $ModuleCount,
-                       $HandleCaptureStatus, $HandleCount);
+                       $FirstObservedUtc, $LastObservedUtc, $LastSource, $ModuleCaptureStatus, $ModuleCount, $ModuleLastCapturedUtc, $ModuleCaptureError,
+                       $HandleCaptureStatus, $HandleCount, $HandleLastCapturedUtc, $HandleCaptureError);
                    """))
         {
             var insert = lease.Command;
@@ -1018,7 +1018,9 @@ internal sealed class ProcessEvidenceWriteService : IProcessEvidenceWriteService
                        FileDescription=$FileDescription, Sha256Hash=$Sha256Hash, TreeDepth=$TreeDepth,
                        FirstObservedUtc=$FirstObservedUtc, LastObservedUtc=$LastObservedUtc, LastSource=$LastSource,
                        ModuleCaptureStatus=$ModuleCaptureStatus, ModuleCount=$ModuleCount,
-                       HandleCaptureStatus=$HandleCaptureStatus, HandleCount=$HandleCount
+                       ModuleLastCapturedUtc=$ModuleLastCapturedUtc, ModuleCaptureError=$ModuleCaptureError,
+                       HandleCaptureStatus=$HandleCaptureStatus, HandleCount=$HandleCount,
+                       HandleLastCapturedUtc=$HandleLastCapturedUtc, HandleCaptureError=$HandleCaptureError
                    WHERE ProcessKey=$ProcessKey;
                    """))
         {
@@ -1114,8 +1116,12 @@ internal sealed class ProcessEvidenceWriteService : IProcessEvidenceWriteService
                        LastSource TEXT,
                        ModuleCaptureStatus TEXT,
                        ModuleCount INTEGER,
+                       ModuleLastCapturedUtc TEXT,
+                       ModuleCaptureError TEXT,
                        HandleCaptureStatus TEXT,
                        HandleCount INTEGER,
+                       HandleLastCapturedUtc TEXT,
+                       HandleCaptureError TEXT,
                        ConflictCount INTEGER NOT NULL
                    );
                    CREATE UNIQUE INDEX IF NOT EXISTS temp.IX_ProcessProjectionAppendRows_Entity
@@ -1133,16 +1139,16 @@ internal sealed class ProcessEvidenceWriteService : IProcessEvidenceWriteService
                        ParentProcessId, ParentProcessKey, ParentProcessEntityId, ParentProcessName,
                        ProcessName, ProcessPath, CommandLine, UserName, SessionId, Architecture,
                        CpuUsage, MemoryUsageBytes, CompanyName, FileDescription, Sha256Hash, TreeDepth,
-                       FirstObservedUtc, LastObservedUtc, LastSource, ModuleCaptureStatus, ModuleCount,
-                       HandleCaptureStatus, HandleCount, ConflictCount)
+                       FirstObservedUtc, LastObservedUtc, LastSource, ModuleCaptureStatus, ModuleCount, ModuleLastCapturedUtc, ModuleCaptureError,
+                       HandleCaptureStatus, HandleCount, HandleLastCapturedUtc, HandleCaptureError, ConflictCount)
                    VALUES(
                        $ProcessKey, $ProcessEntityId, $CaseId, $EvidenceSessionId, $CaptureId, $SourceIdentityId,
                        $HostId, $ExecutionRootId, $ProcessId, $ProcessGuid, $StartTimeUtc, $EndTimeUtc, $Status,
                        $ParentProcessId, $ParentProcessKey, $ParentProcessEntityId, $ParentProcessName,
                        $ProcessName, $ProcessPath, $CommandLine, $UserName, $SessionId, $Architecture,
                        $CpuUsage, $MemoryUsageBytes, $CompanyName, $FileDescription, $Sha256Hash, $TreeDepth,
-                       $FirstObservedUtc, $LastObservedUtc, $LastSource, $ModuleCaptureStatus, $ModuleCount,
-                       $HandleCaptureStatus, $HandleCount, $ConflictCount);
+                       $FirstObservedUtc, $LastObservedUtc, $LastSource, $ModuleCaptureStatus, $ModuleCount, $ModuleLastCapturedUtc, $ModuleCaptureError,
+                       $HandleCaptureStatus, $HandleCount, $HandleLastCapturedUtc, $HandleCaptureError, $ConflictCount);
                    """))
         {
             foreach (var projection in projections)
@@ -1163,16 +1169,16 @@ internal sealed class ProcessEvidenceWriteService : IProcessEvidenceWriteService
                        ParentProcessId, ParentProcessKey, ParentProcessEntityId, ParentProcessName,
                        ProcessName, ProcessPath, CommandLine, UserName, SessionId, Architecture,
                        CpuUsage, MemoryUsageBytes, CompanyName, FileDescription, Sha256Hash, TreeDepth,
-                       FirstObservedUtc, LastObservedUtc, LastSource, ModuleCaptureStatus, ModuleCount,
-                       HandleCaptureStatus, HandleCount)
+                       FirstObservedUtc, LastObservedUtc, LastSource, ModuleCaptureStatus, ModuleCount, ModuleLastCapturedUtc, ModuleCaptureError,
+                       HandleCaptureStatus, HandleCount, HandleLastCapturedUtc, HandleCaptureError)
                    SELECT
                        ProcessKey, ProcessEntityId, CaseId, EvidenceSessionId, CaptureId, SourceIdentityId,
                        HostId, ExecutionRootId, ProcessId, ProcessGuid, StartTimeUtc, EndTimeUtc, Status,
                        ParentProcessId, ParentProcessKey, ParentProcessEntityId, ParentProcessName,
                        ProcessName, ProcessPath, CommandLine, UserName, SessionId, Architecture,
                        CpuUsage, MemoryUsageBytes, CompanyName, FileDescription, Sha256Hash, TreeDepth,
-                       FirstObservedUtc, LastObservedUtc, LastSource, ModuleCaptureStatus, ModuleCount,
-                       HandleCaptureStatus, HandleCount
+                       FirstObservedUtc, LastObservedUtc, LastSource, ModuleCaptureStatus, ModuleCount, ModuleLastCapturedUtc, ModuleCaptureError,
+                       HandleCaptureStatus, HandleCount, HandleLastCapturedUtc, HandleCaptureError
                    FROM ProcessProjectionAppendRows
                    WHERE true
                    ON CONFLICT(ProcessKey) DO UPDATE SET
@@ -1193,7 +1199,9 @@ internal sealed class ProcessEvidenceWriteService : IProcessEvidenceWriteService
                        TreeDepth=excluded.TreeDepth, FirstObservedUtc=excluded.FirstObservedUtc,
                        LastObservedUtc=excluded.LastObservedUtc, LastSource=excluded.LastSource,
                        ModuleCaptureStatus=excluded.ModuleCaptureStatus, ModuleCount=excluded.ModuleCount,
-                       HandleCaptureStatus=excluded.HandleCaptureStatus, HandleCount=excluded.HandleCount;
+                       ModuleLastCapturedUtc=excluded.ModuleLastCapturedUtc, ModuleCaptureError=excluded.ModuleCaptureError,
+                       HandleCaptureStatus=excluded.HandleCaptureStatus, HandleCount=excluded.HandleCount,
+                       HandleLastCapturedUtc=excluded.HandleLastCapturedUtc, HandleCaptureError=excluded.HandleCaptureError;
                    """))
         {
             upsertProcesses.ExecuteNonQuery();
@@ -1221,23 +1229,10 @@ internal sealed class ProcessEvidenceWriteService : IProcessEvidenceWriteService
             clearFields.ExecuteNonQuery();
         }
 
-        var projectionFields = new List<ProjectionFieldBatchRow>(projections.Count * 20);
-        foreach (var projection in projections)
-        {
-            foreach (var winner in projection.Winners)
-            {
-                projectionFields.Add(new ProjectionFieldBatchRow(
-                    projection.Process.ProcessEntityId,
-                    winner.FieldName,
-                    winner.ObservationId,
-                    winner.SourceRunId,
-                    winner.ValueQuality,
-                    winner.ResolutionReason,
-                    DateTime.UtcNow));
-            }
-        }
+        var projectionFields = projections.SelectMany(projection => projection.Winners.Select(winner =>
+            new ProjectionFieldBatchRow(projection.Process.ProcessEntityId, winner.FieldName, winner.ObservationId,
+                winner.SourceRunId, winner.ValueQuality, winner.ResolutionReason, DateTime.UtcNow)));
 
-        if (projectionFields.Count > 0)
         {
             using var insertFields = CreateCommand("""
                 INSERT INTO ProcessProjectionFields(ProcessEntityId, FieldName, ObservationId, SourceRunId,
@@ -1254,8 +1249,12 @@ internal sealed class ProcessEvidenceWriteService : IProcessEvidenceWriteService
                 FROM json_each($ProjectionFieldsJson);
                 """);
             Add(insertFields, "$ProjectionVersion", ProcessProjectionPolicy.Version);
-            Add(insertFields, "$ProjectionFieldsJson", JsonSerializer.Serialize(projectionFields));
-            insertFields.ExecuteNonQuery();
+            // Bound transient serialization while retaining every winner in the caller's single transaction.
+            foreach (var chunk in projectionFields.Chunk(1000))
+            {
+                Add(insertFields, "$ProjectionFieldsJson", JsonSerializer.Serialize(chunk));
+                insertFields.ExecuteNonQuery();
+            }
         }
 
         using (var diagnostics = CreateCommand("""
@@ -1631,7 +1630,7 @@ internal sealed class ProcessEvidenceWriteService : IProcessEvidenceWriteService
         Add(command, "$SourceIdentityId", process.SourceIdentityId);
         Add(command, "$HostId", process.HostId);
         Add(command, "$ExecutionRootId", process.ExecutionRootId);
-        AddProcessPayloadParameters(command, process, includeCaptureSummaries: false);
+        AddProcessPayloadParameters(command, process, includeCaptureSummaries: true);
     }
 
     private SqliteCommand CreateCommand(string sql) => _context.CreateCommand(sql);

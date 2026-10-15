@@ -164,9 +164,8 @@ internal sealed partial class EventsWorkspaceViewModel
             ExtractedFieldsStatus = $"{results.SelectMany(r => r.Fields).Select(f => f.Path).Distinct(StringComparer.Ordinal).Count()} fields on this displayed page ({rows.Length} events); {unavailable} partial/unavailable. Selected fields from other pages remain listed.";
             if (_selected != null && rows.Contains(_selected))
             {
-                RetireAi();
                 InspectorPaneViewModel.Load(_selected.CreatePayload());
-                OnPropertyChanged(nameof(AiDetailsInvestigationViewModel));
+                OnPropertyChanged(nameof(ObjectConversationViewModel));
             }
         }
         catch (OperationCanceledException) { }

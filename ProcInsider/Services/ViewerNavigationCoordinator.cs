@@ -478,7 +478,9 @@ public sealed class ViewerNavigationCoordinator : IDisposable
     public async Task<ViewerNavigationResult> NavigateToProcessResultAsync(
         TelemetrySearchResult result,
         CancellationToken cancellationToken = default,
-        bool retainFilters = false)
+        bool retainFilters = false,
+        Func<ProcessRowViewModel, bool>? eligibleRow = null,
+        Func<bool>? canSelect = null)
     {
         ArgumentNullException.ThrowIfNull(result);
         if (TryCreateDisposedResult(out var disposed))
@@ -490,15 +492,20 @@ public sealed class ViewerNavigationCoordinator : IDisposable
         try
         {
             var visible = _runtime.FindVisibleProcessRow(result);
+            if (visible != null && eligibleRow != null && !eligibleRow(visible)) visible = null;
             if (visible != null)
             {
                 var visibleContext = _runtime.GetCurrentProcessNavigationContext();
                 if (visibleContext != null && IsOperationCurrent(operation, visibleContext))
                 {
+                    if (canSelect != null && !canSelect()) return CompleteInterrupted(operation);
                     _runtime.ApplyProcessNavigationSelection(visibleContext, visible);
                 }
                 else
                 {
+                    if (eligibleRow != null)
+                        return CompleteProcessResult(operation, ViewerNavigationOutcome.NotFound,
+                            "The cited process cannot be selected from the current exact listing.");
                     var legacy = _runtime.NavigateLegacyProcessResult(result);
                     return CompleteLegacy(operation, legacy);
                 }
@@ -597,7 +604,8 @@ public sealed class ViewerNavigationCoordinator : IDisposable
             var row = context.Collection.GetLoadedItem(rowIndex);
             if (row == null || !string.Equals(row.ProcessKey, processKey, StringComparison.Ordinal) ||
                 (!string.IsNullOrWhiteSpace(result.ProcessEntityId) &&
-                 !string.Equals(row.ProcessInfo.ProcessEntityId, result.ProcessEntityId, StringComparison.Ordinal)))
+                 !string.Equals(row.ProcessInfo.ProcessEntityId, result.ProcessEntityId, StringComparison.Ordinal)) ||
+                (eligibleRow != null && !eligibleRow(row)))
             {
                 return CompleteProcessResult(
                     operation,
@@ -605,6 +613,7 @@ public sealed class ViewerNavigationCoordinator : IDisposable
                     $"Could not materialize '{result.ProcessName}' (PID {result.ProcessId}) in the process listing.");
             }
 
+            if (canSelect != null && !canSelect()) return CompleteInterrupted(operation);
             context.Collection.PreserveSelection(row);
             _runtime.ApplyProcessNavigationSelection(context, row);
             return CompleteProcessSuccess(operation, result, row, clearedFilters);

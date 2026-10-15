@@ -192,6 +192,8 @@ public sealed class PeAnalysisRowViewModel : ViewModelBase
             TargetTable = "PeAnalyses",
             TargetId = AnalysisId,
             ArtifactId = AnalysisId,
+            SourceRunId = _record.SourceRunId,
+            IngestionJobId = _record.IngestionJobId,
             CaseId = _record.CaseId,
             EvidenceSessionId = _record.EvidenceSessionId,
             CaptureId = _record.CaptureId,

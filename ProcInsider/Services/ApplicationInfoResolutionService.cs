@@ -16,9 +16,6 @@ public sealed class ApplicationInfoResolutionService
         ["System Idle Process"] = "System Idle Process"
     };
 
-    public const string EvaluationCandidateWarning =
-        "AI draft review candidate — unreviewed; not a benign verdict.";
-
     private readonly ApplicationCatalogService? _catalog;
 
     public ApplicationInfoResolutionService(ApplicationCatalogService? catalog)
@@ -110,32 +107,6 @@ public sealed class ApplicationInfoResolutionService
         };
     }
 
-    public ApplicationMetadataRecord? ResolveEvaluation(ProcessInfo process)
-        => ResolveEvaluationDetailed(process, CreateLookupContext(process)).Record;
-
-    public ApplicationInfoEvaluationResolutionResult ResolveEvaluationDetailed(
-        ProcessInfo process,
-        ApplicationProfileLookupContext lookupContext)
-    {
-        ArgumentNullException.ThrowIfNull(process);
-        ArgumentNullException.ThrowIfNull(lookupContext);
-        var candidates = _catalog?.ResolveEvaluationCandidates(lookupContext) ?? [];
-        var match = _catalog?.ResolveEvaluation(lookupContext);
-        var isAmbiguous = candidates.Count > 0 && match == null;
-        var selectionReason = match?.SelectionReason ?? (isAmbiguous
-            ? $"AI-draft evaluation lookup is ambiguous between {string.Join(", ", candidates.Select(candidate => candidate.Profile.ProfileId))}; no candidate was selected."
-            : "No explicit AI-draft evaluation candidate matched the normalized filename and lookup context.");
-
-        return new ApplicationInfoEvaluationResolutionResult
-        {
-            Record = match == null ? null : CreateCatalogRecord(match),
-            CatalogProfile = match?.Profile,
-            Candidates = candidates,
-            IsAmbiguous = isAmbiguous,
-            SelectionReason = selectionReason
-        };
-    }
-
     public static ApplicationProfileLookupContext CreateLookupContext(ProcessInfo process)
     {
         ArgumentNullException.ThrowIfNull(process);
@@ -180,14 +151,10 @@ public sealed class ApplicationInfoResolutionService
         var isPublished = profile.IsEnabled &&
                           !profile.IsEvaluationCandidate &&
                           profile.ReviewState == ApplicationProfileReviewState.CatalogReviewed;
-        var isEvaluationCandidate = !profile.IsEnabled &&
-                                    profile.IsEvaluationCandidate &&
-                                    profile.ReviewState == ApplicationProfileReviewState.AiDraft &&
-                                    profile.LastReviewedUtc is null;
-        if (!isPublished && !isEvaluationCandidate)
+        if (!isPublished)
         {
             throw new InvalidDataException(
-                $"Application profile '{profile.ProfileId}' is neither published nor an explicit evaluation candidate.");
+                $"Application profile '{profile.ProfileId}' is not a published reviewed catalog profile.");
         }
 
         return new ApplicationMetadataRecord
@@ -216,16 +183,12 @@ public sealed class ApplicationInfoResolutionService
             ChildProcessExpectations = FormatList(profile.ObservableExpectations.ChildProcesses),
             NetworkExpectations = FormatList(profile.ObservableExpectations.Network),
             NormalVariants = FormatList(profile.NormalVariants),
-            KnownBenignNotes = isEvaluationCandidate
-                ? EvaluationCandidateWarning
-                : "Catalog expectations describe consistency with a role; they are not a benign verdict.",
+            KnownBenignNotes = "Catalog expectations describe consistency with a role; they are not a benign verdict.",
             CybersecurityNotes = FormatList(profile.AbuseAndMasqueradingNotes),
             AnalystValidationChecks = FormatList(profile.AnalystValidationChecks),
-            Source = isEvaluationCandidate
-                ? "Bundled AI draft evaluation candidate"
-                : "Built-in application catalog",
+            Source = "Built-in application catalog",
             Confidence = profile.Confidence,
-            IsAiGenerated = isEvaluationCandidate,
+            IsAiGenerated = false,
             SourceReferences = profile.Sources.Select(CloneSource).ToList(),
             CatalogProvenance = profile.Provenance,
             ProfileLastReviewedUtc = profile.LastReviewedUtc,
@@ -340,19 +303,6 @@ public sealed class ApplicationInfoResolutionResult
     public ApplicationProfileDefinition? CatalogProfile { get; init; }
 
     public IReadOnlyList<ApplicationCatalogMatch> Candidates { get; init; } = [];
-
-    public string SelectionReason { get; init; } = string.Empty;
-}
-
-public sealed class ApplicationInfoEvaluationResolutionResult
-{
-    public ApplicationMetadataRecord? Record { get; init; }
-
-    public ApplicationProfileDefinition? CatalogProfile { get; init; }
-
-    public IReadOnlyList<ApplicationCatalogMatch> Candidates { get; init; } = [];
-
-    public bool IsAmbiguous { get; init; }
 
     public string SelectionReason { get; init; } = string.Empty;
 }

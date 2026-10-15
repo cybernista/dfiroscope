@@ -1,0 +1,3 @@
+# Memory and Volatility
+Memory images, dumps and plugin results are stored evidence/derived analysis with capture time, target provenance, acquisition coverage and analyzer/plugin versions. Preserve image and plugin-run identity. Findings depend on the captured snapshot and plugin support; a missing row is not proof the object never existed. Parsed memory processes are not automatically equivalent to live process entities.
+Use only suitable offered Tools that return checked stored records. This guide does not authorize memory acquisition, arbitrary plugin execution or filesystem access. Distinguish checked plugin output from a suggested analysis and disclose unsupported plugins, incomplete dumps, unavailable symbols and ambiguous relations when recorded.

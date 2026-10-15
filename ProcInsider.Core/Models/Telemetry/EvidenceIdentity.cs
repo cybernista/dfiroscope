@@ -8,6 +8,17 @@ public record EvidenceIdentity
     public string SourceIdentityId { get; init; } = string.Empty;
     public string HostId { get; init; } = string.Empty;
     public string ExecutionRootId { get; init; } = string.Empty;
+
+    /// <summary>Compatibility between capture-root evidence and its qualified execution roots.</summary>
+    public static bool ExecutionRootsCompatible(string? selectedRoot, string? relatedRoot,
+        string evidenceSessionId) =>
+        selectedRoot == relatedRoot ||
+        string.IsNullOrEmpty(selectedRoot) ||
+        string.IsNullOrEmpty(relatedRoot) ||
+        (selectedRoot == evidenceSessionId &&
+            relatedRoot.StartsWith(evidenceSessionId + "-execution-", StringComparison.Ordinal)) ||
+        (relatedRoot == evidenceSessionId &&
+            selectedRoot.StartsWith(evidenceSessionId + "-execution-", StringComparison.Ordinal));
 }
 
 public interface IHasEvidenceIdentity

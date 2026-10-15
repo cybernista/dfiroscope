@@ -84,6 +84,7 @@ public sealed class ProcessStatisticsRowViewModel : ViewModelBase
             SourceIdentityId = SourceIdentityId,
             HostId = HostId,
             ExecutionRootId = ExecutionRootId,
+            SourceRunId = _record.SourceRunId,
             ProcessKey = ProcessKey,
             ProcessId = ProcessId,
             ProcessName = ProcessName,

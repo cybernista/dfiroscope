@@ -18,13 +18,25 @@ public sealed class VolatilityExecutionService
 
     private readonly InvestigationSessionPaths? _sessionPaths;
     private readonly VolatilityOutputParser _parser;
+    private readonly OwnedAnalysisProcessRunner _processRunner;
+
+    public bool OwnedProcessExitConfirmationFailed => _processRunner.ExitConfirmationFailed;
 
     public VolatilityExecutionService(
         InvestigationSessionPaths? sessionPaths = null,
         VolatilityOutputParser? parser = null)
+        : this(sessionPaths, parser, new OwnedAnalysisProcessRunner())
+    {
+    }
+
+    internal VolatilityExecutionService(
+        InvestigationSessionPaths? sessionPaths,
+        VolatilityOutputParser? parser,
+        OwnedAnalysisProcessRunner processRunner)
     {
         _sessionPaths = sessionPaths;
         _parser = parser ?? new VolatilityOutputParser();
+        _processRunner = processRunner;
     }
 
     public async Task<IReadOnlyList<VolatilityExecutionResult>> RunPluginsAsync(
@@ -134,7 +146,8 @@ public sealed class VolatilityExecutionService
         {
             throw;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is not OwnedAnalysisProcessCleanupException &&
+            (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception))
         {
             await File.WriteAllTextAsync(stderrPath, ex.Message, CancellationToken.None).ConfigureAwait(false);
             return new VolatilityExecutionResult(
@@ -224,7 +237,7 @@ public sealed class VolatilityExecutionService
         return new PythonModuleVolatilityRunner(python, version);
     }
 
-    private static async Task<string> ReadVersionAsync(
+    private async Task<string> ReadVersionAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
@@ -234,7 +247,7 @@ public sealed class VolatilityExecutionService
             var result = await RunProcessAsync(fileName, arguments, null, TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
             return (string.IsNullOrWhiteSpace(result.StandardOutput) ? result.StandardError : result.StandardOutput).Trim();
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException && !_processRunner.ExitConfirmationFailed)
         {
             return string.Empty;
         }
@@ -293,7 +306,7 @@ public sealed class VolatilityExecutionService
         };
     }
 
-    private static async Task<ProcessRunResult> RunProcessAsync(
+    private async Task<ProcessRunResult> RunProcessAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         string? workingDirectory,
@@ -303,52 +316,26 @@ public sealed class VolatilityExecutionService
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(timeout <= TimeSpan.Zero ? TimeSpan.FromMinutes(10) : timeout);
 
-        using var process = new Process
+        var startInfo = new ProcessStartInfo
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                WorkingDirectory = workingDirectory ?? string.Empty,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            }
+            FileName = fileName,
+            WorkingDirectory = workingDirectory ?? string.Empty,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
         };
 
         foreach (var argument in arguments)
         {
-            process.StartInfo.ArgumentList.Add(argument);
+            startInfo.ArgumentList.Add(argument);
         }
 
-        process.Start();
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutSource.Token);
-        var stderrTask = process.StandardError.ReadToEndAsync(timeoutSource.Token);
-        try
-        {
-            await process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch
-            {
-                // Best effort; the job still reports cancellation/timeout to the caller.
-            }
-
-            throw;
-        }
-
+        var result = await _processRunner.RunAsync(startInfo, timeoutSource.Token).ConfigureAwait(false);
         return new ProcessRunResult(
-            process.ExitCode,
-            await stdoutTask.ConfigureAwait(false),
-            await stderrTask.ConfigureAwait(false));
+            result.ExitCode,
+            result.StandardOutput,
+            result.StandardError);
     }
 
     private static string? FindOnPath(string fileName)

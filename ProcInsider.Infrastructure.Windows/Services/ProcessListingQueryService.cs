@@ -275,7 +275,8 @@ internal sealed partial class ProcessListingQueryService : IProcessListingQueryS
     {
         ArgumentNullException.ThrowIfNull(scope);
         if (string.IsNullOrWhiteSpace(scope.ProcessKey) ||
-            string.IsNullOrWhiteSpace(scope.CaseId) ||
+            scope.CaseId is null ||
+            (scope.CaseId.Length > 0 && string.IsNullOrWhiteSpace(scope.CaseId)) ||
             string.IsNullOrWhiteSpace(scope.EvidenceSessionId) ||
             string.IsNullOrWhiteSpace(scope.SourceIdentityId) ||
             string.IsNullOrWhiteSpace(scope.HostId) ||
@@ -304,7 +305,7 @@ internal sealed partial class ProcessListingQueryService : IProcessListingQueryS
                    SourceIdentityId, HostId, ExecutionRootId, ProcessEntityId, ParentProcessEntityId
             FROM {processTable}
             WHERE ProcessKey = $ProcessKey
-              AND CaseId = $CaseId
+              AND COALESCE(CaseId, '') = $CaseId
               AND EvidenceSessionId = $EvidenceSessionId
               AND CaptureId = $CaptureId
               AND SourceIdentityId = $SourceIdentityId
@@ -666,12 +667,34 @@ internal sealed partial class ProcessListingQueryService : IProcessListingQueryS
             predicates.Add("dfiroscope_column_match(Sha256Hash, $Sha256HashContains)");
             parameters.AddWithValue("$Sha256HashContains", filters.Sha256HashContains);
         }
+        AddFilterIdentityPredicate(predicates, parameters, "ProcessEntityId", filters.ProcessEntityIdEquals, "$ProcessEntityIdEquals");
         AddFilterIdentityPredicate(predicates, parameters, "CaseId", filters.CaseId, "$CaseId");
         AddFilterIdentityPredicate(predicates, parameters, "EvidenceSessionId", filters.EvidenceSessionId, "$EvidenceSessionId");
         AddFilterIdentityPredicate(predicates, parameters, "CaptureId", filters.CaptureId, "$CaptureId");
         AddFilterIdentityPredicate(predicates, parameters, "SourceIdentityId", filters.SourceIdentityId, "$SourceIdentityId");
         AddFilterIdentityPredicate(predicates, parameters, "HostId", filters.HostId, "$HostId");
-        AddFilterIdentityPredicate(predicates, parameters, "ExecutionRootId", filters.ExecutionRootId, "$ExecutionRootId");
+        if (filters.ReadScope is { } readScope)
+        {
+            if (string.IsNullOrWhiteSpace(readScope.EvidenceSessionId) || string.IsNullOrWhiteSpace(readScope.CaptureId) ||
+                string.IsNullOrWhiteSpace(readScope.HostId))
+                throw new ArgumentException("A capture read scope requires a qualified host/capture.", nameof(filters));
+            foreach (var (column, value) in new[] { ("CaseId", readScope.CaseId), ("EvidenceSessionId", readScope.EvidenceSessionId),
+                ("CaptureId", readScope.CaptureId), ("HostId", readScope.HostId) })
+            {
+                predicates.Add($"COALESCE({column},'') = $Read{column}");
+                parameters.AddWithValue("$Read" + column, value);
+            }
+        }
+        if (filters.IncludeCompatibleExecutionRoots)
+        {
+            if (filters.CaseId is null || string.IsNullOrWhiteSpace(filters.EvidenceSessionId) ||
+                string.IsNullOrWhiteSpace(filters.CaptureId) || string.IsNullOrWhiteSpace(filters.HostId))
+                throw new ArgumentException("Compatible-root reads require an explicit host/capture scope.", nameof(filters));
+            connection.CreateFunction<string?, bool>("process_read_root_matches", root =>
+                EvidenceIdentity.ExecutionRootsCompatible(filters.ExecutionRootId, root, filters.EvidenceSessionId), true);
+            predicates.Add("process_read_root_matches(ExecutionRootId)");
+        }
+        else AddFilterIdentityPredicate(predicates, parameters, "ExecutionRootId", filters.ExecutionRootId, "$ExecutionRootId");
         if (!string.IsNullOrWhiteSpace(filters.OwnerKey))
         {
             predicates.Add($"{BuildOwnerKeyExpression("Processes")} = $OwnerKey");

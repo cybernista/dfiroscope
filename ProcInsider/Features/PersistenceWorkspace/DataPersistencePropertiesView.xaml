@@ -1,0 +1,8 @@
+<UserControl x:Class="ProcInsider.Features.InvestigationWorkspaces.DataPersistencePropertiesView" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:shared="clr-namespace:ProcInsider.Views.Shared">
+ <UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="../../Views/Shared/ColumnHeaderResources.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></UserControl.Resources>
+ <DockPanel><Button DockPanel.Dock="Top" Content="Clear property filters" Command="{Binding ClearPropertiesCommand}" HorizontalAlignment="Left"/>
+  <DataGrid x:Name="PropertiesGrid" ItemsSource="{Binding PropertiesView}" SelectedItem="{Binding SelectedProperty,Mode=TwoWay}" CanUserSortColumns="True" CanUserResizeColumns="True" Sorting="SortProperties" ColumnHeaderStyle="{StaticResource ColumnFilterHeaderStyle}" shared:ColumnFilterLookupConverter.Filters="{Binding PropertyFilters}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" AutomationProperties.AutomationId="PersistenceNativeProperties">
+   <DataGrid.Columns><DataGridTextColumn Header="Group" SortMemberPath="Group" Binding="{Binding Group}" Width="120"/><DataGridTextColumn Header="Property" SortMemberPath="Name" Binding="{Binding Name}" Width="190"/><DataGridTextColumn Header="Recorded native value / provenance" SortMemberPath="Value" Binding="{Binding Value}" Width="*"/></DataGrid.Columns>
+  </DataGrid>
+ </DockPanel>
+</UserControl>

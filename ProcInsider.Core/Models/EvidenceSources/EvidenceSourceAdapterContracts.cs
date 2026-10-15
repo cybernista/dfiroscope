@@ -205,6 +205,8 @@ public sealed record EvidenceSourceEmissionBatch
     public IReadOnlyList<FilesystemArtifactRecord> FilesystemArtifacts { get; init; } =
         Array.Empty<FilesystemArtifactRecord>();
 
+    public IReadOnlyList<ForensicReadAttempt> ForensicReads { get; init; } = [];
+
     public IReadOnlyList<NetworkCaptureRecord> NetworkCaptures { get; init; } =
         Array.Empty<NetworkCaptureRecord>();
 
@@ -229,7 +231,12 @@ public sealed record EvidenceSourceEmissionBatch
     public IReadOnlyList<EvidenceSourceDiagnostic> Diagnostics { get; init; } =
         Array.Empty<EvidenceSourceDiagnostic>();
 
+    public IReadOnlyList<ProcInsider.Features.NetworkWorkspace.NetworkEndpointObservation> NetworkEndpointObservations { get; init; } = [];
+    public IReadOnlyList<ProcInsider.Features.NetworkWorkspace.NetworkEndpointPoll> NetworkEndpointPolls { get; init; } = [];
+
     public int RowCount =>
+        ForensicReads.Sum(read => 1 + 2 * read.Outputs.Count) +
+        NetworkEndpointObservations.Count + NetworkEndpointPolls.Count +
         Processes.Count +
         ProcessObservations.Count +
         ProcessAliases.Count +
@@ -249,6 +256,9 @@ public sealed record EvidenceSourcePublishResult
     public int PersistedRowCount { get; init; }
 
     public int DuplicateRowCount { get; init; }
+
+    /// <summary>Accepted immutable bodies reused by later read receipts; distinct from replayed read attempts.</summary>
+    public int ReusedResultCount { get; init; }
 
     public IReadOnlyList<EvidenceSourceDiagnostic> Diagnostics { get; init; } =
         Array.Empty<EvidenceSourceDiagnostic>();

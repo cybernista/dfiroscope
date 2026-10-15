@@ -221,13 +221,6 @@
                           Command="{Binding AnalyzeSelectedDumpPeCommand}"
                           Visibility="{Binding FeaturePublication.DumpsAndPeAnalysis, Converter={StaticResource BoolToVisibilityConverter}}"/>
                 <Separator/>
-                <MenuItem Header="Import NTFS / Prefetch File..."
-                          Command="{Binding QueueArtifactFileImportCommand}"
-                          Visibility="{Binding FeaturePublication.FilesystemArtifacts, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                <MenuItem Header="Import NTFS / Prefetch Folder..."
-                          Command="{Binding QueueArtifactFolderImportCommand}"
-                          Visibility="{Binding FeaturePublication.FilesystemArtifacts, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                <Separator/>
                 <MenuItem Header="Collect Modules"
                           Visibility="{Binding FeaturePublication.ModulesAndHandles, Converter={StaticResource BoolToVisibilityConverter}}"
                           IsCheckable="True"
@@ -250,17 +243,8 @@
             </MenuItem>
             <MenuItem Header="_AI"
                       Visibility="{Binding FeaturePublication.AiAssistance, Converter={StaticResource BoolToVisibilityConverter}}">
-                <MenuItem Header="Open AI Investigation"
+                <MenuItem Header="Open Process Conversation"
                           Command="{Binding OpenAiInvestigationTabCommand}"/>
-                <MenuItem Header="Run AI on Selected Process"
-                          Command="{Binding AiInvestigationViewModel.RunInvestigationCommand}"/>
-                <Separator/>
-                <MenuItem Header="Save AI Settings"
-                          Command="{Binding AiInvestigationViewModel.SaveSettingsCommand}"/>
-                <MenuItem Header="Test AI Connection"
-                          Command="{Binding AiInvestigationViewModel.TestConnectionCommand}"/>
-                <MenuItem Header="Clear Saved API Key"
-                          Command="{Binding AiInvestigationViewModel.ClearApiKeyCommand}"/>
             </MenuItem>
             <MenuItem Header="_Monitoring configuration"
                       IsEnabled="{Binding CanOpenConnectedAgentMenus}"
@@ -465,6 +449,16 @@
                        VerticalAlignment="Center"
                        Margin="10,0,0,0"
                        ToolTip="Counts only fresh authenticated viewer-agent connections for the active workspace"/>
+            <ItemsControl ItemsSource="{Binding ProcessingOperations.Operations}" AutomationProperties.AutomationId="ConcurrentProcessingOperations">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate><DataTemplate>
+                    <StackPanel Orientation="Horizontal" Margin="10,0,0,0">
+                        <ProgressBar Width="55" Height="12" Margin="0,0,6,0" IsIndeterminate="True"/>
+                        <TextBlock Text="{Binding Title}" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        <Button Content="Cancel" Command="{Binding CancelCommand}" Margin="4,0,0,0" Padding="4,1"/>
+                    </StackPanel>
+                </DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
         </ToolBar>
 
         <!-- Main Content: forensic workspace shell -->

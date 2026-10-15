@@ -9,11 +9,19 @@ namespace ProcInsider.Features.InvestigationWorkspaces;
 public sealed class WorkspaceContentTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? Processes { get; set; }
+    public DataTemplate? Ai { get; set; }
     public DataTemplate? Events { get; set; }
+    public DataTemplate? Network { get; set; }
+    public DataTemplate? Persistence { get; set; }
+    public DataTemplate? Artifacts { get; set; }
     public override DataTemplate? SelectTemplate(object item, DependencyObject container) => item switch
     {
         ProcessesWorkspaceViewModel => Processes,
+        AiWorkspaceViewModel => Ai,
         EventsWorkspaceViewModel => Events,
+        NetworkWorkspaceViewModel => Network,
+        PersistenceWorkspaceViewModel => Persistence,
+        ArtifactsWorkspaceViewModel => Artifacts,
         _ => null
     };
 }
@@ -25,7 +33,9 @@ public partial class WorkspaceShellView : UserControl
         InitializeComponent();
         WorkspaceTabs.ContentTemplateSelector = new WorkspaceContentTemplateSelector
         {
-            Processes = (DataTemplate)Resources["ProcessesTemplate"], Events = (DataTemplate)Resources["EventsTemplate"]
+            Ai = (DataTemplate)Resources["AiTemplate"],
+            Processes = (DataTemplate)Resources["ProcessesTemplate"], Events = (DataTemplate)Resources["EventsTemplate"], Network = (DataTemplate)Resources["NetworkTemplate"]
+            , Persistence = (DataTemplate)Resources["PersistenceTemplate"], Artifacts = (DataTemplate)Resources["ArtifactsTemplate"]
         };
         WorkspaceTabs.SelectionChanged += WorkspaceSelectionChanged;
         AddHandler(Button.ClickEvent, new RoutedEventHandler(CloseWorkspace));

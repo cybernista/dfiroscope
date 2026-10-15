@@ -133,7 +133,7 @@ internal sealed class AgentCaptureConfigurationService
         var startNetworkCapture = configuration.NetworkCapture.Enabled;
         var queueArtifactEnrichment = AgentEnrichmentPlanning.ShouldQueue(configuration.ArtifactCapture);
 
-        if (!startLiveCapture && !startNetworkCapture && !queueArtifactEnrichment)
+        if (!startLiveCapture && !startNetworkCapture && !queueArtifactEnrichment && !configuration.Persistence.Enabled && !configuration.CollectPrefetchOnStart)
         {
             return AgentConfiguredCaptureStartPlan.Failure(CreateLifecycleResult(
                 command,
@@ -162,7 +162,7 @@ internal sealed class AgentCaptureConfigurationService
             queueArtifactEnrichment,
             configuration.ArtifactCapture.CaptureModules,
             configuration.ArtifactCapture.CaptureHandles,
-            configuration.ArtifactCapture.CapturePeMetadata);
+            configuration.ArtifactCapture.CapturePeMetadata) with { Persistence = configuration.Persistence, CollectPrefetchOnStart = configuration.CollectPrefetchOnStart };
     }
 
     public AgentCaptureLifecycleResult CreateStopResult(
@@ -253,7 +253,8 @@ internal sealed class AgentCaptureConfigurationService
             CollectSecurityEvents = configuration.SourceToggles.Security,
             CollectPowerShellEvents = configuration.SourceToggles.PowerShell,
             CollectOtherWindowsEvents = configuration.SourceToggles.WindowsOther,
-            CollectSysmonEvents = configuration.SourceToggles.Sysmon
+            CollectSysmonEvents = configuration.SourceToggles.Sysmon,
+            CollectOsNetworkEndpoints = configuration.SourceToggles.OsNetworkEndpoints
         };
     }
 
@@ -288,7 +289,7 @@ internal sealed class AgentCaptureConfigurationService
                configuration.SourceToggles.Security ||
                configuration.SourceToggles.PowerShell ||
                configuration.SourceToggles.WindowsOther ||
-               configuration.SourceToggles.Sysmon;
+               configuration.SourceToggles.Sysmon || configuration.SourceToggles.OsNetworkEndpoints;
     }
 
     private static bool HasAnyArtifactCapture(AgentArtifactCapturePolicy policy)
@@ -313,6 +314,9 @@ internal sealed class AgentCaptureConfigurationService
         AddIf(sources, configuration.SourceToggles.PowerShell, "PowerShell");
         AddIf(sources, configuration.SourceToggles.WindowsOther, "WindowsOther");
         AddIf(sources, configuration.SourceToggles.Sysmon, "Sysmon");
+        AddIf(sources, configuration.SourceToggles.OsNetworkEndpoints, "OS endpoints/5s listeners/5min TCP");
+        AddIf(sources, configuration.CollectPrefetchOnStart, "Prefetch/initial");
+        AddIf(sources, configuration.Persistence.Enabled, $"Persistence/{configuration.Persistence.IntervalMinutes}min");
         AddIf(sources, configuration.NetworkCapture.Enabled, "Network metadata");
         AddIf(sources, configuration.Zeek.Enabled || configuration.Zeek.RunAfterNetworkCapture, "Zeek");
         AddIf(sources, HasAnyArtifactCapture(configuration.ArtifactCapture), "Artifact enrichment");
@@ -368,6 +372,8 @@ internal sealed record AgentConfiguredCaptureStartPlan(
     bool CaptureHandles,
     bool CapturePe)
 {
+    public AgentPersistenceCapturePolicy Persistence { get; init; } = new();
+    public bool CollectPrefetchOnStart { get; init; }
     public static AgentConfiguredCaptureStartPlan Success(
         AgentCaptureLifecycleResult lifecycle,
         StartLiveCaptureCommand? liveCaptureCommand,

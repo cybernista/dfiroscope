@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using ProcInsider.Models;
+using ProcInsider.Features.NetworkWorkspace;
 
 namespace ProcInsider.Services;
 
@@ -61,6 +62,49 @@ public sealed class TelemetryProjectionService : IApplicationComparisonEvidenceR
     private EvidencePathDiagnostics _pathDiagnostics => CurrentBinding.Diagnostics;
     internal int ActiveReadScopes => System.Threading.Volatile.Read(ref _activeReadScopes);
 
+    // Checked adapters share the already admitted projection scope and its typed query owners.
+    // No caller receives a live database path or an independently selected generation.
+    internal SqliteStagingQueryService ScopedQuery => _readScope.Value is { IsDisposed: false, Binding.Queries: { } query } ? query :
+        throw new InvalidOperationException("An admitted evidence read scope is required.");
+
+    // ReadBinding is an opaque generation identity. A fresh binding is published on
+    // every rebind, even when the same SQLite query service is selected again.
+    internal object? CaptureReadBindingToken()
+    {
+        lock (_readGate)
+        {
+            var binding = System.Threading.Volatile.Read(ref _binding);
+            return !_readAdmissionSuspended && binding.Queries != null && binding.Diagnostics.IsReadable
+                ? binding : null;
+        }
+    }
+
+    internal bool IsCurrentReadBinding(object? token)
+    {
+        lock (_readGate)
+        {
+            var binding = System.Threading.Volatile.Read(ref _binding);
+            return token != null && !_readAdmissionSuspended && binding.Queries != null &&
+                binding.Diagnostics.IsReadable && ReferenceEquals(token, binding);
+        }
+    }
+
+    internal IDisposable BeginReadScope(object expectedToken)
+    {
+        lock (_readGate)
+        {
+            var binding = System.Threading.Volatile.Read(ref _binding);
+            if (expectedToken == null || _readAdmissionSuspended || binding.Queries == null ||
+                !binding.Diagnostics.IsReadable || !ReferenceEquals(expectedToken, binding) ||
+                _readScope.Value?.IsDisposed == true)
+                throw new OperationCanceledException("The captured evidence read generation is no longer admitted.");
+            var scope = new ReadScope(this, binding, _readScope.Value);
+            _readScope.Value = scope;
+            System.Threading.Interlocked.Increment(ref _activeReadScopes);
+            return scope;
+        }
+    }
+
     /// <summary>Async descendants retain the exact validated binding captured at admission.</summary>
     internal IDisposable BeginReadScope()
     {
@@ -104,7 +148,8 @@ public sealed class TelemetryProjectionService : IApplicationComparisonEvidenceR
     {
         if (sqliteStagingQueryService == null)
         {
-            System.Threading.Volatile.Write(ref _binding, new ReadBinding(null, EvidencePathDiagnostics.Unavailable()));
+            lock (_readGate)
+                System.Threading.Volatile.Write(ref _binding, new ReadBinding(null, EvidencePathDiagnostics.Unavailable()));
             return;
         }
 
@@ -116,11 +161,33 @@ public sealed class TelemetryProjectionService : IApplicationComparisonEvidenceR
                 "A bound SQLite projection requires an explicit viewer-snapshot or archived-capture read path.");
         }
 
-        System.Threading.Volatile.Write(ref _binding, new ReadBinding(sqliteStagingQueryService, new EvidencePathDiagnostics(
-            readPath,
-            EvidencePathDiagnostics.AgentWritePath,
-            databasePath,
-            DateTime.UtcNow)));
+        lock (_readGate)
+            System.Threading.Volatile.Write(ref _binding, new ReadBinding(sqliteStagingQueryService, new EvidencePathDiagnostics(
+                readPath,
+                EvidencePathDiagnostics.AgentWritePath,
+                databasePath,
+                DateTime.UtcNow)));
+    }
+
+    public NetworkEndpointPage GetNetworkEndpointsForProcess(ProcessInfo process, int maxRows = 100,
+        long? fromUtcTicks = null, long? toUtcTicks = null, string? sourceIdentityId = null,
+        System.Threading.CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+        using var readScope = BeginReadScope();
+        if (_sqliteStagingQueryService == null)
+            return new([], 0, false, "No readable evidence snapshot or archive is bound.");
+        if (string.IsNullOrWhiteSpace(process.ProcessEntityId) ||
+            string.IsNullOrWhiteSpace(process.EvidenceSessionId) ||
+            string.IsNullOrWhiteSpace(process.CaptureId) || string.IsNullOrWhiteSpace(process.HostId))
+            return new([], 0, true, "The selected process has no complete durable evidence identity.");
+        return _sqliteStagingQueryService.NetworkEndpointQueries.QueryForProcess(
+            new(process.ProcessEntityId, new EvidenceIdentity
+            {
+                CaseId = process.CaseId, EvidenceSessionId = process.EvidenceSessionId,
+                CaptureId = process.CaptureId, HostId = process.HostId,
+                ExecutionRootId = process.ExecutionRootId, SourceIdentityId = string.Empty
+            }, sourceIdentityId, fromUtcTicks, toUtcTicks, Math.Clamp(maxRows, 1, 100)), cancellationToken);
     }
 
     public IReadOnlyList<ProcessInfo> GetProcessList(ProcessProjectionQuery query) {
@@ -326,6 +393,21 @@ public sealed class TelemetryProjectionService : IApplicationComparisonEvidenceR
             .GetEventsForProcess(query.ProcessKey, query.Source, query.MaxCount, query.ProcessEntityId)
             .Select(processEvent => processEvent.ToProcessEventInfo())
             .ToList();
+    }
+
+    /// <summary>Preserves the event's recorded identity and run for evidence citations.</summary>
+    public IReadOnlyList<TelemetryEventRecord> GetEventEvidenceForProcess(EventProjectionQuery query,
+        long? fromUtcTicks = null, long? toUtcTicks = null, EvidenceIdentity? permittedScope = null,
+        System.Threading.CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var readScope = BeginReadScope();
+        if (_sqliteStagingQueryService == null ||
+            (string.IsNullOrWhiteSpace(query.ProcessKey) && string.IsNullOrWhiteSpace(query.ProcessEntityId)))
+            return [];
+        return _sqliteStagingQueryService.GetEventsForProcess(
+            query.ProcessKey, query.Source, Math.Clamp(query.MaxCount, 1, 100), query.ProcessEntityId,
+            fromUtcTicks, toUtcTicks, permittedScope, cancellationToken);
     }
 
     public IReadOnlyList<SystemActivityRecord> GetSystemActivities(SystemActivityQuery query) {

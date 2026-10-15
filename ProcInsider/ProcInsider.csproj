@@ -29,6 +29,7 @@
     <InternalsVisibleTo Include="InfrastructureAgentRegistrySelfTest" />
     <InternalsVisibleTo Include="InfrastructureViewerWorkspaceSelfTest" />
     <InternalsVisibleTo Include="ApplicationCatalogSelfTest" />
+    <InternalsVisibleTo Include="ApplicationAiWorkflowSelfTest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -37,6 +38,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\DFIRoscope.Live.ico" />
+    <EmbeddedResource Include="Services\Ai\Guidance\*.v1.md" />
     <None Update="Config\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

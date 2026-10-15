@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using ProcInsider.Models;
@@ -13,6 +16,7 @@ namespace ProcInsider.Services;
 /// </summary>
 public interface IArtifactEvidenceQueryService
 {
+    ArtifactEvidenceReadPage ReadPage(ArtifactEvidenceReadQuery query, CancellationToken cancellationToken = default);
     IReadOnlyList<MemoryDumpRecord> GetMemoryDumpsForProcess(
         string processKey,
         int maxCount = 1000,
@@ -71,6 +75,31 @@ public interface IArtifactEvidenceQueryService
         bool includeDescendants,
         int maxCount = 1000);
 
+    ForensicArtifactResultPage QueryForensicArtifactResults(
+        ForensicArtifactResultQuery query,
+        CancellationToken cancellationToken = default);
+
+    ColumnFilterValuePage GetForensicArtifactResultValues(
+        ForensicArtifactResultQuery query,
+        ForensicArtifactResultColumn column,
+        string? search,
+        ColumnFilterValueSort sort,
+        CancellationToken cancellationToken = default,
+        bool retainColumnFilter = false);
+
+    ForensicArtifactResultDetail GetForensicArtifactResultDetail(
+        string artifactId,
+        CancellationToken cancellationToken = default);
+
+    ForensicArtifactResultDetail GetForensicArtifactResultReadOccurrences(
+        string artifactId, long offset = 0, int pageSize = 50,
+        CancellationToken cancellationToken = default);
+
+    ForensicArtifactResultPropertiesPage GetForensicArtifactResultProperties(
+        string artifactId,
+        ForensicArtifactResultPropertyQuery query,
+        CancellationToken cancellationToken = default);
+
     IReadOnlyList<MemoryImageRecord> GetMemoryImages(int maxCount = 1000);
 
     Task<IReadOnlyList<MemoryImageRecord>> GetMemoryImagesAsync(int maxCount = 1000);
@@ -101,8 +130,10 @@ public interface IArtifactEvidenceQueryService
 /// reads. The validated <see cref="SqliteStagingQueryService"/> remains the
 /// compatibility facade and database-open authority.
 /// </summary>
-internal sealed class ArtifactEvidenceQueryService : IArtifactEvidenceQueryService
+internal sealed partial class ArtifactEvidenceQueryService : IArtifactEvidenceQueryService
 {
+    private const int MaximumForensicFacetValues = 256;
+    private const long MaximumForensicOffset = 1_000_000;
     private readonly SqliteReadQueryContext _readContext;
 
     internal ArtifactEvidenceQueryService(SqliteReadQueryContext readContext)
@@ -638,6 +669,7 @@ internal sealed class ArtifactEvidenceQueryService : IArtifactEvidenceQueryServi
                     FROM Artifacts a
                     LEFT JOIN RawRecords r ON r.RawRecordId = a.RawRecordId
                     WHERE a.ArtifactType IN ('NtfsMft', 'NtfsUsnJournal', 'NtfsLogFile', 'Prefetch', 'FileMetadata')
+                          {(ColumnExists(connection, "Artifacts", "StructuredPayloadVersion") ? "AND a.StructuredPayloadVersion IS NULL" : string.Empty)}
                           {identityWhere}
                           {pathWhere}
                     ORDER BY COALESCE(a.TimestampUtc, a.UpdatedUtc) DESC
@@ -694,6 +726,475 @@ internal sealed class ArtifactEvidenceQueryService : IArtifactEvidenceQueryServi
         bool includeDescendants,
         int maxCount = 1000)
         => Task.Run(() => GetFilesystemArtifacts(scope, includeDescendants, maxCount));
+
+    public ForensicArtifactResultPage QueryForensicArtifactResults(
+        ForensicArtifactResultQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return _readContext.MeasureRead(
+            "QueryForensicArtifactResults",
+            () => QueryForensicArtifactResultsCore(query, cancellationToken),
+            $"sort={query.Sort}; descending={query.Descending}; offset={query.Offset}; page={query.PageSize}",
+            page => page.Rows.Count);
+    }
+
+    public ColumnFilterValuePage GetForensicArtifactResultValues(
+        ForensicArtifactResultQuery query,
+        ForensicArtifactResultColumn column,
+        string? search,
+        ColumnFilterValueSort sort,
+        CancellationToken cancellationToken = default,
+        bool retainColumnFilter = false)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        if (!Enum.IsDefined(column) || !Enum.IsDefined(sort)) throw new ArgumentOutOfRangeException(nameof(column));
+        return _readContext.MeasureRead(
+            "GetForensicArtifactResultValues",
+            () => GetForensicArtifactResultValuesCore(query, column, search, sort, cancellationToken, retainColumnFilter),
+            $"column={column}; sort={sort}",
+            page => page.Entries.Count);
+    }
+
+    public ForensicArtifactResultDetail GetForensicArtifactResultDetail(
+        string artifactId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(artifactId)) return new(null, [], 0, ForensicArtifactResultAvailability.Available, "No structured forensic result was selected.");
+        return _readContext.MeasureRead(
+            "GetForensicArtifactResultDetail",
+            () => GetForensicArtifactResultDetailCore(artifactId, cancellationToken),
+            "exact-id",
+            detail => detail.ReadOccurrences.Count);
+    }
+
+    public ForensicArtifactResultPropertiesPage GetForensicArtifactResultProperties(
+        string artifactId,
+        ForensicArtifactResultPropertyQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        if (string.IsNullOrWhiteSpace(artifactId)) return new([], 0, ForensicArtifactResultAvailability.Available, "No structured forensic result was selected.");
+        return _readContext.MeasureRead(
+            "GetForensicArtifactResultProperties",
+            () => GetForensicArtifactResultPropertiesCore(artifactId, query, cancellationToken),
+            $"sort={query.Sort}; descending={query.Descending}; offset={query.Offset}; page={query.PageSize}",
+            page => page.Rows.Count);
+    }
+
+    private ForensicArtifactResultPage QueryForensicArtifactResultsCore(ForensicArtifactResultQuery query, CancellationToken token)
+    {
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            using var connection = _readContext.OpenReadOnlyConnection();
+            if (!SupportsForensicResults(connection)) return UnavailableForensicResultsPage();
+            // Pin every count, facet and page statement to one WAL-friendly read version.
+            // An Agent commit between independent SELECTs must not make an Available page self-contradictory.
+            using var snapshot = connection.BeginTransaction(deferred: true);
+            using var command = connection.CreateCommand();
+            command.Transaction = snapshot;
+            var where = BuildForensicResultWhere(connection, command, query, token);
+            var rootCount = ScalarLong(connection, snapshot, "SELECT COUNT(*) FROM Artifacts WHERE StructuredPayloadVersion IS NOT NULL;");
+            command.CommandText = "SELECT COUNT(*) FROM Artifacts a WHERE " + where;
+            var viewCount = Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+            var categoryEntries = ReadForensicCounts(connection, command, where, "COALESCE(a.Category, '')", token);
+            if (categoryEntries.Count > MaximumForensicFacetValues) return ForensicFacetLimitFailure();
+            var categoryCounts = categoryEntries.ToDictionary(entry => entry.Value, entry => entry.Count, StringComparer.Ordinal);
+            var facetCounts = new Dictionary<ForensicArtifactResultScopeFacet, IReadOnlyList<ForensicArtifactResultFacetCount>>();
+            foreach (var facet in Enum.GetValues<ForensicArtifactResultScopeFacet>())
+            {
+                var entries = ReadForensicCounts(connection, command, where, ScopeExpression(facet), token);
+                if (entries.Count > MaximumForensicFacetValues) return ForensicFacetLimitFailure();
+                facetCounts[facet] = entries;
+            }
+
+            command.CommandText = $"""
+                SELECT a.ArtifactId, a.CaseId, a.EvidenceSessionId, a.CaptureId, a.SourceIdentityId, a.HostId, a.ExecutionRootId,
+                       a.SourceRunId, a.IngestionJobId, a.RawRecordId, a.TimestampUtc, a.ArtifactType, a.Category,
+                       a.ParserId, a.ParserVersion, a.Name, a.Path, a.Summary, a.InputSha256, a.InputByteCount,
+                       a.ResultSha256, a.OutputKey, a.OriginalFileRetained, a.SourcePathSemantics, a.ParserSettingsJson,
+                       a.StructuredPayloadVersion, a.PropertiesJson
+                FROM Artifacts a
+                WHERE {where}
+                ORDER BY {ForensicResultOrderExpression(query.Sort)} {(query.Descending ? "DESC" : "ASC")}, a.ArtifactId ASC
+                LIMIT $ForensicLimit OFFSET $ForensicOffset;
+                """;
+            command.Parameters.AddWithValue("$ForensicLimit", Math.Clamp(query.PageSize, 1, 512));
+            command.Parameters.AddWithValue("$ForensicOffset", query.Offset);
+            using var registration = token.Register(command.Cancel);
+            using var reader = command.ExecuteReader();
+            var rows = new List<ForensicArtifactResultRow>();
+            while (reader.Read()) { token.ThrowIfCancellationRequested(); rows.Add(ReadForensicArtifactResult(reader).Result); }
+            return new(rows, rootCount, viewCount, categoryCounts, facetCounts, ForensicArtifactResultAvailability.Available, string.Empty);
+        }
+        catch (Exception exception) when (exception is SqliteException or JsonException or InvalidDataException)
+        {
+            return new([], 0, 0, EmptyCategoryCounts, EmptyFacetCounts(), ForensicArtifactResultAvailability.Failed,
+                exception is SqliteException sqlite
+                    ? "Structured forensic-result query failed: " + sqlite.SqliteErrorCode.ToString(CultureInfo.InvariantCulture)
+                    : "Structured forensic-result body is malformed or unreadable.");
+        }
+    }
+
+    private ColumnFilterValuePage GetForensicArtifactResultValuesCore(ForensicArtifactResultQuery query, ForensicArtifactResultColumn column, string? search, ColumnFilterValueSort sort, CancellationToken token, bool retainColumnFilter)
+    {
+        token.ThrowIfCancellationRequested();
+        using var connection = _readContext.OpenReadOnlyConnection();
+        if (!SupportsForensicResults(connection)) return new([], false);
+        var filters = (query.Filters ?? []).Where(filter => retainColumnFilter || filter.Column != column).ToArray();
+        using var command = connection.CreateCommand();
+        var where = BuildForensicResultWhere(connection, command, query with { Filters = filters }, token);
+        connection.CreateFunction<string?, bool>("forensic_value_search", value => ColumnTextFilter.Matches(value, search), true);
+        var value = ForensicResultColumnExpression(column);
+        var order = sort switch
+        {
+            ColumnFilterValueSort.ValueAscending => "Value ASC",
+            ColumnFilterValueSort.ValueDescending => "Value DESC",
+            ColumnFilterValueSort.CountAscending => "Occurrences ASC, Value ASC",
+            ColumnFilterValueSort.CountDescending => "Occurrences DESC, Value ASC",
+            _ => throw new ArgumentOutOfRangeException(nameof(sort))
+        };
+        command.CommandText = $"SELECT {value} AS Value, COUNT(*) AS Occurrences FROM Artifacts a WHERE {where} GROUP BY Value HAVING forensic_value_search(Value) ORDER BY {order} LIMIT 257;";
+        using var registration = token.Register(command.Cancel);
+        using var reader = command.ExecuteReader();
+        var entries = new List<ColumnFilterValue>();
+        while (reader.Read()) { token.ThrowIfCancellationRequested(); entries.Add(new(reader.IsDBNull(0) ? null : reader.GetString(0), reader.GetInt64(1))); }
+        return new(entries.Take(256).ToArray(), entries.Count > 256);
+    }
+
+    public ForensicArtifactResultDetail GetForensicArtifactResultReadOccurrences(
+        string artifactId, long offset = 0, int pageSize = 50, CancellationToken cancellationToken = default)
+    {
+        if (offset is < 0 or > MaximumForensicOffset || pageSize is < 1 or > 50)
+            throw new ArgumentOutOfRangeException(nameof(offset));
+        return _readContext.MeasureRead("GetForensicArtifactResultReadOccurrences",
+            () => GetForensicArtifactResultDetailCore(artifactId, cancellationToken, offset, pageSize),
+            $"exact-id; offset={offset}; page={pageSize}", detail => detail.ReadOccurrences.Count);
+    }
+
+    private ForensicArtifactResultDetail GetForensicArtifactResultDetailCore(string artifactId, CancellationToken token, long offset = 0, int pageSize = 256)
+    {
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            using var connection = _readContext.OpenReadOnlyConnection();
+            if (!SupportsForensicResults(connection)) return new(null, [], 0, ForensicArtifactResultAvailability.Unavailable, "This capture has no structured forensic-result schema.");
+            using var snapshot = connection.BeginTransaction(deferred: true);
+            var body = ReadForensicArtifactResultById(connection, artifactId, token, snapshot);
+            if (body == null) return new(null, [], 0, ForensicArtifactResultAvailability.Available, "The structured forensic result was not found.");
+            var result = body.Result;
+            using var count = connection.CreateCommand();
+            count.Transaction = snapshot;
+            count.CommandText = """
+                SELECT COUNT(*) FROM EvidenceRelations e JOIN RawRecords r ON CAST(r.RawRecordId AS TEXT)=e.FromId
+                WHERE e.Status='Active' AND e.FromKind='RawRecord' AND e.ToKind='GenericArtifact' AND e.ToId=$id
+                  AND e.RelationType='DerivedFrom' AND e.CorrelationMethod='ParserResultForRead' AND r.RecordType='ForensicSourceReadV1';
+                """;
+            count.Parameters.AddWithValue("$id", artifactId);
+            var occurrenceCount = Convert.ToInt64(count.ExecuteScalar(), CultureInfo.InvariantCulture);
+            ValidateOriginalForensicResult(connection, snapshot, body, token);
+            using var command = connection.CreateCommand();
+            command.Transaction = snapshot;
+            command.CommandText = """
+                SELECT r.RawRecordId, e.RelationId, r.CaseId, r.EvidenceSessionId, r.CaptureId, r.SourceIdentityId, r.HostId, r.ExecutionRootId,
+                       r.SourceRunId, r.IngestionJobId, r.TimestampUtc, r.PayloadJson, r.PayloadHash,
+                       e.CaseId, e.EvidenceSessionId, e.CaptureId, e.SourceIdentityId, e.HostId, e.ExecutionRootId,
+                       e.SourceRunId, e.IngestionJobId, e.FromKind, e.ToKind, e.RelationType, e.CorrelationMethod, e.Confidence, e.CandidateCount,
+                       e.CorrelationState, e.RawInputId, e.ResolverName, e.ResolverVersion, s.MetadataJson, s.Status
+                FROM EvidenceRelations e JOIN RawRecords r ON CAST(r.RawRecordId AS TEXT)=e.FromId
+                LEFT JOIN SourceRuns s ON s.SourceRunId=r.SourceRunId AND s.IngestionJobId=r.IngestionJobId
+                  AND COALESCE(s.CaseId,'')=COALESCE(r.CaseId,'') AND s.EvidenceSessionId=r.EvidenceSessionId
+                  AND s.CaptureId=r.CaptureId AND s.SourceIdentityId=r.SourceIdentityId AND s.HostId=r.HostId AND s.ExecutionRootId=r.ExecutionRootId
+                WHERE e.Status='Active' AND e.FromKind='RawRecord' AND e.ToKind='GenericArtifact' AND e.ToId=$id
+                  AND e.RelationType='DerivedFrom' AND e.CorrelationMethod='ParserResultForRead' AND r.RecordType='ForensicSourceReadV1'
+                ORDER BY r.TimestampUtc DESC, r.RawRecordId DESC LIMIT $page OFFSET $offset;
+                """;
+            command.Parameters.AddWithValue("$id", artifactId);
+            command.Parameters.AddWithValue("$page", pageSize);
+            command.Parameters.AddWithValue("$offset", offset);
+            using var registration = token.Register(command.Cancel);
+            using var reader = command.ExecuteReader();
+            var occurrences = new List<ForensicArtifactResultReadOccurrence>();
+            while (reader.Read()) { token.ThrowIfCancellationRequested(); occurrences.Add(ReadForensicOccurrence(reader, body)); }
+            return new(result, occurrences, occurrenceCount, ForensicArtifactResultAvailability.Available, string.Empty);
+        }
+        catch (Exception exception) when (exception is SqliteException or JsonException or InvalidDataException)
+        {
+            return new(null, [], 0, ForensicArtifactResultAvailability.Failed, "Structured forensic-result lineage is malformed or unreadable.");
+        }
+    }
+
+    private ForensicArtifactResultPropertiesPage GetForensicArtifactResultPropertiesCore(string artifactId, ForensicArtifactResultPropertyQuery query, CancellationToken token)
+    {
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            if (!Enum.IsDefined(query.Sort) || query.Offset is < 0 or > MaximumForensicOffset) throw new ArgumentOutOfRangeException(nameof(query));
+            using var connection = _readContext.OpenReadOnlyConnection();
+            if (!SupportsForensicResults(connection)) return new([], 0, ForensicArtifactResultAvailability.Unavailable, "This capture has no structured forensic-result schema.");
+            using var snapshot = connection.BeginTransaction(deferred: true);
+            var body = ReadForensicArtifactResultById(connection, artifactId, token, snapshot);
+            if (body == null) return new([], 0, ForensicArtifactResultAvailability.Available, "The structured forensic result was not found.");
+            ValidateOriginalForensicResult(connection, snapshot, body, token);
+            using var document = JsonDocument.Parse(body.PropertiesJson, new JsonDocumentOptions { MaxDepth = 32 });
+            if (document.RootElement.ValueKind != JsonValueKind.Object) throw new InvalidDataException();
+            var properties = document.RootElement.EnumerateObject().Select(property => new ForensicArtifactResultProperty(
+                property.Name,
+                property.Value.ValueKind == JsonValueKind.Null ? null : property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() : property.Value.GetRawText(),
+                property.Value.ValueKind.ToString())).ToArray();
+            foreach (var filter in query.Filters ?? []) { if (!Enum.IsDefined(filter.Column)) throw new ArgumentOutOfRangeException(nameof(query)); filter.Criteria.Validate(); }
+            var filtered = properties.Where(property => (query.Filters ?? []).All(filter => filter.Criteria.Matches(ForensicPropertyValue(property, filter.Column)))).ToArray();
+            var ordered = query.Sort switch
+            {
+                ForensicArtifactResultPropertyColumn.Name => query.Descending ? filtered.OrderByDescending(property => property.Name, StringComparer.Ordinal) : filtered.OrderBy(property => property.Name, StringComparer.Ordinal),
+                ForensicArtifactResultPropertyColumn.Value => query.Descending
+                    ? filtered.OrderBy(property => property.Value == null ? 1 : 0).ThenByDescending(property => property.Value, StringComparer.Ordinal)
+                    : filtered.OrderBy(property => property.Value == null ? 1 : 0).ThenBy(property => property.Value, StringComparer.Ordinal),
+                ForensicArtifactResultPropertyColumn.ValueType => query.Descending ? filtered.OrderByDescending(property => property.ValueType, StringComparer.Ordinal) : filtered.OrderBy(property => property.ValueType, StringComparer.Ordinal),
+                _ => throw new ArgumentOutOfRangeException(nameof(query))
+            };
+            var rows = ordered.ThenBy(property => property.Name, StringComparer.Ordinal).Skip((int)Math.Min(query.Offset, int.MaxValue)).Take(Math.Clamp(query.PageSize, 1, 512)).ToArray();
+            return new(rows, filtered.LongLength, ForensicArtifactResultAvailability.Available, string.Empty);
+        }
+        catch (Exception exception) when (exception is SqliteException or JsonException or InvalidDataException)
+        {
+            return new([], 0, ForensicArtifactResultAvailability.Failed, "Structured forensic-result properties are malformed or unreadable.");
+        }
+    }
+
+    private static readonly IReadOnlyDictionary<string, long> EmptyCategoryCounts =
+        new Dictionary<string, long>(StringComparer.Ordinal);
+
+    private static ForensicArtifactResultPage UnavailableForensicResultsPage()
+        => new([], 0, 0, EmptyCategoryCounts, EmptyFacetCounts(), ForensicArtifactResultAvailability.Unavailable,
+            "This capture has no structured forensic-result schema.");
+
+    private static ForensicArtifactResultPage ForensicFacetLimitFailure()
+        => new([], 0, 0, EmptyCategoryCounts, EmptyFacetCounts(), ForensicArtifactResultAvailability.Failed,
+            "Structured forensic-result facet cardinality exceeds the 256-value exact-query bound.");
+
+    private static IReadOnlyDictionary<ForensicArtifactResultScopeFacet, IReadOnlyList<ForensicArtifactResultFacetCount>> EmptyFacetCounts()
+        => Enum.GetValues<ForensicArtifactResultScopeFacet>().ToDictionary(
+            facet => facet,
+            _ => (IReadOnlyList<ForensicArtifactResultFacetCount>)[],
+            EqualityComparer<ForensicArtifactResultScopeFacet>.Default);
+
+    private static bool SupportsForensicResults(SqliteConnection connection)
+        => new[] { "Artifacts", "RawRecords", "EvidenceRelations" }.All(table => TableExists(connection, table)) &&
+           new[] { "StructuredPayloadVersion", "Category", "ParserId", "ParserVersion", "PropertiesJson", "InputByteCount", "InputSha256", "ResultSha256", "OriginalFileRetained", "OutputKey", "SourcePathSemantics", "SourceRunId", "IngestionJobId" }
+               .All(column => ColumnExists(connection, "Artifacts", column)) &&
+           new[] { "SourceRunId", "IngestionJobId" }.All(column => ColumnExists(connection, "RawRecords", column));
+
+    private static string BuildForensicResultWhere(SqliteConnection connection, SqliteCommand command, ForensicArtifactResultQuery query, CancellationToken token)
+    {
+        if (!Enum.IsDefined(query.Sort) || query.Offset is < 0 or > MaximumForensicOffset || query.PageSize is < 1 or > 512) throw new ArgumentOutOfRangeException(nameof(query));
+        var selectors = query.GreenSelectors ?? [];
+        var filters = query.Filters ?? [];
+        if (selectors.Count > 64 || filters.Count > Enum.GetValues<ForensicArtifactResultColumn>().Length ||
+            filters.Select(filter => filter.Column).Distinct().Count() != filters.Count) throw new ArgumentOutOfRangeException(nameof(query));
+        var clauses = new List<string> { "a.StructuredPayloadVersion IS NOT NULL" };
+        var selectorIndex = 0;
+        foreach (var group in selectors.Where(selector => !selector.IsExcluded).GroupBy(selector => selector.Facet))
+        {
+            if (!Enum.IsDefined(group.Key)) throw new ArgumentOutOfRangeException(nameof(query));
+            var alternatives = new List<string>();
+            foreach (var selector in group)
+            {
+                if (selector.Value == null) throw new ArgumentOutOfRangeException(nameof(query));
+                var parameter = "$ForensicGreen" + selectorIndex++.ToString(CultureInfo.InvariantCulture);
+                command.Parameters.AddWithValue(parameter, selector.Value);
+                alternatives.Add(ScopeExpression(selector.Facet) + "=" + parameter);
+            }
+            clauses.Add("(" + string.Join(" OR ", alternatives) + ")");
+        }
+        foreach (var selector in selectors.Where(selector => selector.IsExcluded))
+        {
+            if (!Enum.IsDefined(selector.Facet) || selector.Value == null) throw new ArgumentOutOfRangeException(nameof(query));
+            var parameter = "$ForensicGreen" + selectorIndex++.ToString(CultureInfo.InvariantCulture);
+            command.Parameters.AddWithValue(parameter, selector.Value);
+            clauses.Add("NOT (" + ScopeExpression(selector.Facet) + "=" + parameter + ")");
+        }
+        for (var index = 0; index < filters.Count; index++)
+        {
+            token.ThrowIfCancellationRequested();
+            var filter = filters[index];
+            if (!Enum.IsDefined(filter.Column) || filter.Criteria == null) throw new ArgumentOutOfRangeException(nameof(query));
+            filter.Criteria.Validate();
+            var function = "forensic_filter_" + index.ToString(CultureInfo.InvariantCulture);
+            var column = filter.Column;
+            connection.CreateFunction<string?, bool>(function, value => filter.Criteria.Matches(value, timestampUtc: column == ForensicArtifactResultColumn.ObservedUtc && DateTimeOffset.TryParse(value, out var parsed) ? parsed.UtcDateTime : null), true);
+            clauses.Add(function + "(" + ForensicResultColumnExpression(column) + ")");
+        }
+        return string.Join(" AND ", clauses);
+    }
+
+    private static IReadOnlyList<ForensicArtifactResultFacetCount> ReadForensicCounts(SqliteConnection connection, SqliteCommand command, string where, string expression, CancellationToken token)
+    {
+        command.CommandText = "SELECT " + expression + " AS Value, COUNT(*) AS Occurrences FROM Artifacts a WHERE " + where + " GROUP BY Value ORDER BY Occurrences DESC, Value ASC LIMIT 257;";
+        using var reader = command.ExecuteReader();
+        var counts = new List<ForensicArtifactResultFacetCount>();
+        while (reader.Read()) { token.ThrowIfCancellationRequested(); counts.Add(new(GetString(reader, 0), reader.GetInt64(1))); }
+        return counts;
+    }
+
+    private static long ScalarLong(SqliteConnection connection, SqliteTransaction transaction, string statement)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = statement;
+        return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    private static string ScopeExpression(ForensicArtifactResultScopeFacet facet) => facet switch
+    {
+        ForensicArtifactResultScopeFacet.Case => "COALESCE(a.CaseId, '')",
+        ForensicArtifactResultScopeFacet.EvidenceSession => "COALESCE(a.EvidenceSessionId, '')",
+        ForensicArtifactResultScopeFacet.Capture => "COALESCE(a.CaptureId, '')",
+        ForensicArtifactResultScopeFacet.SourceIdentity => "COALESCE(a.SourceIdentityId, '')",
+        ForensicArtifactResultScopeFacet.Host => "COALESCE(a.HostId, '')",
+        ForensicArtifactResultScopeFacet.ExecutionRoot => "COALESCE(a.ExecutionRootId, '')",
+        ForensicArtifactResultScopeFacet.ArtifactType => "COALESCE(a.ArtifactType, '')",
+        ForensicArtifactResultScopeFacet.Category => "COALESCE(a.Category, '')",
+        _ => throw new ArgumentOutOfRangeException(nameof(facet))
+    };
+
+    private static string ForensicResultColumnExpression(ForensicArtifactResultColumn column) => column switch
+    {
+        ForensicArtifactResultColumn.ObservedUtc => "a.TimestampUtc",
+        ForensicArtifactResultColumn.ArtifactType => "a.ArtifactType",
+        ForensicArtifactResultColumn.Category => "a.Category",
+        ForensicArtifactResultColumn.ParserId => "a.ParserId",
+        ForensicArtifactResultColumn.ParserVersion => "a.ParserVersion",
+        ForensicArtifactResultColumn.Name => "a.Name",
+        ForensicArtifactResultColumn.Summary => "a.Summary",
+        ForensicArtifactResultColumn.SourcePath => "a.Path",
+        ForensicArtifactResultColumn.Host => "a.HostId",
+        ForensicArtifactResultColumn.InputSha256 => "a.InputSha256",
+        ForensicArtifactResultColumn.SourceRunId => "a.SourceRunId",
+        ForensicArtifactResultColumn.IngestionJobId => "a.IngestionJobId",
+        _ => throw new ArgumentOutOfRangeException(nameof(column))
+    };
+
+    private static string ForensicResultOrderExpression(ForensicArtifactResultColumn column)
+    {
+        var expression = ForensicResultColumnExpression(column);
+        return "CASE WHEN " + expression + " IS NULL THEN 1 ELSE 0 END, " + expression + " COLLATE NOCASE";
+    }
+
+    private static ForensicArtifactResultBody? ReadForensicArtifactResultById(SqliteConnection connection, string artifactId, CancellationToken token, SqliteTransaction? transaction = null)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT a.ArtifactId, a.CaseId, a.EvidenceSessionId, a.CaptureId, a.SourceIdentityId, a.HostId, a.ExecutionRootId,
+                   a.SourceRunId, a.IngestionJobId, a.RawRecordId, a.TimestampUtc, a.ArtifactType, a.Category,
+                   a.ParserId, a.ParserVersion, a.Name, a.Path, a.Summary, a.InputSha256, a.InputByteCount,
+                   a.ResultSha256, a.OutputKey, a.OriginalFileRetained, a.SourcePathSemantics, a.ParserSettingsJson,
+                   a.StructuredPayloadVersion, a.PropertiesJson
+            FROM Artifacts a WHERE a.ArtifactId=$id AND a.StructuredPayloadVersion IS NOT NULL;
+            """;
+        command.Parameters.AddWithValue("$id", artifactId);
+        using var registration = token.Register(command.Cancel);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadForensicArtifactResult(reader) : null;
+    }
+
+    private static ForensicArtifactResultBody ReadForensicArtifactResult(SqliteDataReader reader)
+    {
+        var result = new ForensicArtifactResultRow(
+            GetString(reader, 0),
+            new EvidenceIdentity { CaseId = GetString(reader, 1), EvidenceSessionId = GetString(reader, 2), CaptureId = GetString(reader, 3), SourceIdentityId = GetString(reader, 4), HostId = GetString(reader, 5), ExecutionRootId = GetString(reader, 6) },
+            GetString(reader, 7), GetString(reader, 8), GetLong(reader, 9), GetStructuredBodyTimestamp(reader, 10), GetString(reader, 11), GetString(reader, 12),
+            GetString(reader, 13), GetString(reader, 14), GetString(reader, 15), GetString(reader, 16), GetString(reader, 17), GetString(reader, 18),
+            reader.IsDBNull(19) ? null : GetLong(reader, 19), GetString(reader, 20), GetString(reader, 21), reader.IsDBNull(22) ? null : GetBool(reader, 22));
+        if (reader.IsDBNull(23) || !Enum.IsDefined((ForensicSourcePathSemantics)GetInt(reader, 23))) throw new InvalidDataException();
+        var body = new ForensicArtifactResultBody(result, (ForensicSourcePathSemantics)GetInt(reader, 23), GetString(reader, 24), GetInt(reader, 25), GetString(reader, 26));
+        ValidateForensicResultBody(body);
+        return body;
+    }
+
+    private static void ValidateForensicResultBody(ForensicArtifactResultBody body)
+    {
+        var result = body.Result;
+        if (result.OriginalFileRetained != false || body.PayloadVersion < 1 || string.IsNullOrWhiteSpace(body.ParserSettingsJson)) throw new InvalidDataException();
+        _ = ForensicArtifactContract.CanonicalJson(body.PropertiesJson);
+        _ = ForensicArtifactContract.CanonicalJson(body.ParserSettingsJson);
+        var output = new ForensicArtifactOutput
+        {
+            OutputKey = result.OutputKey, ArtifactType = result.ArtifactType, Category = result.Category,
+            PrimaryTimeUtc = result.PrimaryTimeUtc, Name = result.Name, Summary = result.Summary,
+            PayloadVersion = body.PayloadVersion, PropertiesJson = body.PropertiesJson
+        };
+        if (ForensicArtifactContract.Hash(JsonSerializer.Serialize(output)) != result.ResultSha256) throw new InvalidDataException();
+    }
+
+    private static void ValidateOriginalForensicResult(SqliteConnection connection, SqliteTransaction transaction, ForensicArtifactResultBody body, CancellationToken token)
+    {
+        var result = body.Result;
+        using var original = connection.CreateCommand();
+        original.Transaction = transaction;
+        original.CommandText = """
+            SELECT r.RawRecordId, e.RelationId, r.CaseId, r.EvidenceSessionId, r.CaptureId, r.SourceIdentityId, r.HostId, r.ExecutionRootId,
+                   r.SourceRunId, r.IngestionJobId, r.TimestampUtc, r.PayloadJson, r.PayloadHash,
+                   e.CaseId, e.EvidenceSessionId, e.CaptureId, e.SourceIdentityId, e.HostId, e.ExecutionRootId,
+                   e.SourceRunId, e.IngestionJobId, e.FromKind, e.ToKind, e.RelationType, e.CorrelationMethod, e.Confidence, e.CandidateCount,
+                   e.CorrelationState, e.RawInputId, e.ResolverName, e.ResolverVersion
+            FROM EvidenceRelations e JOIN RawRecords r ON CAST(r.RawRecordId AS TEXT)=e.FromId
+            WHERE e.Status='Active' AND e.FromKind='RawRecord' AND e.ToKind='GenericArtifact' AND e.ToId=$id
+              AND e.RelationType='DerivedFrom' AND e.CorrelationMethod='ParserResultForRead' AND r.RecordType='ForensicSourceReadV1'
+              AND r.RawRecordId=$rawId;
+            """;
+        original.Parameters.AddWithValue("$id", result.ArtifactId);
+        original.Parameters.AddWithValue("$rawId", result.RawRecordId);
+        using var reader = original.ExecuteReader();
+        token.ThrowIfCancellationRequested();
+        if (!reader.Read()) throw new InvalidDataException("The structured result body has no exact active parser-result receipt lineage.");
+        _ = ReadForensicOccurrence(reader, body, original: true);
+        if (reader.Read()) throw new InvalidDataException("The structured result body has ambiguous parser-result receipt lineage.");
+    }
+
+    private static ForensicArtifactResultReadOccurrence ReadForensicOccurrence(SqliteDataReader reader, ForensicArtifactResultBody body, bool original = false)
+    {
+        var result = body.Result;
+        var scope = new EvidenceIdentity { CaseId = GetString(reader, 2), EvidenceSessionId = GetString(reader, 3), CaptureId = GetString(reader, 4), SourceIdentityId = GetString(reader, 5), HostId = GetString(reader, 6), ExecutionRootId = GetString(reader, 7) };
+        var relationScope = new EvidenceIdentity { CaseId = GetString(reader, 13), EvidenceSessionId = GetString(reader, 14), CaptureId = GetString(reader, 15), SourceIdentityId = GetString(reader, 16), HostId = GetString(reader, 17), ExecutionRootId = GetString(reader, 18) };
+        var sourceRunId = GetString(reader, 8); var ingestionJobId = GetString(reader, 9); var completedUtc = GetStructuredBodyTimestamp(reader, 10); var payload = GetString(reader, 11); var payloadHash = GetString(reader, 12);
+        if (scope != result.Scope || relationScope != result.Scope || sourceRunId != GetString(reader, 19) || ingestionJobId != GetString(reader, 20) ||
+            GetString(reader, 21) != EvidenceReferenceKind.RawRecord.ToString() || GetString(reader, 22) != EvidenceReferenceKind.GenericArtifact.ToString() ||
+            GetString(reader, 23) != EvidenceRelationType.DerivedFrom.ToString() || GetString(reader, 24) != "ParserResultForRead" || reader.GetDouble(25) != 1.0 || reader.GetInt32(26) != 1 ||
+            GetString(reader, 27) != EvidenceCorrelationState.Exact.ToString() || GetString(reader, 28) != GetLong(reader, 0).ToString(CultureInfo.InvariantCulture) ||
+            GetString(reader, 29) != result.ParserId || GetString(reader, 30) != result.ParserVersion || ForensicArtifactContract.Hash(payload) != payloadHash) throw new InvalidDataException();
+        var receipt = JsonSerializer.Deserialize<ForensicReadReceipt>(payload) ?? throw new InvalidDataException();
+        var read = ForensicArtifactContract.Freeze([receipt.Read]).Single();
+        if (completedUtc != read.ReadCompletedUtc || read.Scope != scope || read.SourceRunId != sourceRunId || read.IngestionJobId.ToString("D") != ingestionJobId || read.OriginalFileRetained || read.Outputs.Count != 0 ||
+            read.Status != ForensicReadStatus.Succeeded || read.ParserStatus is not (ForensicParseStatus.Succeeded or ForensicParseStatus.Partial) || read.Consistency == ForensicReadConsistency.ChangedDuringRead ||
+            read.PathSemantics != body.PathSemantics || ForensicArtifactContract.PathKey(read.SourcePath, read.PathSemantics) != ForensicArtifactContract.PathKey(result.SourcePath, body.PathSemantics) ||
+            read.InputByteCount != result.InputByteCount || read.InputSha256 != result.InputSha256 || read.Parser.ParserId != result.ParserId || read.Parser.ParserVersion != result.ParserVersion || read.Parser.SettingsJson != body.ParserSettingsJson ||
+            !receipt.Results.Any(reference => reference.ArtifactId == result.ArtifactId && reference.OutputKey == result.OutputKey && reference.ResultSha256 == result.ResultSha256) ||
+            JsonSerializer.Serialize(new ForensicReadReceipt(read, receipt.Results)) != payload) throw new InvalidDataException();
+        if (original &&
+            (read.SourceRunId != result.SourceRunId || read.IngestionJobId.ToString("D") != result.IngestionJobId || read.SourcePath != result.SourcePath)) throw new InvalidDataException();
+        return new(GetLong(reader, 0), GetString(reader, 1), scope, sourceRunId, ingestionJobId, read.ReadCompletedUtc, payloadHash, false)
+        {
+            ReadMetadata = read,
+            SourceRunMetadataJson = reader.FieldCount > 31 && !reader.IsDBNull(31) ? GetString(reader, 31) : "{}",
+            SourceRunStatus = reader.FieldCount > 32 && !reader.IsDBNull(32) ? GetString(reader, 32) : "Unknown"
+        };
+    }
+
+    private sealed record ForensicArtifactResultBody(ForensicArtifactResultRow Result, ForensicSourcePathSemantics PathSemantics, string ParserSettingsJson, int PayloadVersion, string PropertiesJson);
+
+    private static string? ForensicPropertyValue(ForensicArtifactResultProperty property, ForensicArtifactResultPropertyColumn column) => column switch
+    {
+        ForensicArtifactResultPropertyColumn.Name => property.Name,
+        ForensicArtifactResultPropertyColumn.Value => property.Value,
+        ForensicArtifactResultPropertyColumn.ValueType => property.ValueType,
+        _ => throw new ArgumentOutOfRangeException(nameof(column))
+    };
+
+    private sealed record ForensicReadReceipt(ForensicReadAttempt Read, IReadOnlyList<ForensicResultReference> Results);
+    private sealed record ForensicResultReference(string ArtifactId, string OutputKey, string ResultSha256);
 
     public SqliteStagingQueryService.ZeekProcessCorrelation ResolveZeekProcessCorrelation(
         ZeekNetworkRecord artifact)
@@ -812,11 +1313,12 @@ internal sealed class ArtifactEvidenceQueryService : IArtifactEvidenceQueryServi
                     SELECT ArtifactId FROM ZeekNetworkArtifacts
                     ORDER BY TimestampUtc DESC, RawLineNumber DESC LIMIT $MaxCount;
                     """, AddLimitParameter);
-                AddQueryPlan(plans, connection, "filesystem artifacts page", """
+                AddQueryPlan(plans, connection, "filesystem artifacts page", $"""
                     SELECT a.ArtifactId, r.RawRecordId
                     FROM Artifacts a
                     LEFT JOIN RawRecords r ON r.RawRecordId = a.RawRecordId
                     WHERE a.ArtifactType IN ('NtfsMft', 'NtfsUsnJournal', 'NtfsLogFile', 'Prefetch', 'FileMetadata')
+                          {(ColumnExists(connection, "Artifacts", "StructuredPayloadVersion") ? "AND a.StructuredPayloadVersion IS NULL" : string.Empty)}
                     ORDER BY COALESCE(a.TimestampUtc, a.UpdatedUtc) DESC LIMIT $MaxCount;
                     """, AddLimitParameter);
                 AddQueryPlan(plans, connection, "artifact properties batch", """
@@ -1606,6 +2108,14 @@ internal sealed class ArtifactEvidenceQueryService : IArtifactEvidenceQueryServi
         return false;
     }
 
+    private static bool TableExists(SqliteConnection connection, string tableName)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$name;";
+        command.Parameters.AddWithValue("$name", tableName);
+        return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+    }
+
     private static string GetProperty(IReadOnlyDictionary<string, string> properties, string name)
         => properties.TryGetValue(name, out var value) ? value : string.Empty;
 
@@ -1669,6 +2179,17 @@ internal sealed class ArtifactEvidenceQueryService : IArtifactEvidenceQueryServi
         => reader.IsDBNull(ordinal) || !DateTimeOffset.TryParse(reader.GetString(ordinal), out var value)
             ? null
             : value.UtcDateTime;
+
+    // Structured bodies bind this nullable timestamp into ResultSha256. Unlike legacy projections,
+    // malformed non-null text must therefore fail rather than being treated as an absent primary time.
+    private static DateTime? GetStructuredBodyTimestamp(SqliteDataReader reader, int ordinal)
+    {
+        if (reader.IsDBNull(ordinal)) return null;
+        var stored = reader.GetString(ordinal);
+        if (!DateTimeOffset.TryParse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var value) ||
+            !string.Equals(stored, value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture), StringComparison.Ordinal)) throw new InvalidDataException();
+        return value.UtcDateTime;
+    }
 
     private static string FormatDate(DateTime value)
         => value.Kind == DateTimeKind.Utc

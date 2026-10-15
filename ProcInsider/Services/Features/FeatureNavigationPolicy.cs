@@ -36,6 +36,8 @@ public static class FeatureNavigationPolicy
 
     public static bool IsScopePublished(FeatureAccessService access, ExplorerScope scope)
     {
+        // Retain the legacy contract value, but never restore its removed navigation root.
+        if (scope.Kind == ExplorerScopeKind.ArtifactRoot) return false;
         var featureId = GetFeatureForExplorerScope(scope);
         return !featureId.HasValue || access.IsPublished(featureId.Value);
     }

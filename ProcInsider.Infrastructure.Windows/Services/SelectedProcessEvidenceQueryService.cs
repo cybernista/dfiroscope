@@ -29,7 +29,11 @@ public interface ISelectedProcessEvidenceQueryService
         string processKey,
         string? source,
         int maxCount,
-        string processEntityId = "");
+        string processEntityId = "",
+        long? fromUtcTicks = null,
+        long? toUtcTicks = null,
+        EvidenceIdentity? permittedScope = null,
+        CancellationToken cancellationToken = default);
 
     IReadOnlyList<ModuleObservationRecord> GetModulesForProcess(
         string processKey,
@@ -330,13 +334,24 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
         string processKey,
         string? source,
         int maxCount,
-        string processEntityId = "")
+        string processEntityId = "",
+        long? fromUtcTicks = null,
+        long? toUtcTicks = null,
+        EvidenceIdentity? permittedScope = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (fromUtcTicks >= toUtcTicks)
+            throw new ArgumentOutOfRangeException(nameof(fromUtcTicks));
+        if (permittedScope != null && (string.IsNullOrWhiteSpace(permittedScope.EvidenceSessionId) ||
+            string.IsNullOrWhiteSpace(permittedScope.CaptureId) || string.IsNullOrWhiteSpace(permittedScope.HostId)))
+            throw new ArgumentException("The permitted event scope requires exact session, capture, and host identities.", nameof(permittedScope));
         if (maxCount <= 0 || !HasProcessIdentity(processKey, processEntityId))
         {
             return Array.Empty<TelemetryEventRecord>();
         }
 
+        using var execution = new SqliteWorkScope(cancellationToken, stage: "Loading selected process events");
         return _readContext.MeasureRead(
             "GetEventsForProcess",
             () =>
@@ -384,6 +399,13 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
                 var sourcePredicate = string.IsNullOrWhiteSpace(source)
                     ? string.Empty
                     : "AND e.Source = $Source";
+                var timePredicate = (fromUtcTicks.HasValue ? " AND e.TimestampUtc >= $FromUtc" : "") +
+                    (toUtcTicks.HasValue ? " AND e.TimestampUtc < $ToUtc" : "");
+                var scopePredicate = permittedScope == null ? "" :
+                    " AND e.CaseId=$ScopeCase AND e.EvidenceSessionId=$ScopeSession" +
+                    " AND e.CaptureId=$ScopeCapture AND e.HostId=$ScopeHost" +
+                    (string.IsNullOrWhiteSpace(permittedScope.ExecutionRootId) ? "" : " AND e.ExecutionRootId=$ScopeRoot") +
+                    (string.IsNullOrWhiteSpace(permittedScope.SourceIdentityId) ? "" : " AND e.SourceIdentityId=$ScopeSource");
                 var requestedEntity = SelectOptionalColumn(
                     connection,
                     canonicalProcessTable,
@@ -443,7 +465,7 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
                            {sourceRun}, {ingestionJob}
                     FROM ProcessEvents e
                     INNER JOIN Requested requested ON {processPredicate}
-                    WHERE 1 = 1 {sourcePredicate}
+                    WHERE 1 = 1 {sourcePredicate} {timePredicate} {scopePredicate}
                     ORDER BY e.TimestampUtc DESC, e.SequenceId DESC
                     LIMIT $MaxCount;
                     """;
@@ -452,9 +474,25 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
                 {
                     command.Parameters.AddWithValue("$Source", source);
                 }
+                if (fromUtcTicks is { } from)
+                    command.Parameters.AddWithValue("$FromUtc", new DateTime(from, DateTimeKind.Utc).ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                if (toUtcTicks is { } to)
+                    command.Parameters.AddWithValue("$ToUtc", new DateTime(to, DateTimeKind.Utc).ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                if (permittedScope != null)
+                {
+                    command.Parameters.AddWithValue("$ScopeCase", permittedScope.CaseId ?? string.Empty);
+                    command.Parameters.AddWithValue("$ScopeSession", permittedScope.EvidenceSessionId);
+                    command.Parameters.AddWithValue("$ScopeCapture", permittedScope.CaptureId);
+                    command.Parameters.AddWithValue("$ScopeHost", permittedScope.HostId);
+                    if (!string.IsNullOrWhiteSpace(permittedScope.ExecutionRootId))
+                        command.Parameters.AddWithValue("$ScopeRoot", permittedScope.ExecutionRootId);
+                    if (!string.IsNullOrWhiteSpace(permittedScope.SourceIdentityId))
+                        command.Parameters.AddWithValue("$ScopeSource", permittedScope.SourceIdentityId);
+                }
 
                 command.Parameters.AddWithValue("$MaxCount", Math.Clamp(maxCount, 1, 100000));
-                return ReadEvents(command);
+                using var registration = cancellationToken.Register(command.Cancel);
+                return ReadEvents(command, cancellationToken);
             },
             $"{IdentityDiagnostic(processKey, processEntityId)}; source={source ?? "all"}; max={maxCount}",
             events => events.Count);
@@ -673,12 +711,15 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
             plans => plans.Count);
     }
 
-    internal static IReadOnlyList<TelemetryEventRecord> ReadEvents(SqliteCommand command)
+    internal static IReadOnlyList<TelemetryEventRecord> ReadEvents(SqliteCommand command,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var events = new List<TelemetryEventRecord>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var record = new TelemetryEventRecord
             {
                 SequenceId = GetLong(reader, 0),
@@ -730,6 +771,7 @@ internal sealed class SelectedProcessEvidenceQueryService : ISelectedProcessEvid
             events.Add(record);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         return events;
     }
 

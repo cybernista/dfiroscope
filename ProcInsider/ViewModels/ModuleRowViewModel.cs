@@ -42,6 +42,7 @@ public class ModuleRowViewModel : ViewModelBase
             ArtifactKind = InspectorArtifactKind.Module,
             TargetKind = "Module",
             TargetTable = "Modules",
+            SourceRunId = SourceRunId,
             ArtifactId = $"{BaseAddress}|{FullPath}",
             DisplayPath = FullPath,
             Header = ModuleName,

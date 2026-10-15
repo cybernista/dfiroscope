@@ -127,12 +127,12 @@ internal sealed class ProcessesWorkspaceViewModel : WorkspaceInstanceViewModel
         }
         finally { Interlocked.Decrement(ref _loads); }
     }
-    internal async Task QuiesceAsync(CancellationToken token)
+    internal async Task QuiesceAsync(CancellationToken token, bool preserveSharedAiExecution = false)
     {
         _suspended = true;
         Interlocked.Increment(ref _loadRevision);
         _reads.Cancel();
-        await Presentation.QuiesceAsync(token);
+        await Presentation.QuiesceAsync(token, preserveSharedAiExecution);
         while (Volatile.Read(ref _loads) != 0) await Task.Delay(10, token);
     }
     internal void Resume()

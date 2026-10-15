@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Windows.Threading;
 using ProcInsider.Models;
 using ProcInsider.Models.Agent;
+using ProcInsider.Models.Ai;
 using ProcInsider.Services;
 using ProcInsider.Services.AgentIpc;
 using ProcInsider.Services.Ai;
@@ -415,51 +416,54 @@ public sealed class AiFeatureModule : IDisposable
         ApplicationCatalogService? applicationCatalog,
         InspectorPaneViewModel inspectorPaneViewModel,
         FeatureAccessService featureAccess,
-        AiInvestigationService? sharedService = null)
+        AiInvestigationService? sharedService = null,
+        Func<AnnotationDatabaseService?>? annotationStoreProvider = null,
+        Func<long>? captureGeneration = null,
+        Func<bool>? activePresentation = null,
+        Func<AiEvidenceReference, Task>? navigateCitation = null,
+        Func<AiEvidenceReference, CancellationToken, Task<AiObjectContext?>>? resolveInvestigationTarget = null,
+        Func<string>? evidenceSessionId = null,
+        Func<IAgentRuntime?>? runtimeFactory = null)
     {
         _ownsService = sharedService == null;
         Service = sharedService ?? new AiInvestigationService(sessionPaths.AiSettingsPath, sessionPaths.AiSecretPath);
-        EvidencePackBuilder = new AiEvidencePackBuilder(projectionService, annotationStore, applicationCatalog);
-        InvestigationViewModel = new AiInvestigationViewModel(
-            Service,
-            EvidencePackBuilder,
-            annotationStore,
-            featureAccess);
-        DetailsViewModel = new AiDetailsInvestigationViewModel(
-            Service,
-            inspectorPaneViewModel,
-            annotationStore,
-            featureAccess);
-        ChatViewModel = new AiChatViewModel(Service, annotationStore, featureAccess);
+        InvestigationViewModel = new AiInvestigationViewModel(Service, featureAccess);
+        var policy = new AgentPolicy(featureAccess, projectionService);
+        var tools = new AgentToolRegistry(policy, projectionService);
+        var skills = new AgentSkillRegistry(tools);
+        runtimeFactory ??= () => (annotationStoreProvider?.Invoke() ?? annotationStore) is { } currentStore
+                ? new AgentRuntime(Service, currentStore, policy, tools, skills, new ContextBroker()) : null;
+        ConversationViewModel = new ProcessConversationViewModel(
+            runtimeFactory,
+            annotationStoreProvider ?? (() => annotationStore), Service,
+            captureGeneration ?? (() => 0), activePresentation ?? (() => true), navigateCitation);
+        ConversationViewModel.SettingsViewModel = InvestigationViewModel;
+        DataInvestigationViewModel = new InvestigationDataViewModel(
+            runtimeFactory,
+            annotationStoreProvider ?? (() => annotationStore), Service,
+            captureGeneration ?? (() => 0), activePresentation ?? (() => true),
+            ProcessEvidenceAgentTools.CreateObjectContext,
+            resolveInvestigationTarget ?? ((_, _) => Task.FromResult<AiObjectContext?>(null)),
+            navigateCitation ?? (_ => Task.CompletedTask), evidenceSessionId ?? (() => sessionPaths.SessionId));
+        DataInvestigationViewModel.SettingsViewModel = InvestigationViewModel;
     }
 
     public AiInvestigationService Service { get; }
-    public AiEvidencePackBuilder EvidencePackBuilder { get; }
     public AiInvestigationViewModel InvestigationViewModel { get; }
-    public AiDetailsInvestigationViewModel DetailsViewModel { get; }
-    public AiChatViewModel ChatViewModel { get; }
+    public ProcessConversationViewModel ConversationViewModel { get; }
+    public InvestigationDataViewModel DataInvestigationViewModel { get; }
 
     public void SetWorkspace(InvestigationSessionPaths sessionPaths, AnnotationDatabaseService? annotationStore)
     {
         if (_ownsService) Service.SetStoragePaths(sessionPaths.AiSettingsPath, sessionPaths.AiSecretPath);
-        EvidencePackBuilder.SetAnnotationStore(annotationStore);
-        InvestigationViewModel.SetAnnotationStore(annotationStore);
         InvestigationViewModel.ReloadSettings();
-        DetailsViewModel.SetAnnotationStore(annotationStore);
-        DetailsViewModel.ReloadSettings();
-        ChatViewModel.SetAnnotationStore(annotationStore);
-        ChatViewModel.ReloadSettings();
     }
 
     public void DetachWorkspace()
     {
-        InvestigationViewModel.CancelInvestigation();
-        DetailsViewModel.CancelInvestigation();
-        ChatViewModel.Cancel();
-        InvestigationViewModel.SetAnnotationStore(null);
-        DetailsViewModel.SetAnnotationStore(null);
-        ChatViewModel.SetAnnotationStore(null);
-        InvestigationViewModel.Clear();
+        ConversationViewModel.Detach();
+        DataInvestigationViewModel.Detach();
+        InvestigationViewModel.DetachWorkspace();
     }
 
     public void Dispose()
@@ -470,9 +474,8 @@ public sealed class AiFeatureModule : IDisposable
         }
 
         _disposed = true;
-        InvestigationViewModel.CancelInvestigation();
-        DetailsViewModel.Dispose();
-        ChatViewModel.Dispose();
+        ConversationViewModel.Dispose();
+        DataInvestigationViewModel.Dispose();
         InvestigationViewModel.Dispose();
     }
 }

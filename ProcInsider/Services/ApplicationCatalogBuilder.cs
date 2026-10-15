@@ -829,6 +829,8 @@ public static class ApplicationCatalogBuilder
                     ) WITHOUT ROWID;
                     CREATE INDEX IX_Profiles_Filename ON Profiles(FilenameMatchKind, FilenamePattern, ProfileId);
                     """;
+                // SQLite retains schema SQL verbatim; Git checkout line endings must not change catalog bytes.
+                schema.CommandText = schema.CommandText.Replace("\r\n", "\n", StringComparison.Ordinal);
                 schema.ExecuteNonQuery();
             }
 

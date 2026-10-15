@@ -28,7 +28,7 @@ public sealed class ProcessLifecycleEvidenceSourceAdapter
     : EvidenceSourceAdapterBase<ProcessLifecycleEvidenceSourceInput>
 {
     public const string Id = "procinsider.process-lifecycle";
-    public const string Version = "1.0.0";
+    public const string Version = "1.0.1";
     public const string LifecyclePrerequisite = "windows.process-lifecycle";
 
     public override EvidenceSourceAdapterDescriptor Descriptor { get; } = new()
@@ -104,7 +104,8 @@ public sealed class ProcessLifecycleEvidenceSourceAdapter
                 observationKind,
                 ProcessEntityResolutionStrategy.ExactOrSourceAlias,
                 includeStatistics: false,
-                metadataJson: metadata);
+                metadataJson: metadata,
+                bindObservationContent: true);
         }).ToArray();
         var items = normalizedItems
             .DistinctBy(item => item.Observation.ObservationId)

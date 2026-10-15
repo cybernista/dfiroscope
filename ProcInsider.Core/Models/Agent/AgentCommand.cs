@@ -80,6 +80,8 @@ public sealed record StartLiveCaptureCommand : AgentCommand
 
     /// <summary>Whether the agent should watch the Sysmon operational log when available.</summary>
     public bool CollectSysmonEvents { get; init; } = true;
+
+    public bool CollectOsNetworkEndpoints { get; init; }
 }
 
 /// <summary>
@@ -270,6 +272,12 @@ public sealed record QueueArtifactImportCommand : AgentCommand
 
     /// <summary>Upper bound for files loaded by one queued job.</summary>
     public int MaxFiles { get; init; } = 10000;
+}
+
+/// <summary>Requests one bounded examination of the Agent host's fixed local Windows Prefetch directory.</summary>
+public sealed record CollectPrefetchCommand : AgentCommand
+{
+    public override AgentCommandKind Kind => AgentCommandKind.CollectPrefetch;
 }
 
 /// <summary>

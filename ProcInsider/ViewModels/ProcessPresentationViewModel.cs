@@ -82,7 +82,7 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
     }
     public ViewerSharedActions SharedActions => _services.SharedActions;
 
-    internal async Task QuiesceAsync(CancellationToken cancellationToken)
+    internal async Task QuiesceAsync(CancellationToken cancellationToken, bool preserveSharedAiExecution = false)
     {
         if (!_readsSuspended)
         {
@@ -93,9 +93,9 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
             ProcessStatisticsViewModel.CancelPendingRequests();
             if (_featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var ai))
             {
-                ai.InvestigationViewModel.CancelInvestigation();
-                ai.DetailsViewModel.CancelInvestigation();
-                ai.ChatViewModel.Cancel();
+                ai.ConversationViewModel.Detach();
+                ai.DataInvestigationViewModel.Quiesce(preserveSharedAiExecution);
+                ai.InvestigationViewModel.CancelConnectionTest();
             }
         }
         await _listingWorkflow.QuiesceAsync(cancellationToken);
@@ -154,12 +154,15 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
 
     internal void DetachReadBinding(long captureGeneration)
     {
+        _aiCaptureBinding = null;
+        AiDataConversation = null;
         _selectedProcessFanOutCoordinator.InvalidateWorkspace(captureGeneration);
         _sqliteStagingQueryService = null;
         _processListingService = null;
         ProcessDescriptionViewModel.SetAnnotationStore(null);
         ProcessDescriptionViewModel.SetWorkspace(null, captureGeneration);
         NotesViewModel.SetAnnotationStore(null);
+        _processSavedAiNavigation?.Bind(null);
         if (_featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var ai)) ai.DetachWorkspace();
         RegistrationContext.BindWorkspace(null);
     }
@@ -171,9 +174,15 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
         ProcessDescriptionViewModel.SetAnnotationStore(binding.Annotations);
         ProcessDescriptionViewModel.SetWorkspace(binding.Paths, binding.CaptureGeneration);
         NotesViewModel.SetAnnotationStore(binding.Annotations);
+        _aiCaptureBinding = binding;
+        _processSavedAiNavigation?.Bind(binding);
         if (_featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var ai))
+        {
             ai.SetWorkspace(binding.Paths, binding.Annotations);
+            ai.ConversationViewModel.SelectProcess(SelectedProcess?.ProcessInfo);
+        }
         RegistrationContext.BindWorkspace(binding.Paths);
+        EnsureInitialAiConversation();
     }
 
     internal void ApplyExplorerMetadata(ExplorerCountRefreshPayload payload)
@@ -189,6 +198,14 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
 
     internal void ResetCapture()
     {
+        _aiCaptureBinding = null;
+        _processSavedAiNavigation?.Bind(null);
+        AiDataConversation = null;
+        if (_featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var aiConversation))
+        {
+            aiConversation.ConversationViewModel.Detach();
+            aiConversation.DataInvestigationViewModel.Detach();
+        }
         DetachVirtualizedProcessListing()?.Dispose();
         _processViewModels.Clear();
         Processes.Clear();
@@ -258,6 +275,11 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
     {
         if (!_readsSuspended || _disposed) return;
         _readsSuspended = false;
+        if (_featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var ai))
+        {
+            ai.ConversationViewModel.SelectProcess(SelectedProcess?.ProcessInfo);
+            ai.DataInvestigationViewModel.Resume();
+        }
         ResumeHeaderQueries();
         _listingWorkflow.Resume();
         _selectedProcessFanOutCoordinator.Resume();
@@ -275,6 +297,7 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
     {
         if (_disposed) return;
         _disposed = true;
+        _processSavedAiNavigation?.Dispose();
         _featureModules.Activated -= OnFeatureModuleActivated;
         if (_viewerNavigationCoordinator != null) _viewerNavigationCoordinator.StateChanged -= OnViewerNavigationStateChanged;
         if (_selectedProcessFanOutCoordinator != null) _selectedProcessFanOutCoordinator.StateChanged -= OnSelectedProcessFanOutStateChanged;
@@ -413,6 +436,8 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
     [ObservableProperty]
     private ViewerDetailsTabKey selectedDetailsTabKey = ViewerDetailsTabKey.Object;
 
+    private bool _synchronizingAiDetailsTab;
+
     [ObservableProperty]
     private int totalProcessCount;
 
@@ -447,8 +472,144 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
     public InspectorPaneViewModel InspectorPaneViewModel { get; internal set; } = null!;
     public ProcessRiskDetailsViewModel? ProcessRiskDetailsViewModel { get; internal set; } = null!;
     public AiInvestigationViewModel AiInvestigationViewModel => AiFeature?.InvestigationViewModel!;
-    public AiDetailsInvestigationViewModel AiDetailsInvestigationViewModel => AiFeature?.DetailsViewModel!;
-    public AiChatViewModel AiChatViewModel => AiFeature?.ChatViewModel!;
+    public ProcessConversationViewModel ProcessConversationViewModel
+    {
+        get
+        {
+            var conversation = AiFeature?.ConversationViewModel;
+            if (conversation is not null) conversation.OpenConversationDetailsCommand ??=
+                new RelayCommand(() => SelectedDetailsTabKey = ViewerDetailsTabKey.Ai, () => IsAiPresentationCurrent);
+            return conversation!;
+        }
+    }
+    public InvestigationDataViewModel InvestigationDataViewModel => AiFeature?.DataInvestigationViewModel!;
+    internal bool TryGetActiveInvestigation(out ProcInsider.Models.Ai.Investigation investigation)
+    {
+        investigation = null!;
+        if (!_featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var ai) ||
+            ai.DataInvestigationViewModel.Investigation is not { } saved) return false;
+        investigation = saved;
+        return true;
+    }
+    internal bool IsAiPresentationCurrent => !_disposed && !_readsSuspended &&
+        (_services.IsActivePresentation?.Invoke(this) ?? true);
+
+    internal async Task<ProcInsider.Models.Ai.AiObjectContext?> ResolveInvestigationTargetAsync(
+        ProcInsider.Models.Ai.AiEvidenceReference reference, CancellationToken token)
+    {
+        if (_sqliteStagingQueryService is null) return null;
+        var generation = _services.CaptureGeneration();
+        var query = _sqliteStagingQueryService;
+        var sessionId = _services.SessionPaths().SessionId;
+        var binding = _services.Projection.CaptureReadBindingToken();
+        if (binding is null || query is null) return null;
+        var resolved = await Task.Run(() =>
+        {
+            using var scope = _services.Projection.BeginReadScope(binding);
+            token.ThrowIfCancellationRequested();
+            return new AiEvidenceReferenceResolver(query).ResolveProcess(reference, sessionId);
+        }, token);
+        return !token.IsCancellationRequested &&
+            generation == _services.CaptureGeneration() && ReferenceEquals(query, _sqliteStagingQueryService) &&
+            _services.Projection.IsCurrentReadBinding(binding) && resolved.IsResolved
+            ? ProcessEvidenceAgentTools.CreateObjectContext(resolved.Process!) : null;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanAskSelectedProcessAi))]
+    private Task InvestigateSelectedProcessAsync() => StartSelectedProcessInvestigationAsync(true);
+
+    [RelayCommand(CanExecute = nameof(CanAskSelectedProcessAi))]
+    private Task InvestigateSelectedProcessFromMenuAsync() => StartSelectedProcessInvestigationAsync(true);
+
+    private async Task StartSelectedProcessInvestigationAsync(bool submitImmediately)
+    {
+        if (!CanAskSelectedProcessAi() || !IsAiPresentationCurrent) return;
+        var process = SelectedProcess!.ProcessInfo;
+        if (TryNavigateToDataTab(DataTabKeys.Ai, "Investigate selected process"))
+        {
+            AiDataConversation = InvestigationDataViewModel;
+            await InvestigationDataViewModel.StartAsync(process, submitImmediately: submitImmediately);
+            _processSavedAiNavigation?.Refresh();
+        }
+    }
+
+    internal async Task<bool> LoadInvestigationAsync(string id, CancellationToken token = default)
+    {
+        if (!IsAiPresentationCurrent || !_services.Access.IsPublished(FeatureIds.AiAssistance)) return false;
+        var generation = _services.CaptureGeneration();
+        var loaded = await InvestigationDataViewModel.LoadAsync(id, token);
+        return loaded && !token.IsCancellationRequested && IsAiPresentationCurrent &&
+            generation == _services.CaptureGeneration() &&
+            ShowAiConversation(InvestigationDataViewModel, "Open saved investigation");
+    }
+
+    private bool CanAskSelectedProcessAi() => IsAiPresentationCurrent && SelectedProcess is not null &&
+        _services.Access.IsPublished(FeatureIds.AiAssistance);
+
+    [RelayCommand(CanExecute = nameof(CanAskSelectedProcessAi))]
+    private async Task ChatAboutSelectedProcessAsync()
+    {
+        if (!CanAskSelectedProcessAi() || !IsAiPresentationCurrent) return;
+        var target = CaptureSelectedTarget();
+        var conversation = ProcessConversationViewModel;
+        await conversation.RunActionAsync(ProcessConversationAction.ChatAbout);
+        if (conversation.ConversationId is not null && target is not null && IsSelectedTargetEligible(target))
+        {
+            ShowAiConversation(conversation, "Chat about selected process");
+            _processSavedAiNavigation?.Refresh();
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanAskSelectedProcessAi))]
+    private Task NewChatSelectedProcessAsync() => RunSelectedProcessAiInNewChatAsync(null);
+
+    private async Task RunSelectedProcessAiInNewChatAsync(ProcessConversationAction? action)
+    {
+        if (!CanAskSelectedProcessAi()) return;
+        var target = CaptureSelectedTarget();
+        if (target is null || !IsSelectedTargetEligible(target)) return;
+        var conversation = ProcessConversationViewModel;
+        if (!ShowAiConversation(conversation, action?.ToString() ?? "New chat for selected process")) return;
+        if (await conversation.StartNewProcessConversationAsync() && IsSelectedTargetEligible(target))
+        {
+            if (action is { } selectedAction) await conversation.RunActionAsync(selectedAction);
+            _processSavedAiNavigation?.Refresh();
+        }
+    }
+
+    private async Task RunSelectedProcessAiAsync(ProcessConversationAction action)
+    {
+        if (!CanAskSelectedProcessAi()) return;
+        var conversation = ProcessConversationViewModel;
+        if (await conversation.OpenConversationAsync())
+        {
+            if (!ShowAiConversation(conversation, action.ToString())) return;
+            await conversation.RunActionAsync(action);
+            _processSavedAiNavigation?.Refresh();
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanAskSelectedProcessAi))]
+    private Task ReviewSelectedProcessRecordAsync() => RunSelectedProcessAiAsync(ProcessConversationAction.ReviewRecord);
+    [RelayCommand(CanExecute = nameof(CanAskSelectedProcessAi))]
+    private Task FindSelectedProcessRelatedActivityAsync() => RunSelectedProcessAiAsync(ProcessConversationAction.FindRelatedActivity);
+
+    [RelayCommand(CanExecute = nameof(CanAskSelectedProcessAi))]
+    private Task ReviewSelectedProcessRecordInNewChatAsync() => RunSelectedProcessAiInNewChatAsync(ProcessConversationAction.ReviewRecord);
+
+    [RelayCommand(CanExecute = nameof(CanAskSelectedProcessAi))]
+    private Task FindSelectedProcessRelatedActivityInNewChatAsync() => RunSelectedProcessAiInNewChatAsync(ProcessConversationAction.FindRelatedActivity);
+
+    public async Task<bool> LoadConversationAsync(string id, CancellationToken token = default)
+    {
+        if (_disposed || _readsSuspended || !_services.Access.IsPublished(FeatureIds.AiAssistance) ||
+            SelectedProcess is null) return false;
+        var target = CaptureSelectedTarget();
+        if (target is null || !IsSelectedTargetEligible(target)) return false;
+        var loaded = await ProcessConversationViewModel.LoadConversationAsync(id, token);
+        return loaded && IsSelectedTargetEligible(target) &&
+            ShowAiConversation(ProcessConversationViewModel, "Open saved chat");
+    }
 
     public IReadOnlyList<FeatureTabDescriptor> ExplorerTabs => _viewerNavigationCoordinator.ExplorerTabs;
     public IReadOnlyList<FeatureTabDescriptor> DataTabs => _viewerNavigationCoordinator.DataTabs;
@@ -460,9 +621,6 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
 
     [ObservableProperty]
     private FeatureTabDescriptor? selectedExplorerTab;
-
-    [ObservableProperty]
-    private ExplorerAiSection selectedExplorerAiSection = ExplorerAiSection.Chat;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DataTabs))]
@@ -520,6 +678,8 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
 
         OnPropertyChanged(nameof(ExplorerTabs));
         OnPropertyChanged(nameof(DataTabs));
+        SynchronizeDetailsWithDataTab();
+        EnsureInitialAiConversation();
         if (!string.IsNullOrWhiteSpace(state.StatusMessage))
         {
             StatusMessage = state.StatusMessage;
@@ -995,6 +1155,11 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
 
     internal void OnExplorerScopeSelected(ExplorerScope scope)
     {
+        if (scope.Kind == ExplorerScopeKind.ArtifactRoot)
+        {
+            ExplorerViewModel.SelectNode(new ExplorerNodeViewModel(scope));
+            return;
+        }
         MarkSnapshotPresentationInteraction();
         var requiredFeature = FeatureNavigationPolicy.GetFeatureForExplorerScope(scope);
         if (requiredFeature.HasValue &&
@@ -1301,7 +1466,8 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
     internal static bool IsSelectableExplorerScope(ExplorerScope scope)
     {
         return scope.Kind != ExplorerScopeKind.Placeholder &&
-               scope.Kind != ExplorerScopeKind.Branch;
+               scope.Kind != ExplorerScopeKind.Branch &&
+               scope.Kind != ExplorerScopeKind.ArtifactRoot;
     }
 
     internal bool CanChangeSelectedProcessScope()
@@ -2047,6 +2213,17 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
     /// </summary>
     partial void OnSelectedProcessChanged(ProcessRowViewModel? oldValue, ProcessRowViewModel? newValue)
     {
+        ChatAboutSelectedProcessCommand.NotifyCanExecuteChanged();
+        NewChatSelectedProcessCommand.NotifyCanExecuteChanged();
+        ReviewSelectedProcessRecordCommand.NotifyCanExecuteChanged();
+        ReviewSelectedProcessRecordInNewChatCommand.NotifyCanExecuteChanged();
+        InvestigateSelectedProcessCommand.NotifyCanExecuteChanged();
+        InvestigateSelectedProcessFromMenuCommand.NotifyCanExecuteChanged();
+        FindSelectedProcessRelatedActivityCommand.NotifyCanExecuteChanged();
+        FindSelectedProcessRelatedActivityInNewChatCommand.NotifyCanExecuteChanged();
+        if (_featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var conversationModule))
+            conversationModule.ConversationViewModel.SelectProcess(newValue?.ProcessInfo);
+        _processSavedAiNavigation?.SelectProcess(newValue?.ProcessInfo);
         MarkSnapshotPresentationInteraction();
         _virtualizedProcessListing?.PreserveSelection(newValue);
         _selectionChangedWhileSuspended |= _readsSuspended;
@@ -2103,6 +2280,9 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
 
     internal void OnFeatureModuleActivated(object? sender, FeatureActivatedEventArgs e)
     {
+        if (e.FeatureId == FeatureIds.AiAssistance &&
+            _featureModules.TryGetActivated<AiFeatureModule>(FeatureIds.AiAssistance, out var ai))
+            ai.ConversationViewModel.SelectProcess(SelectedProcess?.ProcessInfo);
         var lateBinding = _selectedProcessFanOutCoordinator.BindActivatedConsumersAsync(e.FeatureId);
         if (!lateBinding.IsCompletedSuccessfully)
         {
@@ -2248,22 +2428,6 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
                 }));
         }
 
-        if ((!featureId.HasValue || featureId.Value == FeatureIds.AiAssistance) &&
-            _featureModules.TryGetActivated<AiFeatureModule>(
-                FeatureIds.AiAssistance,
-                out var ai))
-        {
-            consumers.Add(CreateSelectedProcessConsumer(
-                "ai-details-context",
-                (context, _) => ai.DetailsViewModel.SetSelectedProcessContext(context?.Row)));
-            consumers.Add(CreateSelectedProcessConsumer(
-                "ai-investigation",
-                (context, cancellationToken) =>
-                    ai.InvestigationViewModel.LoadForProcessSelectionAsync(
-                        context?.Row,
-                        cancellationToken)));
-        }
-
         if ((!featureId.HasValue || featureId.Value == FeatureIds.EventTelemetry) &&
             _featureModules.TryGetActivated<EventTelemetryFeatureModule>(
                 FeatureIds.EventTelemetry,
@@ -2355,6 +2519,7 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
         var result = _viewerNavigationCoordinator.AcceptDataSelection(value);
         if (result.Succeeded)
         {
+            EnsureInitialAiConversation();
             _services.QueueSelectedDataEnrichment(this);
         }
     }
@@ -2370,8 +2535,30 @@ public partial class ProcessPresentationViewModel : ViewModelBase, IAppInfoPrese
         _viewerNavigationCoordinator.AcceptExplorerSelection(value);
     }
 
-    partial void OnSelectedDetailsTabKeyChanged(ViewerDetailsTabKey value) =>
+    private void SynchronizeDetailsWithDataTab()
+    {
+        var details = SelectedDataTab?.Key == DataTabKeys.Ai
+            ? ViewerDetailsTabKey.Ai : ViewerDetailsTabKey.Object;
+        if (SelectedDetailsTabKey == details) return;
+        _synchronizingAiDetailsTab = true;
+        try { SelectedDetailsTabKey = details; }
+        finally { _synchronizingAiDetailsTab = false; }
+    }
+
+    partial void OnSelectedDetailsTabKeyChanged(ViewerDetailsTabKey value)
+    {
         MarkSnapshotPresentationInteraction();
+        if (_synchronizingAiDetailsTab || _disposed || _readsSuspended) return;
+        if (value == ViewerDetailsTabKey.Ai)
+        {
+            if (!TryNavigateToDataTab(DataTabKeys.Ai, "Open process chats"))
+                SynchronizeDetailsWithDataTab();
+        }
+        else if (SelectedDataTab?.Key == DataTabKeys.Ai)
+        {
+            TryNavigateToDataTab(DataTabKeys.AppInfo, "Close process chats");
+        }
+    }
 
     // ── DB-backed process grid helpers (Phase 3F / 3G) ────────────────────────
 

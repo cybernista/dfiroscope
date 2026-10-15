@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ProcInsider.Models;
 
 namespace ProcInsider.Services.EvidenceSources;
@@ -33,7 +34,8 @@ internal static class ProcessObservationAdapterFactory
         ProcessEntityResolutionStrategy resolutionStrategy,
         bool includeStatistics,
         string rawRecordId = "",
-        string metadataJson = "{}")
+        string metadataJson = "{}",
+        bool bindObservationContent = false)
     {
         observedUtc = observedUtc.Kind == DateTimeKind.Utc
             ? observedUtc
@@ -95,7 +97,8 @@ internal static class ProcessObservationAdapterFactory
             resolutionStrategy,
             includeStatistics ? CreateStatistics(process, record, observedUtc, source) : null,
             rawRecordId,
-            metadataJson);
+            metadataJson,
+            bindObservationContent);
     }
 
     public static ProcessObservationAdapterItem CreateFromProcessRecord(
@@ -110,7 +113,8 @@ internal static class ProcessObservationAdapterFactory
         ProcessEntityResolutionStrategy resolutionStrategy,
         ProcessStatisticsRecord? statistics = null,
         string rawRecordId = "",
-        string metadataJson = "{}")
+        string metadataJson = "{}",
+        bool bindObservationContent = false)
     {
         ApplyIdentity(record, identity, adapterId);
         observedUtc = observedUtc.Kind == DateTimeKind.Utc
@@ -164,6 +168,14 @@ internal static class ProcessObservationAdapterFactory
             FieldStates = BuildFieldStates(record),
             Fields = record
         };
+        if (bindObservationContent)
+        {
+            // Live lifecycle timestamps may remain the process start/end time while
+            // enrichment changes its fields. Bind the observation, not the entity,
+            // to the complete normalized immutable content; exact replay stays stable.
+            observation.ObservationId = CreateStableId("pobs", observationId,
+                JsonSerializer.Serialize(observation));
+        }
         if (statistics != null)
         {
             ApplyIdentity(statistics, identity, adapterId);

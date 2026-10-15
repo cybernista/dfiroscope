@@ -1,0 +1,12 @@
+<UserControl x:Class="ProcInsider.Views.Features.Ai.AiPromptInspectorView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:ai="clr-namespace:ProcInsider.Views.Features.Ai">
+ <StackPanel Margin="0,5,0,0">
+  <TextBlock x:Name="LoadStatus" TextWrapping="Wrap" Foreground="#805000"/>
+  <TextBlock Text="Exact provider request body. Authentication headers are excluded; submission does not confirm delivery." TextWrapping="Wrap" Foreground="#666666" FontSize="11"/>
+  <ComboBox x:Name="Requests" ItemsSource="{Binding PromptRequests}" DisplayMemberPath="Iteration" SelectedIndex="0" Margin="0,4,0,4"/>
+  <TextBox x:Name="RequestBody" Text="{Binding SelectedItem.RequestBody, ElementName=Requests, Mode=OneWay}" IsReadOnly="True"
+           FontFamily="Consolas" FontSize="11" TextWrapping="NoWrap" MinHeight="90" MaxHeight="180" VerticalScrollBarVisibility="Auto"
+           HorizontalScrollBarVisibility="Auto" ai:AiConversationInteraction.PassMouseWheelToTranscript="True"/>
+ </StackPanel>
+</UserControl>

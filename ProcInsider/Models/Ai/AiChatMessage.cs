@@ -35,25 +35,7 @@ public sealed class AiChatMessage
         : $"{ProviderName} / {ModelName}";
 }
 
-public sealed class AiChatCompletionResult
-{
-    public bool Success { get; init; }
-
-    public AiProviderKind ProviderKind { get; init; } = AiProviderKind.Disabled;
-
-    public string ProviderName { get; init; } = string.Empty;
-
-    public string BaseUrl { get; init; } = string.Empty;
-
-    public string ModelName { get; init; } = string.Empty;
-
-    public string ResponseText { get; init; } = string.Empty;
-
-    public string ErrorText { get; init; } = string.Empty;
-
-    public int? PromptTokens { get; init; }
-
-    public int? CompletionTokens { get; init; }
-
-    public int? TotalTokens { get; init; }
-}
+public sealed record AiChatHistoryPage(
+    IReadOnlyList<AiChatMessage> Messages,
+    int EligibleCount,
+    int DiagnosticCount);

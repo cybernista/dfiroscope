@@ -1,8 +1,10 @@
 using ProcInsider.Models.Agent;
+using ProcInsider.Models;
 using ProcInsider.Models.Infrastructure;
 using ProcInsider.Services;
 using ProcInsider.Services.Features;
 using ProcInsider.Services.Infrastructure;
+using ProcInsider.Services.AgentIpc;
 
 namespace ProcInsider.Agent;
 
@@ -43,6 +45,8 @@ internal sealed record AgentOptions
 
     /// <summary>Runs the exact-host five-source validation against a disposable, Agent-only release catalog.</summary>
     public bool ForegroundFiveSourceValidationSmoke { get; init; }
+    public bool ForegroundPersistenceValidationSmoke { get; init; }
+    public bool ForegroundPersistenceValidationResume { get; init; }
 
     public bool StartCaptureOnLaunch { get; init; }
 
@@ -66,6 +70,16 @@ internal sealed record AgentOptions
         for (var index = 0; index < args.Length; index++)
         {
             var arg = args[index];
+            if (IsOption(arg, "--foreground-persistence-validation-resume"))
+            {
+                options = options with { ForegroundPersistenceValidationResume = true };
+                continue;
+            }
+            if (IsOption(arg, "--foreground-persistence-validation-smoke"))
+            {
+                options = options with { ForegroundPersistenceValidationSmoke = true };
+                continue;
+            }
             if (IsOption(arg, "--foreground", "-f"))
             {
                 options = options with { Foreground = true };
@@ -489,6 +503,22 @@ internal sealed record AgentOptions
             throw new ArgumentException($"Unknown argument: {arg}");
         }
 
+        if (options.ForegroundPersistenceValidationResume &&
+            (!options.Foreground || options.HostMode != AgentHostMode.Interactive || options.ForegroundPersistenceValidationSmoke ||
+             options.ForegroundEvidenceActionSmoke || options.ForegroundMemoryAcquisitionSmoke || options.ForegroundFiveSourceValidationSmoke ||
+             options.SelfTest || options.CheckIpc || options.IpcStressTest || options.ShowHelp || options.CaptureSealed || options.StartCaptureOnLaunch ||
+             options.PreparedPairingGeneration.HasValue ||
+             !IsPersistenceResumeDatabase(options.DatabasePath)))
+            throw new ArgumentException("Persistence validation resume requires an existing ordinary issue-739-persistence-* Results capture, without other modes.");
+
+        if (options.ForegroundPersistenceValidationSmoke &&
+            (!options.Foreground || options.HostMode != AgentHostMode.Interactive || options.ForegroundEvidenceActionSmoke ||
+             options.ForegroundMemoryAcquisitionSmoke || options.ForegroundFiveSourceValidationSmoke || options.SelfTest ||
+             options.CheckIpc || options.IpcStressTest || options.CaptureSealed || options.StartCaptureOnLaunch ||
+             options.PreparedPairingGeneration.HasValue ||
+             !IsPersistenceValidationDatabase(options.DatabasePath)))
+            throw new ArgumentException("Persistence validation requires foreground mode and an explicit disposable non-reparse issue-739-persistence-* Results session, without other modes.");
+
         if (options.CaptureSealed && options.StartCaptureOnLaunch)
         {
             throw new ArgumentException("--capture-sealed cannot be combined with --start-capture.");
@@ -570,6 +600,8 @@ internal sealed record AgentOptions
 
     public AgentOptions ResolveSessionPaths()
     {
+        if (ForegroundPersistenceValidationResume)
+            return ResolvePersistenceValidationResume(Environment.ProcessPath ?? throw new InvalidOperationException("The Agent executable path is unavailable."));
         if (!string.IsNullOrWhiteSpace(DatabasePath))
         {
             var manifestPath = Path.Combine(
@@ -729,6 +761,59 @@ internal sealed record AgentOptions
         }
     }
 
+    internal AgentOptions ResolvePersistenceValidationResume(string agentExecutablePath)
+    {
+        if (!ForegroundPersistenceValidationResume || !IsPersistenceResumeDatabase(DatabasePath))
+            throw new InvalidDataException("Persistence resume requires an existing ordinary validation package.");
+        var manifest = Path.Combine(Path.GetDirectoryName(DatabasePath)!, SessionPathService.CapturePackageManifestFileName);
+        var package = SessionPathService.InspectCapturePackage(manifest, CaptureOpenContext.AgentWritableLive, SqliteEvidenceMigrationRunner.AssessExistingDatabase);
+        if (!package.HasLiveDatabase || package.CompatibilityAssessment.State != CaptureCompatibilityState.CompatibleCurrent ||
+            !package.CompatibilityAssessment.Allows(CaptureOpenCapability.WritePrimaryEvidence) ||
+            !string.Equals(Path.GetFullPath(package.LiveDatabasePath), Path.GetFullPath(DatabasePath), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Persistence resume requires a compatible current writable live database recorded by its manifest.");
+        var paths = SessionPathService.OpenExistingCapturePackage(manifest, CaptureOpenContext.AgentWritableLive, SqliteEvidenceMigrationRunner.AssessExistingDatabase);
+        var executable = Path.GetFullPath(agentExecutablePath);
+        var lease = new AgentPairingStore(paths).ReadLease();
+        if (lease == null || lease.State != AgentPairingState.AgentExited || lease.PairingGeneration <= 0 ||
+            lease.PairingContractVersion != AgentContracts.PairingContractVersion || lease.IpcContractVersion != AgentContracts.ContractVersion ||
+            lease.SessionId != paths.SessionId || package.SessionId != paths.SessionId || paths.SessionId != Path.GetFileName(paths.SessionRoot) ||
+            !string.Equals(lease.DatabaseIdentity, SessionPathService.NormalizeLiveDatabaseIdentity(paths.LiveDatabasePath), StringComparison.OrdinalIgnoreCase) ||
+            lease.ReleaseId != $"{CurrentEducationalReleaseProfile.Catalog.ReleaseId}-persistence-validation" ||
+            lease.WorkspaceMode != CaptureWorkspaceMode.LiveCapture || lease.CaptureSealed ||
+            !string.Equals(Path.GetFileName(executable), "DFIRoscope.Agent.exe", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(lease.ExecutableName, "DFIRoscope.Agent.exe", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(lease.ExecutablePath, executable, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Persistence resume requires the exact exited validation Agent lease for this live package and executable generation.");
+        // Metadata is admission only. AgentHost adopts the current-user DPAPI secret before acquiring the writer.
+        return this with { DatabasePath = paths.LiveDatabasePath, SessionPaths = paths, PreparedPairingGeneration = lease.PairingGeneration };
+    }
+
+    private static bool IsPersistenceResumeDatabase(string databasePath)
+    {
+        if (string.IsNullOrWhiteSpace(databasePath)) return false;
+        try
+        {
+            var full = Path.GetFullPath(databasePath);
+            var session = Path.GetDirectoryName(full);
+            if (session == null || !Path.GetFileName(session).StartsWith("issue-739-persistence-", StringComparison.Ordinal) ||
+                !string.Equals(Path.GetDirectoryName(session), @"C:\DFIRoscope\Results", StringComparison.OrdinalIgnoreCase) ||
+                Path.GetFileName(full) != "procinsider-live.sqlite3") return false;
+            for (var directory = new DirectoryInfo(session); directory != null; directory = directory.Parent)
+                if (!directory.Exists || (directory.Attributes & FileAttributes.ReparsePoint) != 0) return false;
+            foreach (var file in new[] { full, Path.Combine(session, SessionPathService.CapturePackageManifestFileName), full + "-wal", full + "-shm" })
+            {
+                if (Directory.Exists(file)) return false;
+                if (File.Exists(file))
+                {
+                    if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0) return false;
+                }
+                else if (file == full || Path.GetFileName(file) == SessionPathService.CapturePackageManifestFileName) return false;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException) { return false; }
+    }
+
     private static bool IsFiveSourceValidationDatabase(string? databasePath)
     {
         if (string.IsNullOrWhiteSpace(databasePath))
@@ -760,6 +845,24 @@ internal sealed record AgentOptions
         {
             return false;
         }
+    }
+
+    private static bool IsPersistenceValidationDatabase(string databasePath)
+    {
+        if (string.IsNullOrWhiteSpace(databasePath)) return false;
+        try
+        {
+            var session = Path.GetDirectoryName(Path.GetFullPath(databasePath));
+            if (session == null || !Path.GetFileName(session).StartsWith("issue-739-persistence-", StringComparison.Ordinal) ||
+                !string.Equals(Path.GetDirectoryName(session), @"C:\DFIRoscope\Results", StringComparison.OrdinalIgnoreCase) ||
+                Path.GetFileName(databasePath) != "procinsider-live.sqlite3") return false;
+            for (var directory = new DirectoryInfo(session); directory != null; directory = directory.Parent)
+                if (!directory.Exists || (directory.Attributes & FileAttributes.ReparsePoint) != 0) return false;
+            // The validation catalog may only bootstrap a fresh disposable capture.
+            // Existing files (including reparse database targets/manifests) never qualify.
+            return !Directory.EnumerateFileSystemEntries(session).Any();
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException) { return false; }
     }
 
     private static bool IsOption(string value, params string[] names)

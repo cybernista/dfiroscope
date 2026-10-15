@@ -143,7 +143,7 @@ public sealed class LocalAgentSetupCoordinator
 
         if (!captureSaved)
         {
-            partialFailures.Add("capture configuration was not saved");
+            partialFailures.Add("capture setup was not confirmed (configuration or explicit Agent run duration)");
         }
         else if (request.HasSelectedCaptureSources)
         {

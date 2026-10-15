@@ -62,6 +62,8 @@ internal sealed class AgentJobQueue : IAsyncDisposable
     private string _acquisitionGapDetail = string.Empty;
     private bool _acceptingJobs = true;
     private int _activeEnqueues;
+    private bool _persistenceLifecycleReserved;
+    private Task _persistenceLifecycleTask = Task.CompletedTask;
 
     public AgentJobQueue(AgentStagingWriter writer, IAgentJobHandler handler, AgentWorkerOptions options, TextWriter log, AgentArtifactEnrichmentStatistics artifactEnrichmentStatistics)
     {
@@ -96,6 +98,7 @@ internal sealed class AgentJobQueue : IAsyncDisposable
             QueuedJobCount = Math.Max(0, Volatile.Read(ref _queuedJobCount)),
             PeakQueuedJobCount = Math.Max(0, Volatile.Read(ref _peakQueuedJobCount)),
             RunningJobCount = Math.Max(0, Volatile.Read(ref _runningJobCount)),
+            PersistenceLifecycleJobCount = _persistenceLifecycleReserved ? 1 : 0,
             CompletedJobCount = Math.Max(0, Volatile.Read(ref _completedJobCount)),
             RejectedJobCount = Math.Max(0, Volatile.Read(ref _rejectedJobCount)),
             KnownJobCount = KnownJobCount,
@@ -169,10 +172,22 @@ internal sealed class AgentJobQueue : IAsyncDisposable
     public async ValueTask<Guid> EnqueueAsync(AgentJobRequest request, CancellationToken cancellationToken)
     {
         EnterEnqueue();
+        var reservedLifecycle = false;
+        var dispatchedLifecycle = false;
         try
         {
+            if (request.JobKind == JobKind.PersistenceCapture)
+            {
+                lock (_enqueueLifecycleLock)
+                {
+                    if (_persistenceLifecycleReserved) throw new InvalidOperationException("Persistence capture lifecycle is already active.");
+                    _persistenceLifecycleReserved = reservedLifecycle = true;
+                }
+            }
             ThrowIfAutomaticConfiguredCaptureIsStopping(request);
             var sourceRun = await _writer.CreateSourceRunAsync(request, cancellationToken).ConfigureAwait(false);
+            if (request.JobKind is JobKind.LiveCapture or JobKind.PersistenceCapture or JobKind.PersistenceCollection or JobKind.PrefetchCollection)
+                request = request with { EvidenceIdentity = sourceRun.ResolvedEvidenceIdentity ?? throw new InvalidDataException("This collection requires canonical registered source scope.") };
             await _writer.CreateJobAsync(request, sourceRun, cancellationToken).ConfigureAwait(false);
             try
             {
@@ -206,7 +221,12 @@ internal sealed class AgentJobQueue : IAsyncDisposable
             UpdateQueuedJobCount(Interlocked.Increment(ref _queuedJobCount));
             try
             {
-                if (!_queue.Writer.TryWrite(queuedJob))
+                if (reservedLifecycle)
+                {
+                    _persistenceLifecycleTask = RunPersistenceLifecycleAsync(queuedJob);
+                    dispatchedLifecycle = true;
+                }
+                else if (!_queue.Writer.TryWrite(queuedJob))
                 {
                     await RejectSaturatedJobAsync(request, sourceRun.SourceRunId, cancellationToken).ConfigureAwait(false);
                     throw new AgentQueueSaturatedException(
@@ -228,8 +248,16 @@ internal sealed class AgentJobQueue : IAsyncDisposable
         }
         finally
         {
+            if (reservedLifecycle && !dispatchedLifecycle)
+                lock (_enqueueLifecycleLock) _persistenceLifecycleReserved = false;
             ExitEnqueue();
         }
+    }
+
+    private async Task RunPersistenceLifecycleAsync(QueuedJob job)
+    {
+        try { await RunJobAsync(job, workerId: 0).ConfigureAwait(false); }
+        finally { lock (_enqueueLifecycleLock) _persistenceLifecycleReserved = false; }
     }
 
     public async Task DrainAcceptedWorkAsync(CancellationToken cancellationToken)
@@ -245,11 +273,16 @@ internal sealed class AgentJobQueue : IAsyncDisposable
             enqueuesDrained = _enqueuesDrained.Task;
         }
         await enqueuesDrained.WaitAsync(cancellationToken).ConfigureAwait(false);
+        Guid[] schedulingJobs;
+        lock (_controlLock) schedulingJobs = _activeWork.Values.Where(entry => entry.Request.JobKind == JobKind.PersistenceCapture)
+            .Select(entry => entry.Request.JobId).ToArray();
+        foreach (var jobId in schedulingJobs) await CancelJobAsync(jobId, cancellationToken).ConfigureAwait(false);
         var accepted = _jobCompletions.Values.Select(completion => completion.Task).ToArray();
         if (accepted.Length != 0)
         {
             await Task.WhenAll(accepted).WaitAsync(cancellationToken).ConfigureAwait(false);
         }
+        await _persistenceLifecycleTask.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private void EnterEnqueue()
@@ -566,6 +599,10 @@ internal sealed class AgentJobQueue : IAsyncDisposable
             await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
+    internal bool HasJobCompleted(Guid jobId) => _jobCompletions.TryGetValue(jobId, out var completion)
+        ? completion.Task.IsCompleted
+        : _jobStatuses.TryGetValue(jobId, out var status) && status.State is JobState.Completed or JobState.Failed or JobState.Cancelled &&
+            !_queuedJobs.ContainsKey(jobId) && !_runningJobs.ContainsKey(jobId);
 
     public async ValueTask CancelJobAsync(Guid jobId, CancellationToken cancellationToken)
     {
@@ -623,8 +660,13 @@ internal sealed class AgentJobQueue : IAsyncDisposable
         }
     }
 
+    private int _shutdownStarted;
+    private int _shutdownDrainFailed;
+    internal bool ShutdownDrainFailed => Volatile.Read(ref _shutdownDrainFailed) != 0;
+
     public async ValueTask DisposeAsync()
     {
+        Interlocked.Exchange(ref _shutdownStarted, 1);
         Task enqueuesDrained;
         lock (_enqueueLifecycleLock)
         {
@@ -637,38 +679,48 @@ internal sealed class AgentJobQueue : IAsyncDisposable
         }
         await enqueuesDrained.ConfigureAwait(false);
         _queue.Writer.TryComplete();
-        foreach (var queuedJob in _queuedJobs.Values)
-        {
-            _cancelRequested.TryAdd(queuedJob.Request.JobId, 0);
-            await _writer.UpdateJobAsync(
-                queuedJob.Request.JobId,
-                JobState.Cancelled,
-                0,
-                -1,
-                "Canceled during agent shutdown.",
-                null,
-                CancellationToken.None,
-                advancesDatabaseChangeCursor: AdvancesDatabaseChangeCursor(queuedJob.Request)).ConfigureAwait(false);
-            PublishProgress(queuedJob.Request, JobState.Cancelled, 0, -1, "Canceled during agent shutdown.");
-            MarkCompleted(queuedJob.Request.JobId);
-        }
-
-        _queuedJobs.Clear();
-        Interlocked.Exchange(ref _queuedJobCount, 0);
-
-        foreach (var cancellation in _runningJobs.Values)
-        {
-            cancellation.Cancel();
-        }
-
         try
         {
-            await Task.WhenAll(_workers).ConfigureAwait(false);
+            foreach (var queuedJob in _queuedJobs.Values)
+            {
+                _cancelRequested.TryAdd(queuedJob.Request.JobId, 0);
+                await _writer.UpdateJobAsync(
+                    queuedJob.Request.JobId,
+                    JobState.Cancelled,
+                    0,
+                    -1,
+                    "Canceled during agent shutdown.",
+                    null,
+                    CancellationToken.None,
+                    advancesDatabaseChangeCursor: AdvancesDatabaseChangeCursor(queuedJob.Request)).ConfigureAwait(false);
+                PublishProgress(queuedJob.Request, JobState.Cancelled, 0, -1, "Canceled during agent shutdown.");
+                MarkCompleted(queuedJob.Request.JobId);
+            }
+
+            _queuedJobs.Clear();
+            Interlocked.Exchange(ref _queuedJobCount, 0);
+        }
+        catch
+        {
+            Interlocked.Exchange(ref _shutdownDrainFailed, 1);
+            throw;
         }
         finally
         {
-            _shutdown.Cancel();
-            _shutdown.Dispose();
+            foreach (var cancellation in _runningJobs.Values)
+            {
+                try { cancellation.Cancel(); }
+                catch (ObjectDisposedException) { /* A worker already completed and disposed this snapshotted source. */ }
+            }
+            try
+            {
+                await Task.WhenAll(_workers.Append(_persistenceLifecycleTask)).ConfigureAwait(false);
+            }
+            finally
+            {
+                _shutdown.Cancel();
+                _shutdown.Dispose();
+            }
         }
     }
 
@@ -702,17 +754,31 @@ internal sealed class AgentJobQueue : IAsyncDisposable
             Interlocked.Decrement(ref _queuedJobCount);
         }
 
-        if (_cancelRequested.TryRemove(request.JobId, out _))
+        // Registration precedes this check: shutdown either cancels this registered job or
+        // the worker observes shutdown itself, even when a queued terminal write failed.
+        if (Volatile.Read(ref _shutdownStarted) != 0) jobCancellation.Cancel();
+        if (_cancelRequested.TryRemove(request.JobId, out _) || jobCancellation.IsCancellationRequested)
         {
-            await _writer.UpdateJobAsync(
-                request.JobId, JobState.Cancelled, 0, -1, "Canceled before start.", null, CancellationToken.None,
-                advancesDatabaseChangeCursor).ConfigureAwait(false);
-            await _writer.UpdateSourceRunStatusAsync(
-                queuedJob.SourceRunId, "Stopped", DateTime.UtcNow, null, CancellationToken.None,
-                advancesDatabaseChangeCursor).ConfigureAwait(false);
-            PublishProgress(request, JobState.Cancelled, 0, -1, "Canceled before start.");
-            _runningJobs.TryRemove(request.JobId, out _);
-            MarkCompleted(request.JobId);
+            try
+            {
+                await _writer.UpdateJobAsync(
+                    request.JobId, JobState.Cancelled, 0, -1, "Canceled before start.", null, CancellationToken.None,
+                    advancesDatabaseChangeCursor).ConfigureAwait(false);
+                await _writer.UpdateSourceRunStatusAsync(
+                    queuedJob.SourceRunId, "Stopped", DateTime.UtcNow, null, CancellationToken.None,
+                    advancesDatabaseChangeCursor).ConfigureAwait(false);
+                PublishProgress(request, JobState.Cancelled, 0, -1, "Canceled before start.");
+            }
+            catch
+            {
+                if (Volatile.Read(ref _shutdownStarted) != 0) Interlocked.Exchange(ref _shutdownDrainFailed, 1);
+                throw;
+            }
+            finally
+            {
+                _runningJobs.TryRemove(request.JobId, out _);
+                MarkCompleted(request.JobId);
+            }
             return;
         }
 
@@ -721,6 +787,7 @@ internal sealed class AgentJobQueue : IAsyncDisposable
         long total = -1;
         AgentSqliteBenchmarkResult? sqliteBenchmark = null;
         AgentMemoryActionResult? memoryAction = null;
+        AgentJobContext? jobContext = null;
         var lastPeProgressMessage = string.Empty;
 
         try
@@ -730,7 +797,7 @@ internal sealed class AgentJobQueue : IAsyncDisposable
                 advancesDatabaseChangeCursor).ConfigureAwait(false);
             PublishProgress(request, JobState.Queued, 0, -1, "Waiting for an available worker/policy slot.");
             lease = await _concurrency.AcquireAsync(request, jobCancellation.Token).ConfigureAwait(false);
-            Interlocked.Increment(ref _runningJobCount);
+            if (request.JobKind != JobKind.PersistenceCapture) Interlocked.Increment(ref _runningJobCount);
             await _writer.UpdateJobAsync(
                 request.JobId, JobState.Running, 0, -1, "Running.", null, CancellationToken.None,
                 advancesDatabaseChangeCursor).ConfigureAwait(false);
@@ -739,7 +806,7 @@ internal sealed class AgentJobQueue : IAsyncDisposable
                 advancesDatabaseChangeCursor).ConfigureAwait(false);
             PublishProgress(request, JobState.Running, 0, -1, "Running.");
             _log.WriteLine($"[{DateTimeOffset.Now:O}] Worker {workerId} running {request.JobKind} job {request.JobId}.");
-            var context = new AgentJobContext(
+            jobContext = new AgentJobContext(
                 request,
                 queuedJob.SourceId,
                 queuedJob.SourceRunId,
@@ -796,7 +863,8 @@ internal sealed class AgentJobQueue : IAsyncDisposable
 
             using (_writer.BeginSourceRunScope(queuedJob.SourceRunId, request.JobId))
             {
-                await _handler.ExecuteAsync(context).ConfigureAwait(false);
+                jobCancellation.Token.ThrowIfCancellationRequested();
+                await _handler.ExecuteAsync(jobContext).ConfigureAwait(false);
             }
             var completedMessage = BuildPeTerminalMessage("Completed.", lastPeProgressMessage);
             await _writer.UpdateJobAsync(
@@ -804,9 +872,9 @@ internal sealed class AgentJobQueue : IAsyncDisposable
                 advancesDatabaseChangeCursor).ConfigureAwait(false);
             await _writer.UpdateSourceRunStatusAsync(
                 queuedJob.SourceRunId,
-                context.SourceRunCompletionStatus,
+                jobContext.SourceRunCompletionStatus,
                 DateTime.UtcNow,
-                context.SourceRunCompletionMetadataJson,
+                jobContext.SourceRunCompletionMetadataJson,
                 CancellationToken.None,
                 advancesDatabaseChangeCursor).ConfigureAwait(false);
             PublishProgress(
@@ -826,7 +894,7 @@ internal sealed class AgentJobQueue : IAsyncDisposable
                 request.JobId, JobState.Cancelled, current, total, cancelledMessage, null, CancellationToken.None,
                 advancesDatabaseChangeCursor).ConfigureAwait(false);
             await _writer.UpdateSourceRunStatusAsync(
-                queuedJob.SourceRunId, "Stopped", DateTime.UtcNow, null, CancellationToken.None,
+                queuedJob.SourceRunId, "Stopped", DateTime.UtcNow, jobContext?.SourceRunCompletionMetadataJson, CancellationToken.None,
                 advancesDatabaseChangeCursor).ConfigureAwait(false);
             PublishProgress(
                 request,
@@ -840,12 +908,13 @@ internal sealed class AgentJobQueue : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            if (Volatile.Read(ref _shutdownStarted) != 0) Interlocked.Exchange(ref _shutdownDrainFailed, 1);
             var failedMessage = BuildPeTerminalMessage("Failed.", lastPeProgressMessage);
             await _writer.UpdateJobAsync(
                 request.JobId, JobState.Failed, current, total, failedMessage, ex.Message, CancellationToken.None,
                 advancesDatabaseChangeCursor).ConfigureAwait(false);
             await _writer.UpdateSourceRunStatusAsync(
-                queuedJob.SourceRunId, "Error", DateTime.UtcNow, ex.Message, CancellationToken.None,
+                queuedJob.SourceRunId, "Error", DateTime.UtcNow, jobContext?.SourceRunCompletionMetadataJson ?? ex.Message, CancellationToken.None,
                 advancesDatabaseChangeCursor).ConfigureAwait(false);
             PublishProgress(
                 request,
@@ -865,7 +934,7 @@ internal sealed class AgentJobQueue : IAsyncDisposable
             _runningJobs.TryRemove(request.JobId, out _);
             if (lease is not null)
             {
-                Interlocked.Decrement(ref _runningJobCount);
+                if (request.JobKind != JobKind.PersistenceCapture) Interlocked.Decrement(ref _runningJobCount);
             }
 
             MarkCompleted(request.JobId);

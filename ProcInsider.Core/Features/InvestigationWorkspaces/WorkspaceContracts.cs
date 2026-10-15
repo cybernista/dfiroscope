@@ -6,7 +6,11 @@ namespace ProcInsider.Models.InvestigationWorkspaces;
 internal readonly record struct WorkspaceTypeId(string Value)
 {
     public static WorkspaceTypeId Processes => new("processes");
+    public static WorkspaceTypeId Network => new("network");
     public static WorkspaceTypeId Events => new("events");
+    public static WorkspaceTypeId Persistence => new("persistence");
+    public static WorkspaceTypeId Artifacts => new("artifacts");
+    public static WorkspaceTypeId Ai => new("ai");
 }
 
 internal readonly record struct WorkspaceInstanceId(Guid Value)

@@ -19,15 +19,17 @@ internal sealed class AgentConfiguredCapturePauseCoordinator
     private readonly AgentJobQueue _jobQueue;
     private readonly AgentLiveCaptureJobHandler _liveCapture;
     private readonly AgentNetworkCaptureJobHandler _networkCapture;
+    private readonly AgentPersistenceCaptureWorkflow? _persistence;
 
     public AgentConfiguredCapturePauseCoordinator(
         AgentJobQueue jobQueue,
         AgentLiveCaptureJobHandler liveCapture,
-        AgentNetworkCaptureJobHandler networkCapture)
+        AgentNetworkCaptureJobHandler networkCapture, AgentPersistenceCaptureWorkflow? persistence = null)
     {
         _jobQueue = jobQueue;
         _liveCapture = liveCapture;
         _networkCapture = networkCapture;
+        _persistence = persistence;
     }
 
     public Task<AgentConfiguredCapturePauseResult> PauseAsync(
@@ -153,6 +155,9 @@ internal sealed class AgentConfiguredCapturePauseCoordinator
             JobKind.NetworkCapture => pause
                 ? _networkCapture.RequestPauseAsync(work.JobId, cancellationToken)
                 : _networkCapture.RequestResumeAsync(work.JobId, cancellationToken),
+            JobKind.PersistenceCapture => _persistence == null ? Task.FromResult(false) : pause
+                ? _persistence.RequestPauseAsync(work.JobId, cancellationToken)
+                : _persistence.RequestResumeAsync(work.JobId, cancellationToken),
             _ => Task.FromResult(false)
         };
 }

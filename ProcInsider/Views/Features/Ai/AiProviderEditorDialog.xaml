@@ -1,0 +1,59 @@
+<Window x:Class="ProcInsider.Views.Features.Ai.AiProviderEditorDialog"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="{Binding EditorHeading}" Width="660" Height="650" MinWidth="520" MinHeight="400" WindowStartupLocation="CenterOwner">
+ <Window.Resources>
+  <BooleanToVisibilityConverter x:Key="EditingVisibility"/>
+  <Style x:Key="ProviderRequestAction" TargetType="Button">
+   <Setter Property="IsEnabled" Value="True"/>
+   <Style.Triggers><DataTrigger Binding="{Binding IsBusy}" Value="True"><Setter Property="IsEnabled" Value="False"/></DataTrigger></Style.Triggers>
+  </Style>
+ </Window.Resources>
+ <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="16">
+ <TextBlock Text="{Binding EditorHeading}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                    <WrapPanel Margin="0,0,0,5">
+                        <TextBlock Text="Name" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBox Width="160" Text="{Binding ProfileName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
+                        <TextBlock Text="Type" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <ComboBox Width="160" ItemsSource="{Binding ProviderOptions}" SelectedItem="{Binding SelectedProviderOption}"
+                                  DisplayMemberPath="DisplayName" Margin="0,0,12,0"/>
+
+                    </WrapPanel>
+                    <WrapPanel Margin="0,0,0,5">
+                        <TextBlock Text="Endpoint" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBox Width="360" Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
+                        <TextBlock Text="Timeout (seconds)" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBox Width="65" Text="{Binding TimeoutSeconds}"/>
+                    </WrapPanel>
+                    <WrapPanel Visibility="{Binding IsEditing, Converter={StaticResource EditingVisibility}}" Margin="0,0,0,5">
+                        <TextBlock Text="Context tokens" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBox Width="70" Text="{Binding ContextWindowTokens, TargetNullValue=''}" Margin="0,0,12,0"/>
+                        <TextBlock Text="Output tokens" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBox Width="70" Text="{Binding MaximumOutputTokens, TargetNullValue=''}" Margin="0,0,12,0"/>
+                        <CheckBox Content="Native tools" IsThreeState="True" IsChecked="{Binding SupportsTools}" Margin="0,0,12,0"/>
+                        <CheckBox Content="Native structured output" IsThreeState="True" IsChecked="{Binding SupportsStructuredOutput}"/>
+                    </WrapPanel>
+                    <CheckBox Content="Allow HTTP on a private network for this session"
+                              IsChecked="{Binding AllowPrivateNetworkHttp}" Margin="0,0,0,5"
+                              ToolTip="Local providers at private IP addresses only. Traffic is unencrypted; API keys are prohibited."/>
+                    <TextBlock Text="{Binding PrivacyWarning}" TextWrapping="Wrap" Foreground="#805000"/>
+
+ <TextBlock Text="OpenAI compatible supports LM Studio (http://localhost:1234/v1) and Ollama (http://localhost:11434/v1). Discovery lists server/account visibility; not every model supports investigative chat or tools." TextWrapping="Wrap" Margin="0,8"/>
+ <TextBlock Text="API key (leave empty to use this endpoint's saved key)"/>
+ <PasswordBox x:Name="ApiKeyInput" Margin="0,4,0,8" PasswordChanged="ApiKeyChanged"/>
+ <TextBlock Text="New keystore password (first key or legacy migration only)"/>
+ <PasswordBox x:Name="FirstPasswordInput" Margin="0,4,0,8"/>
+ <TextBlock Visibility="{Binding IsEditing, Converter={StaticResource EditingVisibility}}" Text="Load models uses the entered or saved key for this endpoint. Saved keys are never displayed. Entries are cleared after Save, destination change or closing." TextWrapping="Wrap"/>
+ <StackPanel Visibility="{Binding IsEditing, Converter={StaticResource EditingVisibility}}">
+ <Button x:Name="LoadModelsButton" Style="{StaticResource ProviderRequestAction}" Content="Load / Refresh models" Click="LoadModelsClicked" HorizontalAlignment="Left" Padding="8,4" Margin="0,10,0,6"/>
+ <TextBlock Text="Model"/>
+ <ComboBox x:Name="ModelSelection" IsEditable="False" ItemsSource="{Binding ModelOptions}" SelectedItem="{Binding ModelName, Mode=TwoWay}" Margin="0,4,0,6"/>
+ <TextBlock Text="{Binding ModelCatalogStatus}" TextWrapping="Wrap"/>
+ </StackPanel>
+ <TextBlock Text="{Binding ProviderStatusDisplay}" TextWrapping="Wrap" Margin="0,8"/>
+ <WrapPanel><Button x:Name="SaveProviderButton" Style="{StaticResource ProviderRequestAction}" Content="Save provider" Click="SaveClicked" Padding="8,4" Margin="0,0,8,0"/>
+ <Button x:Name="TestConnectionButton" Style="{StaticResource ProviderRequestAction}" Content="Test connection" Click="TestClicked" Padding="8,4" Margin="0,0,8,0"/>
+ <Button Content="Clear saved key" Command="{Binding ClearApiKeyCommand}" Padding="8,4" Margin="0,0,8,0"/>
+ <Button Content="Cancel" IsCancel="True" Padding="8,4"/></WrapPanel>
+ <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#805000" Margin="0,8"/>
+ </StackPanel></ScrollViewer>
+</Window>

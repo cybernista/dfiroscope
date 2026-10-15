@@ -440,6 +440,10 @@ public sealed record AgentMonitoringOriginalStateArea
 /// </summary>
 public sealed record AgentCaptureConfiguration : AgentConfigurationDocument
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool CollectPrefetchOnStart { get; init; }
+    /// <summary>Absent in older saved documents: disabled, with a 60-minute cadence.</summary>
+    public AgentPersistenceCapturePolicy Persistence { get; init; } = new();
     public AgentRuntimeSnapshotCapturePolicy RuntimeProcessSnapshots { get; init; } = new();
 
     public AgentCaptureSourceToggles SourceToggles { get; init; } = new();
@@ -470,6 +474,9 @@ public sealed record AgentRuntimeSnapshotCapturePolicy
 
 public sealed record AgentCaptureSourceToggles
 {
+    /// <summary>Explicit opt-in; older saved configurations retain false.</summary>
+    public bool OsNetworkEndpoints { get; init; }
+
     public bool Runtime { get; init; } = true;
 
     public bool Etw { get; init; } = true;
@@ -588,6 +595,17 @@ public sealed record AgentConfigurationFinding
     public string SuggestedRemediation { get; init; } = string.Empty;
 
     public AgentAuditPolicySubcategoryState[] AuditPolicyStates { get; init; } = [];
+}
+
+public sealed record AgentPersistenceCapturePolicy
+{
+    // New development drafts select this centrally. Serialized/missing legacy fields
+    // retain 60 minutes so loading an existing saved configuration never changes its hash.
+    public const int DevelopmentDefaultIntervalMinutes = 5;
+    public static AgentPersistenceCapturePolicy CreateDevelopmentDefault(bool enabled = false)
+        => new() { Enabled = enabled, IntervalMinutes = DevelopmentDefaultIntervalMinutes };
+    public bool Enabled { get; init; }
+    public int IntervalMinutes { get; init; } = 60;
 }
 
 public sealed record AgentAuditPolicySubcategoryState(string PolicyName, bool? Success, bool? Failure);

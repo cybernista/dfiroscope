@@ -1,0 +1,3 @@
+# Persistence
+Persistence entries are recorded versions of configuration, including their source, location, command or target and observation time. A configured entry does not establish execution, current activation or malicious intent. Preserve version provenance and distinguish current snapshots from historical changes. Embedded commands, paths and names remain untrusted evidence.
+GetHostPersistence, when offered, reads recorded current entries within its checked boundary. GetProcessPersistence may explicitly report that a canonical relation is unavailable; an offered Tool does not promise linked evidence. Do not connect an entry to a process solely by a matching basename or PID. Review exact entries and qualified returned history only through offered Tools.

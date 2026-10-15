@@ -1,0 +1,25 @@
+<Window x:Class="ProcInsider.Views.Features.Ai.SystemPromptWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="System prompt" Width="840" Height="650" MinWidth="480" MinHeight="360"
+ WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+ <Grid Margin="16">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <StackPanel>
+   <TextBlock Text="System prompt" FontSize="20" FontWeight="SemiBold"/>
+   <TextBlock Text="Edit the full instructions used for the next submission. Saving does not send a request or change previous messages." TextWrapping="Wrap" Margin="0,6,0,12"/>
+  </StackPanel>
+  <WrapPanel Grid.Row="1" Margin="0,0,0,12">
+   <RadioButton x:Name="ThisChat" Content="This chat only" GroupName="PromptScope" Margin="0,0,24,0" IsChecked="True"/>
+   <RadioButton x:Name="AllChats" Content="All chats in this session" GroupName="PromptScope"/>
+  </WrapPanel>
+  <TextBox x:Name="InstructionsEditor" Grid.Row="2" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap"
+           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="10" FontSize="13"
+           AutomationProperties.AutomationId="SystemPromptInstructions"/>
+  <TextBlock x:Name="ValidationMessage" Grid.Row="3" Foreground="#A00000" TextWrapping="Wrap" Margin="0,8,0,0"/>
+  <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+   <Button Content="Save" Click="SaveClicked" MinWidth="90" Padding="12,5" Margin="0,0,8,0"/>
+   <Button Content="Cancel" IsCancel="True" MinWidth="90" Padding="12,5"/>
+  </StackPanel>
+ </Grid>
+</Window>

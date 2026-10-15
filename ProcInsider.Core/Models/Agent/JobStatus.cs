@@ -101,4 +101,7 @@ public enum JobKind
     SqliteBenchmark = 14,
     PeAnalysis = 15,
     MemoryAcquisition = 16,
+    PersistenceCapture = 17,
+    PersistenceCollection = 18,
+    PrefetchCollection = 19,
 }

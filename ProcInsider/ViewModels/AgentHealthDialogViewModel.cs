@@ -136,7 +136,7 @@ public sealed class AgentHealthDialogViewModel : ViewModelBase
             .Where(source => IsSourcePublished(source.Source, catalog))
             .OrderBy(source => source.Source, StringComparer.OrdinalIgnoreCase)
             .Select(source => new AgentHealthSourceRowViewModel(
-                source.Source,
+                source.Source == "OS endpoints" ? "Live network snapshots" : source.Source,
                 source.Status,
                 FormatCount(source.RecordsWritten),
                 FormatRate(source.RecordsPerSecond),
@@ -326,9 +326,10 @@ public sealed class AgentHealthDialogViewModel : ViewModelBase
         AgentRuntimeSnapshot runtime,
         IFeatureCatalog catalog)
     {
-        var totalWritten = capture.TotalEventsReceived + capture.TotalProcessRecordsWritten;
-        var totalDropped = capture.TotalEventsDropped + capture.TotalProcessRecordsDropped;
-        var totalFailures = capture.EventWriteFailures + capture.ProcessWriteFailures;
+        var endpointSource = capture.Sources.FirstOrDefault(source => source.Source == "OS endpoints");
+        var totalWritten = capture.TotalEventsReceived + capture.TotalProcessRecordsWritten + Math.Max(0, endpointSource?.RecordsWritten ?? 0);
+        var totalDropped = capture.TotalEventsDropped + capture.TotalProcessRecordsDropped + Math.Max(0, endpointSource?.RecordsDropped ?? 0);
+        var totalFailures = capture.EventWriteFailures + capture.ProcessWriteFailures + Math.Max(0, endpointSource?.WriteFailures ?? 0);
         var queuedRecords = capture.Sources.Sum(source => Math.Max(0, source.RecordsQueued));
         var recordsPerSecond = capture.Sources.Sum(source => Math.Max(0, source.RecordsPerSecond));
 
@@ -427,6 +428,7 @@ public sealed class AgentHealthDialogViewModel : ViewModelBase
     {
         featureId = source switch
         {
+            "OS endpoints" => FeatureIds.NetworkWorkspace,
             "Runtime" => FeatureIds.AgentsAndCapture,
             "Security" => FeatureIds.WindowsSecurityEvents,
             "ETW" or "PowerShell" or "WindowsOther" or "Sysmon" =>
@@ -625,8 +627,8 @@ public sealed class AgentHealthDialogViewModel : ViewModelBase
         }
 
         return diagnostics.Count == 0
-            ? $"{source.Source}={source.Status}"
-            : $"{source.Source}={source.Status} ({string.Join("; ", diagnostics)})";
+            ? $"{(source.Source == "OS endpoints" ? "Live network snapshots" : source.Source)}={source.Status}"
+            : $"{(source.Source == "OS endpoints" ? "Live network snapshots" : source.Source)}={source.Status} ({string.Join("; ", diagnostics)})";
     }
 
     private static string BuildLiveBufferStatus(CaptureHealthReport capture)

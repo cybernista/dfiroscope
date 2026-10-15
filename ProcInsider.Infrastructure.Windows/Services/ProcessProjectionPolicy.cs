@@ -10,7 +10,7 @@ namespace ProcInsider.Services;
 /// </summary>
 public static class ProcessProjectionPolicy
 {
-    public const string Version = "process-projection-v1";
+    public const string Version = "process-projection-v2";
 
     public static ProcessProjectionResolution Resolve(IReadOnlyList<ProcessObservation> observations)
     {
@@ -71,8 +71,10 @@ public static class ProcessProjectionPolicy
         projected.Sha256Hash = PickString("Sha256Hash", static o => o.Fields.Sha256Hash);
 
         projected.ProcessId = PickValue("ProcessId", static o => o.Fields.ProcessId, static value => value > 0);
-        projected.ParentProcessId = PickValue("ParentProcessId", static o => o.Fields.ParentProcessId, static value => value > 0);
-        projected.SessionId = PickValue("SessionId", static o => o.Fields.SessionId, static value => value > 0);
+        projected.ParentProcessId = PickValue("ParentProcessId", static o => o.Fields.ParentProcessId, static value => value > 0,
+            () => PickRecordedZero("ParentProcessId", static o => o.Fields.ParentProcessId));
+        projected.SessionId = PickValue("SessionId", static o => o.Fields.SessionId, static value => value > 0,
+            () => PickRecordedZero("SessionId", static o => o.Fields.SessionId));
         projected.StartTimeUtc = PickValue<DateTime?>("StartTimeUtc", static o => o.Fields.StartTimeUtc, static value => value.HasValue);
         projected.EndTimeUtc = PickValue<DateTime?>("EndTimeUtc", static o => o.Fields.EndTimeUtc, static value => value.HasValue);
 
@@ -92,18 +94,41 @@ public static class ProcessProjectionPolicy
         projected.EvidenceSessionId = latest.Fields.EvidenceSessionId;
         projected.HostId = latest.Fields.HostId;
         projected.ExecutionRootId = latest.Fields.ExecutionRootId;
-        projected.CpuUsage = latest.Fields.CpuUsage;
-        projected.MemoryUsageBytes = latest.Fields.MemoryUsageBytes;
-        projected.TreeDepth = latest.Fields.TreeDepth;
-        projected.ModuleCaptureStatus = latest.Fields.ModuleCaptureStatus;
-        projected.ModuleCount = latest.Fields.ModuleCount;
-        projected.ModuleLastCapturedUtc = latest.Fields.ModuleLastCapturedUtc;
-        projected.ModuleCaptureError = latest.Fields.ModuleCaptureError;
-        projected.HandleCaptureStatus = latest.Fields.HandleCaptureStatus;
-        projected.HandleCount = latest.Fields.HandleCount;
-        projected.HandleLastCapturedUtc = latest.Fields.HandleLastCapturedUtc;
-        projected.HandleCaptureError = latest.Fields.HandleCaptureError;
+        projected.CpuUsage = PickPartial("CpuUsage", o => o.Fields.CpuUsage, -1d);
+        projected.MemoryUsageBytes = PickPartial("MemoryUsageBytes", o => o.Fields.MemoryUsageBytes, -1L);
+        projected.TreeDepth = PickPartial("TreeDepth", o => o.Fields.TreeDepth, 0);
+        var modules = PartialWinner("ModuleCaptureStatus");
+        projected.ModuleCaptureStatus = modules?.Fields.ModuleCaptureStatus ?? ArtifactCaptureStatus.NotAvailable;
+        projected.ModuleCount = modules?.Fields.ModuleCount ?? 0;
+        projected.ModuleLastCapturedUtc = modules?.Fields.ModuleLastCapturedUtc;
+        projected.ModuleCaptureError = modules?.Fields.ModuleCaptureError ?? "";
+        var handles = PartialWinner("HandleCaptureStatus");
+        projected.HandleCaptureStatus = handles?.Fields.HandleCaptureStatus ?? ArtifactCaptureStatus.NotAvailable;
+        projected.HandleCount = handles?.Fields.HandleCount ?? 0;
+        projected.HandleLastCapturedUtc = handles?.Fields.HandleLastCapturedUtc;
+        projected.HandleCaptureError = handles?.Fields.HandleCaptureError ?? "";
+        // Capture groups select one observation so status/count/time/error remain coherent.
+        foreach (var field in new[] { "ModuleCaptureStatus", "ModuleCount", "ModuleLastCapturedUtc", "ModuleCaptureError" })
+            if (modules != null) AddWinner(field, modules, 4, "latest collected capture group");
+        foreach (var field in new[] { "HandleCaptureStatus", "HandleCount", "HandleLastCapturedUtc", "HandleCaptureError" })
+            if (handles != null) AddWinner(field, handles, 4, "latest collected capture group");
 
+        ProcessObservation? PartialWinner(string field)
+        {
+            ProcessObservation? winner = null;
+            foreach (var observation in ordered)
+                // Missing states preserve the historic observation contract. Explicit absence never wins.
+                if ((!observation.FieldStates.TryGetValue(field, out var state) || state == ProcessObservationValueState.Available) &&
+                    (winner == null || IsBetterObservedCandidate(observation, winner))) winner = observation;
+            return winner;
+        }
+        T PickPartial<T>(string field, Func<ProcessObservation,T> select, T absent)
+        {
+            var winner = PartialWinner(field);
+            if (winner == null) return absent;
+            AddWinner(field, winner, 4, "latest collected value");
+            return select(winner);
+        }
         return new ProcessProjectionResolution(projected, winners, conflicts);
 
         string PickString(string field, Func<ProcessObservation, string> selector)
@@ -161,7 +186,23 @@ public static class ProcessProjectionPolicy
             }
         }
 
-        T PickValue<T>(string field, Func<ProcessObservation, T> selector, Func<T, bool> supplied)
+        int PickRecordedZero(string field, Func<ProcessObservation, int> selector)
+        {
+            ProcessObservation? winner = null;
+            var winnerScore = 0;
+            foreach (var observation in ordered)
+            {
+                if (selector(observation) != 0 || (observation.FieldStates.TryGetValue(field, out var state) && state != ProcessObservationValueState.Available)) continue;
+                var score = CandidateScore(observation, field);
+                if (winner == null || IsBetterRankedCandidate(observation, score, winner, winnerScore))
+                { winner = observation; winnerScore = score; }
+            }
+            if (winner == null) return -1;
+            AddWinner(field, winner, winnerScore, "recorded zero > identity confidence > source authority > observed time");
+            return 0;
+        }
+
+        T PickValue<T>(string field, Func<ProcessObservation, T> selector, Func<T, bool> supplied, Func<T>? noWinnerFallback = null)
         {
             ProcessObservation? winner = null;
             var winnerScore = 0;
@@ -187,7 +228,7 @@ public static class ProcessProjectionPolicy
 
             if (winner == null)
             {
-                return selector(latest);
+                return noWinnerFallback == null ? selector(latest) : noWinnerFallback();
             }
 
             conflicts += Math.Max(0, distinctCount - 1);

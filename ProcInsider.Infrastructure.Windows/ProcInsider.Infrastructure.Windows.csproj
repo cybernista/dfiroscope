@@ -16,6 +16,7 @@
     <InternalsVisibleTo Include="DFIRoscope.Live" />
     <InternalsVisibleTo Include="DFIRoscope.VmFunctionalTest" />
     <InternalsVisibleTo Include="AgentConfigurationSelfTest" />
+    <InternalsVisibleTo Include="EvidenceSourceAdapterSelfTest" />
     <InternalsVisibleTo Include="CaptureWorkspaceSelfTest" />
     <InternalsVisibleTo Include="TelemetryLabSelfTest" />
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" />

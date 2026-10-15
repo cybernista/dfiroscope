@@ -22,7 +22,10 @@ public partial class ColumnHeaderFilterControl : UserControl
 
 public sealed class ColumnFilterLookupConverter : IMultiValueConverter
 {
+    public static readonly DependencyProperty FiltersProperty = DependencyProperty.RegisterAttached("Filters", typeof(IReadOnlyDictionary<string,ColumnFilterViewModel>), typeof(ColumnFilterLookupConverter));
+    public static void SetFilters(DependencyObject target,IReadOnlyDictionary<string,ColumnFilterViewModel> value) => target.SetValue(FiltersProperty,value);
+    public static IReadOnlyDictionary<string,ColumnFilterViewModel>? GetFilters(DependencyObject target) => (IReadOnlyDictionary<string,ColumnFilterViewModel>?)target.GetValue(FiltersProperty);
     public object? Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
-        => values.Length == 2 && values[0] is IReadOnlyDictionary<string, ColumnFilterViewModel> filters && values[1] is string key && filters.TryGetValue(key, out var filter) ? filter : null;
+        => values.Length >= 2 && (values.Length > 2 && values[2] is IReadOnlyDictionary<string,ColumnFilterViewModel> ? values[2] : values[0]) is IReadOnlyDictionary<string, ColumnFilterViewModel> filters && values[1] is string key && filters.TryGetValue(key, out var filter) ? filter : null;
     public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture) => throw new NotSupportedException();
 }

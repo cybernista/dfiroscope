@@ -44,6 +44,7 @@ public sealed class SqliteStagingStore : IDisposable
     private readonly DumpPeEvidenceWriteService _dumpPeEvidenceWriter;
     private readonly NetworkEvidenceWriteService _networkEvidenceWriter;
     private readonly FilesystemEvidenceWriteService _filesystemEvidenceWriter;
+    private readonly ForensicArtifactWriteService _forensicArtifactWriter;
     private readonly SystemMemoryEvidenceWriteService _systemMemoryEvidenceWriter;
     private readonly YaraAnalysisPersistenceService _yaraAnalysisPersistence;
     private readonly ReputationAttributionPersistenceService _reputationAttributionPersistence;
@@ -71,13 +72,36 @@ public sealed class SqliteStagingStore : IDisposable
         _dumpPeEvidenceWriter = new DumpPeEvidenceWriteService(writeContext);
         _networkEvidenceWriter = new NetworkEvidenceWriteService(writeContext);
         _filesystemEvidenceWriter = new FilesystemEvidenceWriteService(writeContext);
+        _forensicArtifactWriter = new ForensicArtifactWriteService(writeContext);
         _systemMemoryEvidenceWriter = new SystemMemoryEvidenceWriteService(writeContext);
         _yaraAnalysisPersistence = new YaraAnalysisPersistenceService(writeContext);
         _reputationAttributionPersistence =
             new ReputationAttributionPersistenceService(writeContext);
     }
 
+    public void AppendNetworkEndpoints(IReadOnlyList<ProcInsider.Features.NetworkWorkspace.NetworkEndpointObservation> rows,
+        IReadOnlyList<ProcInsider.Features.NetworkWorkspace.NetworkEndpointPoll> polls)
+        => new NetworkEndpointEvidenceWriteService(new SqliteWriteTransactionContext(this)).Append(rows, polls);
+
     public string DatabasePath => _databasePath;
+
+    public ProcInsider.Models.Persistence.PersistenceAcceptance AcceptPersistenceCollection(
+        ProcInsider.Models.Persistence.PersistenceCollection collection, CancellationToken cancellationToken = default)
+    {
+        lock (_lock)
+        {
+            EnsureOpenRole(CaptureOpenContext.AgentWritableLive, CaptureArtifactKind.LiveAuthoritativeDatabase);
+            if (!string.IsNullOrEmpty(_expectedEvidenceSessionId) && collection.EvidenceIdentity.EvidenceSessionId != _expectedEvidenceSessionId)
+                throw new InvalidDataException("Persistence collection belongs to another evidence session.");
+            return new PersistenceEvidenceWriteService(new SqliteWriteTransactionContext(this)).Accept(collection, cancellationToken);
+        }
+    }
+
+    public ProcInsider.Models.Persistence.PersistenceCheckpoint? GetPersistenceCheckpoint(EvidenceIdentity identity)
+        => new PersistenceEvidenceWriteService(new SqliteWriteTransactionContext(this)).GetCheckpoint(identity);
+
+    public ProcInsider.Models.Persistence.PersistenceAcceptedState? RecoverPersistenceState(EvidenceIdentity identity)
+        => new PersistenceEvidenceWriteService(new SqliteWriteTransactionContext(this)).Recover(identity);
 
     public void EnableInfrastructureEvidenceOutbox(Guid ownerId, Guid writerInstanceId)
     {
@@ -2013,6 +2037,9 @@ public sealed class SqliteStagingStore : IDisposable
     public void UpsertFilesystemArtifacts(IEnumerable<FilesystemArtifactRecord> artifacts)
         => _filesystemEvidenceWriter.UpsertFilesystemArtifacts(artifacts);
 
+    public ForensicArtifactAppendResult AppendForensicReads(IReadOnlyList<ForensicReadAttempt> reads, CancellationToken token = default)
+        => _forensicArtifactWriter.Append(reads, token);
+
     public void ReplaceWithSnapshot(IEvidenceStoreSnapshot snapshot)
     {
         lock (_lock)
@@ -2272,7 +2299,7 @@ public sealed class SqliteStagingStore : IDisposable
                 lineage.ExecuteNonQuery();
             }
 
-            return new SourceRunRegistration(sourceId, descriptor.SourceRunId);
+            return new SourceRunRegistration(sourceId, descriptor.SourceRunId) { ResolvedEvidenceIdentity = identity };
         }
     }
 
@@ -3359,6 +3386,16 @@ public sealed class SqliteStagingStore : IDisposable
                 break;
             case "031_reputation_attributions":
                 EnsureReputationAttributionSchema();
+                break;
+            case "033_os_network_endpoints":
+                ExecuteNonQuery(NetworkEndpointEvidenceWriteService.SchemaSql);
+                break;
+            case "034_persistence_history":
+                ExecuteNonQuery(PersistenceEvidenceWriteService.SchemaSql);
+                break;
+            case "035_forensic_artifact_results":
+                foreach (var (column,type) in ForensicArtifactWriteService.Columns) EnsureColumn("Artifacts",column,type);
+                ExecuteNonQuery(ForensicArtifactWriteService.IndexSql);
                 break;
             case "032_infrastructure_evidence_outbox":
                 EnsureInfrastructureEvidenceOutboxSchema();

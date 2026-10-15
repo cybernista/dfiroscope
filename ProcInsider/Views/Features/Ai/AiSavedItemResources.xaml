@@ -1,0 +1,23 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:workspace="clr-namespace:ProcInsider.Features.InvestigationWorkspaces">
+    <DataTemplate DataType="{x:Type workspace:ConversationExplorerEntry}">
+        <StackPanel ToolTip="{Binding Availability}" Margin="2">
+            <TextBlock Text="{Binding Conversation.Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+            <TextBlock Text="{Binding Model, StringFormat=Model used: {0}}"/>
+            <TextBlock Text="{Binding Conversation.CreatedUtc, StringFormat=Started: {0:g}}"/>
+            <TextBlock Text="{Binding Availability}" TextWrapping="Wrap" Foreground="#666666"/>
+        </StackPanel>
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type workspace:InvestigationExplorerEntry}">
+        <StackPanel ToolTip="{Binding Availability}" Margin="2">
+            <TextBlock Text="{Binding Investigation.Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+            <TextBlock Text="{Binding Model}"/>
+            <TextBlock Text="{Binding Investigation.CreatedUtc, StringFormat=Started: {0:g}}"/>
+            <TextBlock Text="{Binding Availability}" TextWrapping="Wrap" Foreground="#666666"/>
+        </StackPanel>
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type workspace:AiExplorerMore}">
+        <Button Content="{Binding Title}" Command="{Binding Command}" HorizontalAlignment="Left"/>
+    </DataTemplate>
+</ResourceDictionary>

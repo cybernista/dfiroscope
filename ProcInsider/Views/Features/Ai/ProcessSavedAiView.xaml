@@ -1,0 +1,25 @@
+<UserControl x:Class="ProcInsider.Views.Features.Ai.ProcessSavedAiView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries>
+  <ResourceDictionary Source="AiSavedItemResources.xaml"/>
+ </ResourceDictionary.MergedDictionaries><BooleanToVisibilityConverter x:Key="Visible"/></ResourceDictionary></UserControl.Resources>
+ <DockPanel Margin="4">
+  <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+   <Button x:Name="NewChatAction" Content="New chat" Command="{Binding NewChatSelectedProcessCommand}" Margin="0,0,4,4"/>
+   <Button x:Name="InvestigateAction" Content="Investigate" Command="{Binding InvestigateSelectedProcessCommand}" Margin="0,0,4,4"/>
+   <Button x:Name="ReviewRecordAction" Content="Review record" Command="{Binding ReviewSelectedProcessRecordInNewChatCommand}" Margin="0,0,4,4"/>
+   <Button x:Name="FindRelatedAction" Content="Find related activity" Command="{Binding FindSelectedProcessRelatedActivityInNewChatCommand}" Margin="0,0,4,4"/>
+  </WrapPanel>
+  <TextBlock DockPanel.Dock="Top" Text="Saved chats and investigations" FontWeight="SemiBold" Margin="2,0,2,4"/>
+  <TextBlock DockPanel.Dock="Bottom" Text="{Binding ProcessSavedAiNavigation.Status}" TextWrapping="Wrap" Foreground="#666666" Margin="2,4,2,0"/>
+  <Button DockPanel.Dock="Bottom" Content="Load more" Command="{Binding ProcessSavedAiNavigation.LoadMoreCommand}"
+          Visibility="{Binding ProcessSavedAiNavigation.HasMore, Converter={StaticResource Visible}}"
+          HorizontalAlignment="Left" Margin="2,4,2,0"/>
+  <ListBox x:Name="ProcessSavedAiItems" DataContext="{Binding ProcessSavedAiNavigation}"
+           ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+           SelectionChanged="SavedItemSelected" PreviewMouseLeftButtonDown="SavedItemMouseDown"
+           HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+           VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"/>
+ </DockPanel>
+</UserControl>

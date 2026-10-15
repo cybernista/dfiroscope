@@ -25,7 +25,7 @@
     <AnalysisMode>Default</AnalysisMode>
     <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
 
-    <RepositoryUrl>https://github.com/tomek4624/ProcInsider</RepositoryUrl>
+    <RepositoryUrl>https://github.com/cybernista/dfiroscope</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
   </PropertyGroup>

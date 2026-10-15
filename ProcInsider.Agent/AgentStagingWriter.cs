@@ -758,6 +758,13 @@ internal sealed class AgentStagingWriter : IAsyncDisposable
             "InsertAuthenticodeVerifications");
     }
 
+    public async ValueTask AppendNetworkEndpointsAsync(
+        ProcInsider.Models.EvidenceSources.EvidenceSourceEmissionBatch batch, CancellationToken token)
+    {
+        await EnqueueAsync(store => { store.AppendNetworkEndpoints(batch.NetworkEndpointObservations, batch.NetworkEndpointPolls); return true; },
+            token, "AppendNetworkEndpoints").ConfigureAwait(false);
+    }
+
     public ValueTask UpsertNetworkCapturesAsync(
         IEnumerable<NetworkCaptureRecord> networkCaptures,
         CancellationToken cancellationToken)
@@ -946,6 +953,30 @@ internal sealed class AgentStagingWriter : IAsyncDisposable
         _databaseCommitNotifications.Writer.TryComplete();
         await _databaseCommitNotificationWorker.ConfigureAwait(false);
     }
+
+    public ValueTask<ProcInsider.Models.Persistence.PersistenceAcceptance> AcceptPersistenceCollectionAsync(
+        ProcInsider.Models.Persistence.PersistenceCollection collection, CancellationToken cancellationToken,
+        Func<Func<ProcInsider.Models.Persistence.PersistenceAcceptance>, ProcInsider.Models.Persistence.PersistenceAcceptance>? commitGuard = null)
+    {
+        var frozen = JsonSerializer.Deserialize<ProcInsider.Models.Persistence.PersistenceCollection>(JsonSerializer.Serialize(collection))
+            ?? throw new InvalidDataException("Missing persistence collection.");
+        return EnqueueAsync(store => commitGuard == null ? store.AcceptPersistenceCollection(frozen, cancellationToken)
+                : commitGuard(() => store.AcceptPersistenceCollection(frozen, cancellationToken)), cancellationToken,
+            "AcceptPersistenceCollection", frozen.Results.Sum(result => (long)result.Artifacts.Count));
+    }
+
+    public ValueTask<ForensicArtifactAppendResult> AppendForensicReadsAsync(IReadOnlyList<ForensicReadAttempt> reads, CancellationToken token)
+    {
+        var snapshot = ForensicArtifactContract.Freeze(reads);
+        return EnqueueAsync(store => store.AppendForensicReads(snapshot, token), token, "AppendForensicReads",
+            snapshot.Sum(read => 1 + 2 * read.Outputs.Count));
+    }
+
+    public ValueTask<ProcInsider.Models.Persistence.PersistenceCheckpoint?> GetPersistenceCheckpointAsync(EvidenceIdentity identity, CancellationToken cancellationToken)
+        => EnqueueAsync(store => store.GetPersistenceCheckpoint(identity), cancellationToken, "ReadPersistenceCheckpoint", 0, advancesDatabaseChangeCursor: false);
+
+    public ValueTask<ProcInsider.Models.Persistence.PersistenceAcceptedState?> RecoverPersistenceStateAsync(EvidenceIdentity identity, CancellationToken cancellationToken)
+        => EnqueueAsync(store => store.RecoverPersistenceState(identity), cancellationToken, "RecoverPersistenceState", 0, advancesDatabaseChangeCursor: false);
 
     private async ValueTask<T> EnqueueAsync<T>(
         Func<SqliteStagingStore, T> action,

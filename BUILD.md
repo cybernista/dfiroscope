@@ -38,3 +38,7 @@ dotnet publish ProcInsider.Agent/ProcInsider.Agent.csproj --configuration Releas
 Keep Viewer and Agent in separate directories. The official release pipeline accepts only this provenance-bound disclosed graph, runs these production publishes from a disposable exact copy, and then adds bounded compatibility aliases, signing disclosure, checksums, and release provenance. An official build binding must retain the same disclosure-policy identity/digest and exported-tree digest as `SOURCE-PROVENANCE.json`.
 
 The disclosed graph makes no product claim beyond `PUBLIC-EDITION.json`. Changing the publication catalog or source produces an unofficial, unsupported build even when compilation succeeds.
+
+## Edition and local configuration
+
+The official 0.4.0 publication scope is the exact 13 groups in `PUBLIC-EDITION.json`. Keep the Viewer and local Agent together as the standalone distribution described above. AI Assistance requires your provider configuration and analyst consent before cloud calls; credentials are not supplied with source or binaries. Explicit Agent live Prefetch analysis saves parsed results for Artifacts; that workflow does not retain original `.pf` files or add an offline evidence store. Infrastructure deployment and source-authoring workflows are unsupported by this edition.

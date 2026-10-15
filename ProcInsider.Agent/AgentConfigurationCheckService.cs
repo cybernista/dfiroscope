@@ -318,6 +318,7 @@ internal sealed class AgentConfigurationCheckService
                 RefreshIntervalSeconds = 10
             },
             SourceToggles = new AgentCaptureSourceToggles(),
+            Persistence = AgentPersistenceCapturePolicy.CreateDevelopmentDefault(),
             Etw = new AgentEtwMonitoringIntent
             {
                 ConfigureSession = true,
@@ -884,11 +885,11 @@ internal sealed class AgentConfigurationCheckService
     private void CheckCaptureSources(List<AgentConfigurationFinding> findings, AgentCaptureConfiguration configuration)
     {
         var toggles = configuration.SourceToggles;
-        if (!toggles.Runtime && !toggles.Etw && !toggles.Security && !toggles.PowerShell && !toggles.WindowsOther && !toggles.Sysmon)
+        if (!toggles.Runtime && !toggles.Etw && !toggles.Security && !toggles.PowerShell && !toggles.WindowsOther && !toggles.Sysmon && !toggles.OsNetworkEndpoints && !configuration.Persistence.Enabled && !configuration.CollectPrefetchOnStart)
         {
             Add(findings, AgentConfigurationAreaKind.SourceHealth, AgentConfigurationFindingSeverity.Blocked,
                 "No capture sources are enabled.",
-                "At least one Runtime, ETW, Security, PowerShell, WindowsOther, or Sysmon source must be selected.",
+                "At least one Runtime, ETW, Security, PowerShell, WindowsOther, Sysmon, or OS endpoint source must be selected.",
                 "Enable the Runtime source or another evidence source before starting capture.");
             return;
         }
@@ -899,6 +900,17 @@ internal sealed class AgentConfigurationCheckService
                 "Runtime source is enabled.",
                 "Process snapshot/delta evidence will be collected by the agent.");
         }
+
+        if (configuration.Persistence.IntervalMinutes is < 1 or > 1440)
+            Add(findings, AgentConfigurationAreaKind.SourceHealth, AgentConfigurationFindingSeverity.Blocked,
+                "Persistence interval is invalid.", "Supported range: 1-1440 minutes; default 60 minutes.");
+        if (configuration.Persistence.Enabled)
+            Add(findings, AgentConfigurationAreaKind.SourceHealth, AgentConfigurationFindingSeverity.Info,
+                "Persistence collection is enabled.", $"Immediate startup, then every {configuration.Persistence.IntervalMinutes} minutes. Accessible loaded registry hives and authorized local tasks only.");
+
+        if (toggles.OsNetworkEndpoints)
+            Add(findings,AgentConfigurationAreaKind.SourceHealth,AgentConfigurationFindingSeverity.Info,
+                "OS endpoint source is enabled.","Native TCP listeners and UDP bindings use five-second sampled coverage; TCP connections use five-minute snapshots.");
 
         if (toggles.Etw)
         {

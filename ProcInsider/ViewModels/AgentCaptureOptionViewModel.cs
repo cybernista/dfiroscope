@@ -27,6 +27,8 @@ public enum AgentCaptureOptionKind
     MemoryImageImport = 13,
     VolatilityAnalysis = 14,
     PeAnalysis = 15,
+    OsNetworkEndpoints = 16,
+    Persistence = 17,
 }
 
 public partial class AgentCaptureOptionViewModel : ViewModelBase
@@ -57,8 +59,12 @@ public partial class AgentCaptureOptionViewModel : ViewModelBase
     public string DisplayName { get; }
 
     public string Description { get; }
+    private int _persistenceIntervalMinutes = AgentPersistenceCapturePolicy.DevelopmentDefaultIntervalMinutes;
+    public int PersistenceIntervalMinutes { get => _persistenceIntervalMinutes; set => SetProperty(ref _persistenceIntervalMinutes, value); }
+    public bool HasPersistenceCadence => Kind == AgentCaptureOptionKind.Persistence && IsPublished;
+    public bool HasPrefetchChild => Kind == AgentCaptureOptionKind.FilesystemArtifactImport && IsPublished;
 
-    [ObservableProperty]
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasPersistenceCadence))]
     private bool isPublished = true;
 
     [ObservableProperty]
@@ -105,7 +111,8 @@ public partial class AgentCaptureOptionViewModel : ViewModelBase
         {
             StatusText = StatusText,
             CapturedItemCount = CapturedItemCount,
-            IsPublished = IsPublished
+            IsPublished = IsPublished,
+            PersistenceIntervalMinutes = PersistenceIntervalMinutes
         };
     }
 
@@ -122,10 +129,12 @@ public partial class AgentCaptureOptionViewModel : ViewModelBase
             new(AgentCaptureOptionKind.ModuleEnrichment, "Module enrichment", "Agent module inventory sweep for staged processes.", true, true, true, false),
             new(AgentCaptureOptionKind.HandleEnrichment, "Handle enrichment", "Agent handle inventory sweep for staged processes.", true, true, true, false),
             new(AgentCaptureOptionKind.PeAnalysis, "PE analysis", "Safe deferred background PE metadata analysis; printable strings are extracted immediately only by the explicit selected-process action.", true, true, true, false),
+            new(AgentCaptureOptionKind.OsNetworkEndpoints, "Live network snapshots", "TCP listeners and UDP bindings every 5 seconds; TCP connection snapshots every 5 minutes. Sampled evidence with visible gaps.", false, true, false, false),
+            new(AgentCaptureOptionKind.Persistence, "Persistence", "Read-only Run/RunOnce, Scheduled Tasks, Services/Drivers, accessible Startup folders, local WMI permanent subscriptions and bounded Winlogon/IFEO/AppInit/LSA configuration; immediate startup and configurable cadence. Unavailable coverage stays stale; changes between polls may be missed.", false, true, false, false),
             new(AgentCaptureOptionKind.NetworkCapture, "Network capture", "Packet Monitor metadata capture with PCAPNG finalization on stop.", false, true, true, true),
             new(AgentCaptureOptionKind.ZeekAnalysis, "Zeek analysis", "Zeek import can run after network capture or from a selected PCAP segment.", false, true, false, false),
             new(AgentCaptureOptionKind.ProcessMonitorCapture, "Process Monitor", "Sysinternals Process Monitor capture/import path.", false, false, true, true),
-            new(AgentCaptureOptionKind.FilesystemArtifactImport, "Filesystem imports", "NTFS and Prefetch imports require an analyst-selected file or folder.", false, false, false, false),
+            new(AgentCaptureOptionKind.FilesystemArtifactImport, "Live forensics", "Examine selected live forensic sources once at capture startup. Collect Prefetch remains available for later manual collection.", false, true, false, false),
             new(AgentCaptureOptionKind.MemoryImageImport, "Memory image import", "Full-memory image import requires an analyst-selected image or acquisition handoff.", false, false, false, false),
             new(AgentCaptureOptionKind.VolatilityAnalysis, "Volatility analysis", "Volatility runs require a staged memory image.", false, false, false, false),
         ];
@@ -153,6 +162,8 @@ public partial class AgentCaptureOptionViewModel : ViewModelBase
 
     public static FeatureId? GetFeatureId(AgentCaptureOptionKind kind) => kind switch
     {
+        AgentCaptureOptionKind.OsNetworkEndpoints => FeatureIds.NetworkWorkspace,
+        AgentCaptureOptionKind.Persistence => FeatureIds.Persistence,
         AgentCaptureOptionKind.ProcessLiveEvents => FeatureIds.AgentsAndCapture,
         AgentCaptureOptionKind.ProcessMonitorCapture => FeatureIds.EventTelemetry,
         AgentCaptureOptionKind.SecurityEvents => FeatureIds.WindowsSecurityEvents,
@@ -209,6 +220,9 @@ public partial class AgentCaptureOptionViewModel : ViewModelBase
                 AgentCaptureOptionKind.PowerShellEvents => configuration.SourceToggles.PowerShell,
                 AgentCaptureOptionKind.WindowsOtherEvents => configuration.SourceToggles.WindowsOther,
                 AgentCaptureOptionKind.SysmonEvents => configuration.SourceToggles.Sysmon,
+                AgentCaptureOptionKind.OsNetworkEndpoints => configuration.SourceToggles.OsNetworkEndpoints,
+                AgentCaptureOptionKind.Persistence => configuration.Persistence.Enabled,
+                AgentCaptureOptionKind.FilesystemArtifactImport => configuration.CollectPrefetchOnStart,
                 AgentCaptureOptionKind.ModuleEnrichment => configuration.ArtifactCapture.CaptureModules,
                 AgentCaptureOptionKind.HandleEnrichment => configuration.ArtifactCapture.CaptureHandles,
                 AgentCaptureOptionKind.PeAnalysis => configuration.ArtifactCapture.CapturePeMetadata,
@@ -217,6 +231,7 @@ public partial class AgentCaptureOptionViewModel : ViewModelBase
                                                        configuration.Zeek.RunAfterNetworkCapture,
                 _ => option.IsIncluded
             };
+            if (option.Kind == AgentCaptureOptionKind.Persistence) option.PersistenceIntervalMinutes = configuration.Persistence.IntervalMinutes;
         }
     }
 
@@ -226,6 +241,9 @@ public partial class AgentCaptureOptionViewModel : ViewModelBase
     {
         foreach (var option in options)
         {
+            // Persistence health counts describe the last accepted source observation;
+            // the generic telemetry count projection does not own those counts.
+            if (option.Kind == AgentCaptureOptionKind.Persistence) continue;
             option.CapturedItemCount = option.Kind switch
             {
                 AgentCaptureOptionKind.ProcessLiveEvents => stats.ProcessCount + stats.RuntimeEventCount,
@@ -237,6 +255,7 @@ public partial class AgentCaptureOptionViewModel : ViewModelBase
                 AgentCaptureOptionKind.ModuleEnrichment => stats.ModuleObservationCount,
                 AgentCaptureOptionKind.HandleEnrichment => stats.HandleObservationCount,
                 AgentCaptureOptionKind.PeAnalysis => stats.PeAnalysisCount,
+                AgentCaptureOptionKind.OsNetworkEndpoints => stats.OsNetworkEndpointCount,
                 AgentCaptureOptionKind.NetworkCapture => stats.NetworkCaptureCount,
                 AgentCaptureOptionKind.ZeekAnalysis => stats.ZeekNetworkArtifactCount,
                 AgentCaptureOptionKind.ProcessMonitorCapture => stats.ProcessMonitorEventCount,

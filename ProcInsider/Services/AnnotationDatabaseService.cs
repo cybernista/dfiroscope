@@ -11,9 +11,9 @@ using ProcInsider.Models.Telemetry;
 
 namespace ProcInsider.Services;
 
-public sealed class AnnotationDatabaseService
+public sealed partial class AnnotationDatabaseService
 {
-    private const string SchemaVersion = "5";
+    private const int CurrentSchemaVersion = 10;
     private static readonly TimeSpan MetadataRegexTimeout = TimeSpan.FromMilliseconds(150);
     private readonly object _lock = new();
     private readonly string _databasePath;
@@ -31,6 +31,7 @@ public sealed class AnnotationDatabaseService
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_databasePath) ?? AppContext.BaseDirectory);
             using var connection = OpenConnection(SqliteOpenMode.ReadWriteCreate);
+            RejectUnknownAnnotationVersion(connection);
             using var command = connection.CreateCommand();
             command.CommandText = """
                 PRAGMA journal_mode=WAL;
@@ -88,44 +89,6 @@ public sealed class AnnotationDatabaseService
                     CreatedUtc TEXT NOT NULL,
                     UpdatedUtc TEXT NOT NULL,
                     UNIQUE(TargetKind, TargetId)
-                );
-                CREATE TABLE IF NOT EXISTS AiInvestigationOutputs (
-                    InvestigationId TEXT PRIMARY KEY,
-                    TargetKind TEXT NOT NULL,
-                    TargetTable TEXT,
-                    TargetId TEXT NOT NULL,
-                    ArtifactId TEXT,
-                    CaseId TEXT,
-                    EvidenceSessionId TEXT,
-                    CaptureId TEXT,
-                    SourceIdentityId TEXT,
-                    HostId TEXT,
-                    ProcessKey TEXT,
-                    ProcessId INTEGER,
-                    ProcessName TEXT,
-                    Label TEXT,
-                    DisplayPath TEXT,
-                    SourceScopeKind TEXT,
-                    SourceScopeSummary TEXT,
-                    PromptTemplateId TEXT,
-                    PromptTemplateTitle TEXT,
-                    SystemPrompt TEXT,
-                    AnalystPrompt TEXT,
-                    FinalPrompt TEXT,
-                    ProviderKind TEXT,
-                    ProviderName TEXT,
-                    BaseUrl TEXT,
-                    ModelName TEXT,
-                    RequestedUtc TEXT NOT NULL,
-                    CompletedUtc TEXT,
-                    Status TEXT NOT NULL,
-                    RequestCharacterCount INTEGER,
-                    ResponseCharacterCount INTEGER,
-                    PromptTokens INTEGER,
-                    CompletionTokens INTEGER,
-                    TotalTokens INTEGER,
-                    ErrorText TEXT,
-                    ResponseText TEXT
                 );
                 CREATE TABLE IF NOT EXISTS AiChatMessages (
                     MessageId TEXT PRIMARY KEY,
@@ -197,9 +160,6 @@ public sealed class AnnotationDatabaseService
                 CREATE INDEX IF NOT EXISTS IX_Notes_Target ON Notes(TargetKind, TargetId);
                 CREATE INDEX IF NOT EXISTS IX_Notes_ProcessKey ON Notes(ProcessKey);
                 CREATE INDEX IF NOT EXISTS IX_Notes_Identity ON Notes(CaseId, EvidenceSessionId, CaptureId, SourceIdentityId, HostId);
-                CREATE INDEX IF NOT EXISTS IX_AiInvestigationOutputs_Target ON AiInvestigationOutputs(TargetKind, TargetId, RequestedUtc);
-                CREATE INDEX IF NOT EXISTS IX_AiInvestigationOutputs_ProcessKey ON AiInvestigationOutputs(ProcessKey, RequestedUtc);
-                CREATE INDEX IF NOT EXISTS IX_AiInvestigationOutputs_Identity ON AiInvestigationOutputs(CaseId, EvidenceSessionId, CaptureId, SourceIdentityId, HostId);
                 CREATE INDEX IF NOT EXISTS IX_AiChatMessages_Conversation ON AiChatMessages(ConversationId, CreatedUtc);
                 CREATE INDEX IF NOT EXISTS IX_ApplicationMetadata_Executable ON ApplicationMetadata(ExecutableNamePattern, IsRegexPattern);
                 CREATE INDEX IF NOT EXISTS IX_ApplicationMetadata_Package ON ApplicationMetadata(PackageFamilyName, AppUserModelId);
@@ -243,7 +203,6 @@ public sealed class AnnotationDatabaseService
                 overrideIndexCommand.ExecuteNonQuery();
             }
 
-            UpsertSchemaInfo(connection, "SchemaVersion", SchemaVersion);
             UpsertSchemaInfo(connection, "ApplicationVersion", typeof(AnnotationDatabaseService).Assembly.GetName().Version?.ToString() ?? "unknown");
             UpsertSchemaInfo(connection, "LastOpenedUtc", FormatDate(DateTime.UtcNow));
             using var migrationCommand = connection.CreateCommand();
@@ -263,6 +222,11 @@ public sealed class AnnotationDatabaseService
             Add(migrationCommand, "$CreatedUtc", DateTime.UtcNow);
             Add(migrationCommand, "$AppliedUtc", DateTime.UtcNow);
             migrationCommand.ExecuteNonQuery();
+            InitializeConversationSchema(connection);
+            InitializeInvestigationSchema(connection);
+            InitializePromptRequestSchema(connection);
+            InitializeConversationOriginSchema(connection);
+            RemoveObsoleteAiInvestigationOutputs(connection);
         }
     }
 
@@ -435,17 +399,15 @@ public sealed class AnnotationDatabaseService
     public Task<AnnotationNoteSaveResult> SaveNoteAsync(AnnotationTarget target, string content)
         => Task.Run(() => SaveNote(target, content));
 
-    public Task SaveAiInvestigationAsync(AiInvestigationRecord record)
-        => Task.Run(() => SaveAiInvestigation(record));
-
-    public Task<IReadOnlyList<AiInvestigationRecord>> LoadAiInvestigationsAsync(AnnotationTarget target, int limit = 25)
-        => Task.Run<IReadOnlyList<AiInvestigationRecord>>(() => LoadAiInvestigations(target, limit));
-
     public Task SaveAiChatMessageAsync(AiChatMessage message)
         => Task.Run(() => SaveAiChatMessage(message));
 
     public Task<IReadOnlyList<AiChatMessage>> LoadAiChatMessagesAsync(string conversationId, int limit = 200)
         => Task.Run<IReadOnlyList<AiChatMessage>>(() => LoadAiChatMessages(conversationId, limit));
+
+    public Task<AiChatHistoryPage> LoadAiChatHistoryPageAsync(
+        string conversationId, string excludedMessageId, int limit = 500)
+        => Task.Run(() => LoadAiChatHistoryPage(conversationId, excludedMessageId, limit));
 
     public Task ClearAiChatMessagesAsync(string conversationId)
         => Task.Run(() => ClearAiChatMessages(conversationId));
@@ -688,120 +650,14 @@ public sealed class AnnotationDatabaseService
         }
     }
 
-    private void SaveAiInvestigation(AiInvestigationRecord record)
-    {
-        lock (_lock)
-        {
-            using var connection = OpenConnection(SqliteOpenMode.ReadWriteCreate);
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                INSERT INTO AiInvestigationOutputs (
-                    InvestigationId, TargetKind, TargetTable, TargetId, ArtifactId,
-                    CaseId, EvidenceSessionId, CaptureId, SourceIdentityId, HostId,
-                    ProcessKey, ProcessId, ProcessName, Label, DisplayPath,
-                    SourceScopeKind, SourceScopeSummary,
-                    PromptTemplateId, PromptTemplateTitle, SystemPrompt, AnalystPrompt, FinalPrompt,
-                    ProviderKind, ProviderName, BaseUrl, ModelName,
-                    RequestedUtc, CompletedUtc, Status,
-                    RequestCharacterCount, ResponseCharacterCount,
-                    PromptTokens, CompletionTokens, TotalTokens,
-                    ErrorText, ResponseText)
-                VALUES (
-                    $InvestigationId, $TargetKind, $TargetTable, $TargetId, $ArtifactId,
-                    $CaseId, $EvidenceSessionId, $CaptureId, $SourceIdentityId, $HostId,
-                    $ProcessKey, $ProcessId, $ProcessName, $Label, $DisplayPath,
-                    $SourceScopeKind, $SourceScopeSummary,
-                    $PromptTemplateId, $PromptTemplateTitle, $SystemPrompt, $AnalystPrompt, $FinalPrompt,
-                    $ProviderKind, $ProviderName, $BaseUrl, $ModelName,
-                    $RequestedUtc, $CompletedUtc, $Status,
-                    $RequestCharacterCount, $ResponseCharacterCount,
-                    $PromptTokens, $CompletionTokens, $TotalTokens,
-                    $ErrorText, $ResponseText)
-                ON CONFLICT(InvestigationId) DO UPDATE SET
-                    TargetKind = excluded.TargetKind,
-                    TargetTable = excluded.TargetTable,
-                    TargetId = excluded.TargetId,
-                    ArtifactId = excluded.ArtifactId,
-                    CaseId = excluded.CaseId,
-                    EvidenceSessionId = excluded.EvidenceSessionId,
-                    CaptureId = excluded.CaptureId,
-                    SourceIdentityId = excluded.SourceIdentityId,
-                    HostId = excluded.HostId,
-                    ProcessKey = excluded.ProcessKey,
-                    ProcessId = excluded.ProcessId,
-                    ProcessName = excluded.ProcessName,
-                    Label = excluded.Label,
-                    DisplayPath = excluded.DisplayPath,
-                    SourceScopeKind = excluded.SourceScopeKind,
-                    SourceScopeSummary = excluded.SourceScopeSummary,
-                    PromptTemplateId = excluded.PromptTemplateId,
-                    PromptTemplateTitle = excluded.PromptTemplateTitle,
-                    SystemPrompt = excluded.SystemPrompt,
-                    AnalystPrompt = excluded.AnalystPrompt,
-                    FinalPrompt = excluded.FinalPrompt,
-                    ProviderKind = excluded.ProviderKind,
-                    ProviderName = excluded.ProviderName,
-                    BaseUrl = excluded.BaseUrl,
-                    ModelName = excluded.ModelName,
-                    RequestedUtc = excluded.RequestedUtc,
-                    CompletedUtc = excluded.CompletedUtc,
-                    Status = excluded.Status,
-                    RequestCharacterCount = excluded.RequestCharacterCount,
-                    ResponseCharacterCount = excluded.ResponseCharacterCount,
-                    PromptTokens = excluded.PromptTokens,
-                    CompletionTokens = excluded.CompletionTokens,
-                    TotalTokens = excluded.TotalTokens,
-                    ErrorText = excluded.ErrorText,
-                    ResponseText = excluded.ResponseText;
-                """;
-            AddAiRecordParameters(command, record);
-            command.ExecuteNonQuery();
-        }
-    }
-
-    private IReadOnlyList<AiInvestigationRecord> LoadAiInvestigations(AnnotationTarget target, int limit)
-    {
-        lock (_lock)
-        {
-            using var connection = OpenConnection(SqliteOpenMode.ReadOnly);
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT InvestigationId, TargetKind, TargetTable, TargetId, ArtifactId,
-                       CaseId, EvidenceSessionId, CaptureId, SourceIdentityId, HostId,
-                       ProcessKey, ProcessId, ProcessName, Label, DisplayPath,
-                       SourceScopeKind, SourceScopeSummary,
-                       PromptTemplateId, PromptTemplateTitle, SystemPrompt, AnalystPrompt, FinalPrompt,
-                       ProviderKind, ProviderName, BaseUrl, ModelName,
-                       RequestedUtc, CompletedUtc, Status,
-                       RequestCharacterCount, ResponseCharacterCount,
-                       PromptTokens, CompletionTokens, TotalTokens,
-                       ErrorText, ResponseText
-                FROM AiInvestigationOutputs
-                WHERE TargetKind = $TargetKind AND TargetId = $TargetId
-                ORDER BY RequestedUtc DESC
-                LIMIT $Limit;
-                """;
-            Add(command, "$TargetKind", target.TargetKind);
-            Add(command, "$TargetId", target.TargetId);
-            Add(command, "$Limit", Math.Clamp(limit, 1, 200));
-
-            var records = new List<AiInvestigationRecord>();
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                records.Add(ReadAiInvestigation(reader));
-            }
-
-            return records;
-        }
-    }
-
     private void SaveAiChatMessage(AiChatMessage message)
     {
         lock (_lock)
         {
             using var connection = OpenConnection(SqliteOpenMode.ReadWriteCreate);
+            using var transaction = connection.BeginTransaction();
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO AiChatMessages (
                     MessageId, ConversationId, Role, Content,
@@ -825,6 +681,8 @@ public sealed class AnnotationDatabaseService
                 """;
             AddAiChatMessageParameters(command, message);
             command.ExecuteNonQuery();
+            EnsureLegacyConversation(connection, transaction, message.ConversationId);
+            transaction.Commit();
         }
     }
 
@@ -860,6 +718,63 @@ public sealed class AnnotationDatabaseService
 
             messages.Reverse();
             return messages;
+        }
+    }
+
+    private AiChatHistoryPage LoadAiChatHistoryPage(
+        string conversationId, string excludedMessageId, int limit)
+    {
+        if (string.IsNullOrWhiteSpace(conversationId))
+            return new AiChatHistoryPage([], 0, 0);
+
+        lock (_lock)
+        {
+            using var connection = OpenConnection(SqliteOpenMode.ReadOnly);
+            using var transaction = connection.BeginTransaction(deferred: true);
+            using var count = connection.CreateCommand();
+            count.Transaction = transaction;
+            count.CommandText = """
+                SELECT COUNT(*), COALESCE(SUM(CASE WHEN Status = 'Succeeded' AND
+                    (LOWER(Role) = 'user' OR LOWER(Role) = 'assistant') THEN 1 ELSE 0 END), 0)
+                FROM AiChatMessages
+                WHERE ConversationId = $ConversationId AND MessageId <> $ExcludedMessageId;
+                """;
+            Add(count, "$ConversationId", conversationId);
+            Add(count, "$ExcludedMessageId", excludedMessageId);
+            int total;
+            int eligible;
+            using (var reader = count.ExecuteReader())
+            {
+                reader.Read();
+                total = checked((int)reader.GetInt64(0));
+                eligible = checked((int)reader.GetInt64(1));
+            }
+
+            using var rows = connection.CreateCommand();
+            rows.Transaction = transaction;
+            rows.CommandText = """
+                SELECT MessageId, ConversationId, Role, Content,
+                       ProviderKind, ProviderName, BaseUrl, ModelName,
+                       CreatedUtc, Status, ErrorText
+                FROM AiChatMessages
+                WHERE ConversationId = $ConversationId AND MessageId <> $ExcludedMessageId
+                  AND Status = 'Succeeded' AND (LOWER(Role) = 'user' OR LOWER(Role) = 'assistant')
+                ORDER BY CreatedUtc DESC, MessageId DESC
+                LIMIT $Limit;
+                """;
+            Add(rows, "$ConversationId", conversationId);
+            Add(rows, "$ExcludedMessageId", excludedMessageId);
+            Add(rows, "$Limit", Math.Clamp(limit, 1, 500));
+            var messages = new List<AiChatMessage>();
+            using (var reader = rows.ExecuteReader())
+            {
+                while (reader.Read())
+                    messages.Add(ReadAiChatMessage(reader));
+            }
+
+            transaction.Commit();
+            messages.Reverse();
+            return new AiChatHistoryPage(messages, eligible, total - eligible);
         }
     }
 
@@ -1020,10 +935,15 @@ public sealed class AnnotationDatabaseService
         {
             DataSource = _databasePath,
             Mode = mode,
-            Cache = SqliteCacheMode.Shared,
+            // A shared cache reuses the first pager: a ReadOnly answer read can make a later writer read-only.
+            // Keep each annotation connection independent; WAL still permits overlapping readers and writers.
+            Cache = SqliteCacheMode.Private,
             Pooling = false
         }.ToString());
         connection.Open();
+        using var foreignKeys = connection.CreateCommand();
+        foreignKeys.CommandText = "PRAGMA foreign_keys=ON;";
+        foreignKeys.ExecuteNonQuery();
         return connection;
     }
 
@@ -1079,46 +999,6 @@ public sealed class AnnotationDatabaseService
         Add(command, "$ProcessName", target.ProcessName);
         Add(command, "$Label", target.Label);
         Add(command, "$DisplayPath", target.DisplayPath);
-    }
-
-    private static void AddAiRecordParameters(SqliteCommand command, AiInvestigationRecord record)
-    {
-        Add(command, "$InvestigationId", string.IsNullOrWhiteSpace(record.InvestigationId) ? Guid.NewGuid().ToString("N") : record.InvestigationId);
-        Add(command, "$TargetKind", record.TargetKind);
-        Add(command, "$TargetTable", record.TargetTable);
-        Add(command, "$TargetId", record.TargetId);
-        Add(command, "$ArtifactId", record.ArtifactId);
-        Add(command, "$CaseId", record.CaseId);
-        Add(command, "$EvidenceSessionId", record.EvidenceSessionId);
-        Add(command, "$CaptureId", record.CaptureId);
-        Add(command, "$SourceIdentityId", record.SourceIdentityId);
-        Add(command, "$HostId", record.HostId);
-        Add(command, "$ProcessKey", record.ProcessKey);
-        Add(command, "$ProcessId", record.ProcessId);
-        Add(command, "$ProcessName", record.ProcessName);
-        Add(command, "$Label", record.Label);
-        Add(command, "$DisplayPath", record.DisplayPath);
-        Add(command, "$SourceScopeKind", record.SourceScopeKind);
-        Add(command, "$SourceScopeSummary", record.SourceScopeSummary);
-        Add(command, "$PromptTemplateId", record.PromptTemplateId);
-        Add(command, "$PromptTemplateTitle", record.PromptTemplateTitle);
-        Add(command, "$SystemPrompt", record.SystemPrompt);
-        Add(command, "$AnalystPrompt", record.AnalystPrompt);
-        Add(command, "$FinalPrompt", record.FinalPrompt);
-        Add(command, "$ProviderKind", record.ProviderKind.ToString());
-        Add(command, "$ProviderName", record.ProviderName);
-        Add(command, "$BaseUrl", record.BaseUrl);
-        Add(command, "$ModelName", record.ModelName);
-        Add(command, "$RequestedUtc", record.RequestedUtc);
-        Add(command, "$CompletedUtc", record.CompletedUtc);
-        Add(command, "$Status", record.Status.ToString());
-        Add(command, "$RequestCharacterCount", record.RequestCharacterCount);
-        Add(command, "$ResponseCharacterCount", record.ResponseCharacterCount);
-        Add(command, "$PromptTokens", record.PromptTokens);
-        Add(command, "$CompletionTokens", record.CompletionTokens);
-        Add(command, "$TotalTokens", record.TotalTokens);
-        Add(command, "$ErrorText", record.ErrorText);
-        Add(command, "$ResponseText", record.ResponseText);
     }
 
     private static void AddAiChatMessageParameters(SqliteCommand command, AiChatMessage message)
@@ -1214,49 +1094,6 @@ public sealed class AnnotationDatabaseService
             Tags = GetString(reader, 16),
             CreatedUtc = GetDateTime(reader, 17) ?? DateTime.UtcNow,
             UpdatedUtc = GetDateTime(reader, 18) ?? DateTime.UtcNow
-        };
-    }
-
-    private static AiInvestigationRecord ReadAiInvestigation(SqliteDataReader reader)
-    {
-        return new AiInvestigationRecord
-        {
-            InvestigationId = GetString(reader, 0),
-            TargetKind = GetString(reader, 1),
-            TargetTable = GetString(reader, 2),
-            TargetId = GetString(reader, 3),
-            ArtifactId = GetString(reader, 4),
-            CaseId = GetString(reader, 5),
-            EvidenceSessionId = GetString(reader, 6),
-            CaptureId = GetString(reader, 7),
-            SourceIdentityId = GetString(reader, 8),
-            HostId = GetString(reader, 9),
-            ProcessKey = GetString(reader, 10),
-            ProcessId = GetInt(reader, 11),
-            ProcessName = GetString(reader, 12),
-            Label = GetString(reader, 13),
-            DisplayPath = GetString(reader, 14),
-            SourceScopeKind = GetString(reader, 15),
-            SourceScopeSummary = GetString(reader, 16),
-            PromptTemplateId = GetString(reader, 17),
-            PromptTemplateTitle = GetString(reader, 18),
-            SystemPrompt = GetString(reader, 19),
-            AnalystPrompt = GetString(reader, 20),
-            FinalPrompt = GetString(reader, 21),
-            ProviderKind = ParseEnum(GetString(reader, 22), AiProviderKind.Disabled),
-            ProviderName = GetString(reader, 23),
-            BaseUrl = GetString(reader, 24),
-            ModelName = GetString(reader, 25),
-            RequestedUtc = GetDateTime(reader, 26) ?? DateTime.UtcNow,
-            CompletedUtc = GetDateTime(reader, 27),
-            Status = ParseEnum(GetString(reader, 28), AiInvestigationStatus.Failed),
-            RequestCharacterCount = GetInt(reader, 29),
-            ResponseCharacterCount = GetInt(reader, 30),
-            PromptTokens = GetNullableInt(reader, 31),
-            CompletionTokens = GetNullableInt(reader, 32),
-            TotalTokens = GetNullableInt(reader, 33),
-            ErrorText = GetString(reader, 34),
-            ResponseText = GetString(reader, 35)
         };
     }
 

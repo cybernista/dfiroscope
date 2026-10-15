@@ -92,6 +92,7 @@ public sealed class MemoryDumpRowViewModel : ViewModelBase
             SourceIdentityId = _record.SourceIdentityId,
             HostId = _record.HostId,
             ExecutionRootId = _record.ExecutionRootId,
+            SourceRunId = _record.SourceRunId,
             ProcessKey = _record.ProcessKey,
             ProcessId = ProcessId,
             ProcessName = ProcessName,

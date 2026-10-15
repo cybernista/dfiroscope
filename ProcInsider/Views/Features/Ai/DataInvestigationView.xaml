@@ -1,0 +1,178 @@
+<UserControl x:Class="ProcInsider.Views.Features.Ai.DataInvestigationView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ai="clr-namespace:ProcInsider.Views.Features.Ai">
+    <UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="AiConversationResources.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></UserControl.Resources>
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <ScrollViewer Grid.Row="0" MaxHeight="80" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
+            <TextBlock Text="Formal process investigation" FontSize="17" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding ProviderDestination}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding Investigation.Title, TargetNullValue=No saved investigation loaded}" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding TargetSummary}" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding Investigation.Status, StringFormat=Status: {0}}"/>
+            <TextBlock Text="{Binding LastSubmissionDestination}" TextWrapping="Wrap"/>
+            <TextBlock Text="Submitting an investigation sends its pinned process context and checked evidence to the configured provider. A cloud/external endpoint sends data outside this computer."
+                       TextWrapping="Wrap" Foreground="#805000"/>
+        </StackPanel></ScrollViewer>
+        <TextBlock Grid.Row="1" Text="Configure providers in Explorer > AI providers." TextTrimming="CharacterEllipsis" ToolTip="Configure and select providers in Explorer > AI providers." Foreground="#805000" Margin="0,5,0,5"/>
+        <WrapPanel Grid.Row="2" Margin="0,0,0,6">
+            <Button Content="Start reviewed investigation" Command="{Binding StartReviewedCommand}"
+                    Visibility="{Binding HasPendingStart, Converter={StaticResource BoolToVisibilityConverter}}" Margin="0,0,5,0"/>
+            <Button Content="Reload saved state" Command="{Binding ReloadSavedCommand}" Margin="0,0,5,0"/>
+            <Button Content="Run selected task" Command="{Binding RunTaskCommand}" Margin="0,0,5,0"/>
+        </WrapPanel>
+        <DockPanel Grid.Row="3" Margin="0,0,0,6">
+            <WrapPanel DockPanel.Dock="Bottom" Margin="0,5,0,0">
+                <Button Command="{Binding ContinueFromQuestionCommand}" Margin="0,0,5,0"><Button.Style><Style TargetType="Button"><Setter Property="Content" Value="Send"/><Style.Triggers><DataTrigger Binding="{Binding IsBusy}" Value="True"><Setter Property="Content" Value="Sending…"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" Margin="0,0,5,0"/>
+                <Button Content="{Binding CorrectionActionText}" Command="{Binding PrepareCorrectionCommand}"
+                        Visibility="{Binding HasCorrectionOption, Converter={StaticResource AiCorrectionVisibility}}"
+                        ToolTip="Prepare an editable follow-up. Only Send contacts the provider." Margin="0,0,5,0"/>
+                <Button Content="System prompt" Command="{Binding EditSystemPromptCommand}"/>
+            </WrapPanel>
+            <TextBox x:Name="Composer" Text="{Binding Question, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" MaxHeight="100" VerticalScrollBarVisibility="Auto" IsReadOnly="{Binding IsBusy}" ai:AiConversationInteraction.SendCommand="{Binding ContinueFromQuestionCommand}" ToolTip="Enter to send; Shift+Enter for a new line"/>
+        </DockPanel>
+        <TabControl Grid.Row="4">
+            <TabItem Header="Summary">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="8">
+                    <TextBlock Text="Objective" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding Investigation.Objective}" TextWrapping="Wrap"/>
+                    <TextBlock Text="Summary" FontWeight="SemiBold" Margin="0,8,0,0"/>
+                    <TextBlock Text="{Binding Investigation.Summary, TargetNullValue=No summary yet}" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding Progress}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                </StackPanel></ScrollViewer>
+            </TabItem>
+            <TabItem Header="Findings">
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <ListBox Grid.Column="0" ItemsSource="{Binding Findings}" SelectedItem="{Binding SelectedFinding}"
+                         HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="5">
+                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding Claim}" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding Description}" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding Severity, StringFormat=Severity: {0}}"/>
+                        <TextBlock Text="{Binding Confidence, StringFormat=Confidence: {0}}"/>
+                        <TextBlock Text="{Binding VerificationStatus, StringFormat=Verification: {0}}"/>
+                        <TextBlock Text="{Binding CreatedByExecutionId, StringFormat=Created by execution: {0}}"/>
+                    </StackPanel></DataTemplate></ListBox.ItemTemplate>
+                </ListBox>
+                <Grid Grid.Column="1" Margin="8,0,0,0"><Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="Selected finding: supporting and contradicting evidence" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                    <ListBox Grid.Row="1" ItemsSource="{Binding SelectedFindingLinks}" SelectedItem="{Binding SelectedEvidenceLink}"
+                             HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4">
+                            <TextBlock Text="{Binding Polarity}" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding Reference.DisplayName}" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding Reference.ReferenceId}" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding Reference.SourceRunId, StringFormat=Run: {0}}"/>
+                            <TextBlock Text="{Binding Reference.SourceRevision, StringFormat=Revision: {0}}"/>
+                        </StackPanel></DataTemplate></ListBox.ItemTemplate>
+                    </ListBox>
+                    <Button Grid.Row="2" Content="Open selected original" Command="{Binding OpenEvidenceCommand}"/>
+                </Grid>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Hypotheses">
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <ListBox Grid.Column="0" ItemsSource="{Binding Hypotheses}" SelectedItem="{Binding SelectedHypothesis}"
+                             HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="5">
+                            <TextBlock Text="{Binding Statement}" TextWrapping="Wrap" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding Status, StringFormat=Status: {0}}"/>
+                            <TextBlock Text="{Binding Confidence, StringFormat=Confidence: {0}}"/>
+                            <TextBlock Text="{Binding CreatedByExecutionId, StringFormat=Created by execution: {0}}"/>
+                        </StackPanel></DataTemplate></ListBox.ItemTemplate>
+                    </ListBox>
+                    <Grid Grid.Column="1" Margin="8,0,0,0"><Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="Selected hypothesis: supporting and contradicting evidence" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                        <ListBox Grid.Row="1" ItemsSource="{Binding SelectedHypothesisLinks}" SelectedItem="{Binding SelectedEvidenceLink}"
+                                 HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4">
+                                <TextBlock Text="{Binding Polarity}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding Reference.DisplayName}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding Reference.ReferenceId}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding Reference.SourceRunId, StringFormat=Run: {0}}"/>
+                                <TextBlock Text="{Binding Reference.SourceRevision, StringFormat=Revision: {0}}"/>
+                            </StackPanel></DataTemplate></ListBox.ItemTemplate>
+                        </ListBox>
+                        <Button Grid.Row="2" Content="Open selected original" Command="{Binding OpenEvidenceCommand}"/>
+                    </Grid>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Tasks and open questions">
+                <Grid Margin="5"><Grid.RowDefinitions><RowDefinition Height="2*"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <ListBox Grid.Row="0" ItemsSource="{Binding Tasks}" SelectedItem="{Binding SelectedTask}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4">
+                            <TextBlock Text="{Binding Objective}" TextWrapping="Wrap" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding Status, StringFormat=Status: {0}}"/>
+                            <TextBlock Text="{Binding ResultSummary}" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding CreatedByExecutionId, StringFormat=Created by execution: {0}, TargetNullValue=Created by analyst}"/>
+                        </StackPanel></DataTemplate></ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel Grid.Row="1"><TextBlock Text="Open questions" FontWeight="SemiBold"/>
+                        <ListBox ItemsSource="{Binding Investigation.OpenQuestions}"/></StackPanel>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Evidence">
+                <Grid Margin="5"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <ListBox Grid.Row="0" ItemsSource="{Binding EvidenceLinks}" SelectedItem="{Binding SelectedEvidenceLink}"
+                             HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4">
+                            <TextBlock Text="{Binding Reference.DisplayName}" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding Polarity, StringFormat=Polarity: {0}}"/>
+                            <TextBlock Text="{Binding Owner, StringFormat=Supports: {0}}"/>
+                            <TextBlock Text="{Binding OwnerId, StringFormat=Owner ID: {0}}"/>
+                            <TextBlock Text="{Binding Reference.ReferenceId, StringFormat=Exact reference: {0}}"/>
+                            <TextBlock Text="{Binding Reference.SourceRunId, StringFormat=Source run: {0}}"/>
+                            <TextBlock Text="{Binding Reference.SourceRevision, StringFormat=Revision: {0}}"/>
+                        </StackPanel></DataTemplate></ListBox.ItemTemplate>
+                    </ListBox>
+                    <Button Grid.Row="1" Content="Open selected original" Command="{Binding OpenEvidenceCommand}" HorizontalAlignment="Left"/>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Activity">
+                <ListBox ItemsSource="{Binding Activity}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4">
+                        <TextBlock Text="{Binding TimeUtc, StringFormat={}{0:O}}"/>
+                        <TextBlock Text="{Binding Kind}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding Detail}" TextWrapping="Wrap"/>
+                    </StackPanel></DataTemplate></ListBox.ItemTemplate>
+                </ListBox>
+            </TabItem>
+            <TabItem Header="Conversation">
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <ListBox x:Name="Transcript" Grid.Column="0" ItemsSource="{Binding Messages}" SelectedItem="{Binding SelectedMessage}" Style="{StaticResource AiTranscriptStyle}" ItemTemplateSelector="{StaticResource AiMessageTemplates}"/>
+                    <Grid Grid.Column="1" Margin="8,0,0,0"><Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="Exact answer citations" FontWeight="SemiBold"/>
+                        <ListBox Grid.Row="1" ItemsSource="{Binding SelectedMessageReferences}" SelectedItem="{Binding SelectedReference}"
+                                 HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4">
+                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding ReferenceId, StringFormat=Exact reference: {0}}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding SourceRunId, StringFormat=Source run: {0}}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding SourceRevision, StringFormat=Revision: {0}}" TextWrapping="Wrap"/>
+                            </StackPanel></DataTemplate></ListBox.ItemTemplate>
+                        </ListBox>
+                        <Button Grid.Row="2" Content="Open selected citation" Command="{Binding NavigateSelectedReferenceCommand}"/>
+                    </Grid>
+                </Grid>
+            </TabItem>
+        </TabControl>
+        <StackPanel Grid.Row="5">
+            <TextBlock Text="{Binding HistoryStatus}" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
+            <TextBlock Style="{StaticResource AiCorrectionGuidanceStyle}"/>
+        </StackPanel>
+    </Grid>
+</UserControl>

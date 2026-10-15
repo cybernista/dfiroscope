@@ -90,7 +90,13 @@ public static class CaptureCompatibilityPolicy
             Define(310, "031_reputation_attributions", CaptureMigrationKind.RebuildableAnalysisState,
                 "Add immutable exact-evidence process reputation attributions and bounded query indexes.", ["030_yara_risk_inputs"]),
             Define(320, "032_infrastructure_evidence_outbox", CaptureMigrationKind.PrimaryEvidence,
-                "Add the inert transactional Infrastructure evidence outbox and durable acknowledgement ledger.", ["025_authenticode_verification"])
+                "Add the inert transactional Infrastructure evidence outbox and durable acknowledgement ledger.", ["025_authenticode_verification"]),
+            Define(330, "033_os_network_endpoints", CaptureMigrationKind.PrimaryEvidence,
+                "Add immutable native endpoint observations and per-family committed poll coverage.", ["032_infrastructure_evidence_outbox"]),
+            Define(340, "034_persistence_history", CaptureMigrationKind.PrimaryEvidence,
+                "Add atomic persistence collection history and rebuildable comparison projections.", ["033_os_network_endpoints"]),
+            Define(350, "035_forensic_artifact_results", CaptureMigrationKind.PrimaryEvidence,
+                "Add immutable structured artifact bodies and original-not-retained source-read provenance.", ["034_persistence_history"])
         };
 
         ValidateMigrationDefinitions(definitions);

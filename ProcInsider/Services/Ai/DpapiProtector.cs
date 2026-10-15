@@ -1,5 +1,8 @@
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using System.Text;
+
+[assembly: InternalsVisibleTo("ApplicationAiWorkflowSelfTest")]
 
 namespace ProcInsider.Services.Ai;
 

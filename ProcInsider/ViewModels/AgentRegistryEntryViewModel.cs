@@ -455,6 +455,14 @@ public partial class AgentRegistryEntryViewModel : ViewModelBase
 
         DeploymentState = AgentDeploymentState.Available;
         CaptureState = MapCaptureState(response.Health.CaptureHealth.Health);
+        var persistenceOption = CaptureOptions.FirstOrDefault(option => option.Kind == AgentCaptureOptionKind.Persistence);
+        if (persistenceOption is { IsPublished: true })
+        {
+            var sources = response.Health.CaptureHealth.PersistenceSources;
+            persistenceOption.CapturedItemCount = (int)Math.Min(int.MaxValue, sources.Sum(source => (long)source.ArtifactCount));
+            persistenceOption.StatusText = sources.Count == 0 ? "No accepted Persistence collection reported." : string.Join("; ", sources.Select(source =>
+                $"{source.CollectorId}: {source.Status}, {source.ArtifactCount:N0} artifacts, {source.Coverage.Count:N0} coverage partitions; last success {source.LastSuccessfulCollectionUtc?.ToString("u") ?? "none"}. {source.Diagnostic}"));
+        }
         var releaseProfileError = response.Health.ReleaseProfile.Match == AgentReleaseProfileMatch.Match
             ? string.Empty
             : FirstNonEmpty(
@@ -1011,6 +1019,7 @@ public partial class AgentRegistryEntryViewModel : ViewModelBase
                 configuration.SourceToggles.PowerShell ? "PowerShell" : string.Empty,
                 configuration.SourceToggles.WindowsOther ? "WindowsOther" : string.Empty,
                 configuration.SourceToggles.Sysmon ? "Sysmon" : string.Empty,
+                configuration.SourceToggles.OsNetworkEndpoints ? "OS endpoints" : string.Empty,
                 configuration.NetworkCapture.Enabled ? "Network" : string.Empty,
                 configuration.Zeek.Enabled || configuration.Zeek.RunAfterNetworkCapture ? "Zeek" : string.Empty
             }

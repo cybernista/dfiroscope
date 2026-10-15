@@ -1,0 +1,47 @@
+<UserControl x:Class="ProcInsider.Features.InvestigationWorkspaces.AiWorkspaceView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ProcInsider.Features.InvestigationWorkspaces"
+             xmlns:ai="clr-namespace:ProcInsider.Views.Features.Ai">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../../Views/Features/Ai/AiSavedItemResources.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="SavedItemStyle" TargetType="ListBoxItem">
+                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=local:AiWorkspaceView}}"/>
+                <Setter Property="ContextMenu">
+                    <Setter.Value>
+                        <ContextMenu>
+                            <MenuItem Header="Open in a new workspace"
+                                      Command="{Binding PlacementTarget.Tag.OpenSavedAiNewCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                        </ContextMenu>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <Grid Margin="4">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="240" MinWidth="160"/>
+            <ColumnDefinition Width="6"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <DockPanel>
+            <Button DockPanel.Dock="Top" Content="New chat" Command="{Binding NewChatCommand}"
+                    HorizontalAlignment="Left" Margin="4,0,4,5"/>
+            <TextBlock DockPanel.Dock="Top" Text="Saved chats and investigations" FontWeight="SemiBold" Margin="4"/>
+            <ListBox x:Name="SavedItemsList" ItemsSource="{Binding SavedAiItems}"
+                     ItemContainerStyle="{StaticResource SavedItemStyle}"
+                     SelectionChanged="SavedItemSelected" PreviewMouseLeftButtonDown="SavedItemMouseDown"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"/>
+        </DockPanel>
+        <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+        <ai:AiConversationLayoutView Grid.Column="2" Conversation="{Binding Conversation}"
+                                     TechnicalDetailsVisible="{Binding TechnicalDetailsVisible}"
+                                     ToggleTechnicalDetailsCommand="{Binding ToggleTechnicalDetailsCommand}"/>
+    </Grid>
+</UserControl>

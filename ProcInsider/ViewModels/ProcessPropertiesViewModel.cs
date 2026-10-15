@@ -59,12 +59,12 @@ public class ProcessPropertiesViewModel : ViewModelBase
         Add("Identity", "Process Name", process.ProcessName);
         Add("Identity", "Process ID", process.ProcessId.ToString());
         Add("Identity", "Process Key", process.ProcessKey);
-        Add("Lineage", "Parent PID", process.ParentProcessId.ToString());
+        Add("Lineage", "Parent PID", process.ParentProcessIdDisplay);
         Add("Lineage", "Parent Name", process.ParentProcessName);
         Add("Execution", "Path", process.ProcessPath);
         Add("Execution", "Command Line", process.CommandLine);
         Add("Execution", "User", process.UserName);
-        Add("Execution", "Session", process.SessionId.ToString());
+        Add("Execution", "Session", process.SessionIdDisplay);
         Add("Execution", "Architecture", process.Architecture);
         Add("Runtime", "Status", process.StatusDisplay);
         Add("Runtime", "Start Time", process.StartTimeDisplay);

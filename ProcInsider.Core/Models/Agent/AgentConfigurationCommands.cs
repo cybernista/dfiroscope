@@ -83,6 +83,12 @@ public sealed record SaveCaptureConfigurationCommand : AgentConfigurationCommand
     public override AgentCommandKind Kind => AgentCommandKind.SaveCaptureConfiguration;
 
     public AgentCaptureConfiguration Configuration { get; init; } = new();
+
+    /// <summary>Only an explicit Add/Start setup changes this process's lifetime. Ordinary saves preserve it.</summary>
+    public bool ApplyRunDuration { get; init; }
+
+    /// <summary>Positive minutes from confirmed setup; null means indefinitely. Never persisted into capture settings.</summary>
+    public int? RunDurationMinutes { get; init; }
 }
 
 /// <summary>Checks capture configuration readiness without starting capture.</summary>

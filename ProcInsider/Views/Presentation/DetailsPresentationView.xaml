@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:ProcInsider"
+        xmlns:local="clr-namespace:ProcInsider.Views.Presentation"
         xmlns:models="clr-namespace:ProcInsider.Models;assembly=DFIRoscope.Core"
         xmlns:viewerModels="clr-namespace:ProcInsider.Models"
         xmlns:vm="clr-namespace:ProcInsider.ViewModels"
@@ -20,7 +20,11 @@
         xmlns:presentation="clr-namespace:ProcInsider.Services.Presentation"
         presentation:ViewerPresentationContext.SharedActions="{Binding SharedActions}"
         mc:Ignorable="d">
-<UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="ViewerPresentationResources.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></UserControl.Resources>
+<UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="ViewerPresentationResources.xaml"/></ResourceDictionary.MergedDictionaries>
+    <DataTemplate x:Key="ProcessChats"><aiViews:ProcessSavedAiView/></DataTemplate>
+    <DataTemplate x:Key="RecordChats"><aiViews:ProcessConversationView DataContext="{Binding ProcessConversationViewModel}"/></DataTemplate>
+    <local:DetailsAiTemplateSelector x:Key="ChatsSelector" ProcessTemplate="{StaticResource ProcessChats}" RecordTemplate="{StaticResource RecordChats}"/>
+</ResourceDictionary></UserControl.Resources>
 
 <Border Padding="6" Background="#FFF7F7F7">
                     <Grid>
@@ -178,108 +182,9 @@
                                 </Grid>
                             </Grid>
                         </TabItem>
-                        <TabItem Header="AI"
-                                 Tag="{x:Static viewerModels:ViewerDetailsTabKey.Ai}"
-                                 Visibility="{Binding DataContext.FeaturePublication.AiAssistance, RelativeSource={RelativeSource AncestorType=presentationViews:DetailsPresentationView}, Converter={StaticResource BoolToVisibilityConverter}}"
-                                 DataContext="{Binding AiDetailsInvestigationViewModel}">
-                            <Grid Margin="2">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="*"/>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="*"/>
-                                </Grid.RowDefinitions>
-
-                                <Border Grid.Row="0"
-                                        Margin="0,0,0,6"
-                                        Padding="8"
-                                        Background="#FFFFFFFF"
-                                        BorderBrush="#FFD8D8D8"
-                                        BorderThickness="1">
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding CurrentTargetDisplay}"
-                                                   FontWeight="SemiBold"
-                                                   FontSize="13"/>
-                                        <TextBlock Text="{Binding ProviderStatusDisplay}"
-                                                   Margin="0,4,0,0"
-                                                   Foreground="#555555"
-                                                   TextWrapping="Wrap"/>
-                                        <TextBlock Text="{Binding PrivacyWarning}"
-                                                   Margin="0,4,0,0"
-                                                   Foreground="#7A4D00"
-                                                   TextWrapping="Wrap"/>
-                                    </StackPanel>
-                                </Border>
-
-                                <Grid Grid.Row="1" Margin="0,0,0,6">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-
-                                    <TextBox Grid.Column="0"
-                                             Text="{Binding ArtifactPrompt, UpdateSourceTrigger=PropertyChanged}"
-                                             MinHeight="48"
-                                             TextWrapping="Wrap"
-                                             AcceptsReturn="True"
-                                             VerticalScrollBarVisibility="Auto"
-                                             IsEnabled="{Binding HasArtifactSelected}"/>
-                                    <Button Grid.Column="1"
-                                            Content="Investigate"
-                                            Command="{Binding RunInvestigationCommand}"
-                                            Margin="6,0,0,0"
-                                            Padding="10,4"
-                                            VerticalAlignment="Top"/>
-                                    <Button Grid.Column="2"
-                                            Content="Cancel"
-                                            Command="{Binding CancelInvestigationCommand}"
-                                            Margin="6,0,0,0"
-                                            Padding="10,4"
-                                            VerticalAlignment="Top"/>
-                                </Grid>
-
-                                <Grid Grid.Row="2">
-                                    <TextBlock Margin="12"
-                                               Text="Select an artifact in Details to build an AI evidence preview."
-                                               Foreground="#666666"
-                                               TextWrapping="Wrap"
-                                               VerticalAlignment="Center"
-                                               HorizontalAlignment="Center"
-                                               Visibility="{Binding HasArtifactSelected, Converter={StaticResource InverseBoolToVisibilityConverter}}"/>
-                                    <TextBox Text="{Binding EvidencePreview, Mode=OneWay}"
-                                             IsReadOnly="True"
-                                             TextWrapping="Wrap"
-                                             AcceptsReturn="True"
-                                             VerticalScrollBarVisibility="Auto"
-                                             FontFamily="Consolas"
-                                             FontSize="11"
-                                             Visibility="{Binding HasArtifactSelected, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                                </Grid>
-
-                                <DockPanel Grid.Row="3" Margin="0,6,0,4">
-                                    <ProgressBar DockPanel.Dock="Left"
-                                                 Width="100"
-                                                 Height="16"
-                                                 IsIndeterminate="{Binding IsBusy}"
-                                                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                 Margin="0,0,8,0"/>
-                                    <TextBlock Text="{Binding StatusMessage}"
-                                               VerticalAlignment="Center"
-                                               TextWrapping="Wrap"/>
-                                </DockPanel>
-
-                                <TextBox Grid.Row="4"
-                                         Text="{Binding ResponseText, Mode=OneWay}"
-                                         IsReadOnly="True"
-                                         TextWrapping="Wrap"
-                                         AcceptsReturn="True"
-                                         VerticalScrollBarVisibility="Auto"
-                                         FontFamily="Consolas"
-                                         FontSize="11"/>
-                            </Grid>
-                        </TabItem>
+                        <TabItem Header="Chats" Tag="{x:Static viewerModels:ViewerDetailsTabKey.Ai}"
+                                 Visibility="{Binding FeaturePublication.AiAssistance, Converter={StaticResource BoolToVisibilityConverter}}"
+                                 Content="{Binding}" ContentTemplateSelector="{StaticResource ChatsSelector}"/>
                     </TabControl>
                     </Grid>
                 </Border>

@@ -32,6 +32,9 @@ internal sealed class AgentJobConcurrencyCoordinator
         var leases = new List<IDisposable>();
         try
         {
+            // The queue owns one scheduling-only lifecycle slot. Holding a shared
+            // database lease while idle would deadlock a poll behind an exclusive import.
+            if (request.JobKind == JobKind.PersistenceCapture) return new JobConcurrencyLease(request.JobKind, leases);
             leases.Add(IsDatabaseExclusive(request.JobKind)
                 ? await _databaseGate.AcquireExclusiveAsync(cancellationToken).ConfigureAwait(false)
                 : await _databaseGate.AcquireSharedAsync(cancellationToken).ConfigureAwait(false));
@@ -43,6 +46,12 @@ internal sealed class AgentJobConcurrencyCoordinator
                     break;
                 case JobKind.NetworkCapture:
                     leases.Add(await AcquireResourceAsync("network-capture", cancellationToken).ConfigureAwait(false));
+                    break;
+                case JobKind.PersistenceCollection:
+                    leases.Add(await AcquireResourceAsync("persistence-collection", cancellationToken).ConfigureAwait(false));
+                    break;
+                case JobKind.PrefetchCollection:
+                    leases.Add(await AcquireResourceAsync("prefetch-collection", cancellationToken).ConfigureAwait(false));
                     break;
                 case JobKind.ProcessMonitorCapture:
                     leases.Add(await AcquireResourceAsync("process-monitor-capture", cancellationToken).ConfigureAwait(false));

@@ -1,0 +1,28 @@
+<UserControl x:Class="ProcInsider.Views.Features.Ai.InvestigationConversationView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ai="clr-namespace:ProcInsider.Views.Features.Ai">
+ <UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="AiConversationResources.xaml"/></ResourceDictionary.MergedDictionaries><BooleanToVisibilityConverter x:Key="Visible"/></ResourceDictionary></UserControl.Resources>
+ <Grid Margin="6"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <ScrollViewer MaxHeight="112" VerticalScrollBarVisibility="Auto"><StackPanel>
+   <TextBlock Text="{Binding Investigation.Title}" FontSize="16" FontWeight="SemiBold"/>
+   <TextBlock Text="{Binding Investigation.Status, StringFormat=Status: {0}}" TextWrapping="Wrap"/>
+   <TextBlock Text="{Binding ProviderDestination}" TextWrapping="Wrap"/>
+   <TextBlock Text="{Binding TargetSummary}" TextWrapping="Wrap"/>
+   <TextBlock Text="Submitting sends this pinned investigation and checked evidence to the displayed provider. An external endpoint sends data outside this computer." TextWrapping="Wrap" Foreground="#805000"/>
+  </StackPanel></ScrollViewer>
+  <ListBox x:Name="Transcript" Grid.Row="1" ItemsSource="{Binding Messages}" SelectedItem="{Binding SelectedMessage}" Style="{StaticResource AiTranscriptStyle}" ItemTemplateSelector="{StaticResource AiMessageTemplates}"/>
+  <DockPanel Grid.Row="2" Margin="0,5,0,0">
+   <WrapPanel DockPanel.Dock="Bottom" Margin="0,5,0,0">
+    <Button Command="{Binding ContinueFromQuestionCommand}" Margin="0,0,5,0"><Button.Style><Style TargetType="Button"><Setter Property="Content" Value="Send"/><Style.Triggers><DataTrigger Binding="{Binding IsBusy}" Value="True"><Setter Property="Content" Value="Sending…"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+    <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" Margin="0,0,5,0"/>
+    <Button Content="{Binding CorrectionActionText}" Command="{Binding PrepareCorrectionCommand}"
+            Visibility="{Binding HasCorrectionOption, Converter={StaticResource AiCorrectionVisibility}}"
+            ToolTip="Prepare an editable follow-up. Only Send contacts the provider." Margin="0,0,5,0"/>
+    <Button Content="System prompt" Command="{Binding EditSystemPromptCommand}"/>
+   </WrapPanel>
+   <TextBox x:Name="Composer" Text="{Binding Question, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" MaxHeight="100" VerticalScrollBarVisibility="Auto" IsReadOnly="{Binding IsBusy}" ai:AiConversationInteraction.SendCommand="{Binding ContinueFromQuestionCommand}" ToolTip="Enter to send; Shift+Enter for a new line"/>
+  </DockPanel>
+  <StackPanel Grid.Row="3"><TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
+   <TextBlock Style="{StaticResource AiCorrectionGuidanceStyle}"/></StackPanel>
+ </Grid>
+</UserControl>

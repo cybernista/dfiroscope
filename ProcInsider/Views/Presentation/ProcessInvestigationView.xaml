@@ -86,6 +86,7 @@
                 <!-- Process DataGrid -->
                 <DataGrid Grid.Row="3"
                           x:Name="ProcessDataGrid"
+                          PreviewMouseRightButtonDown="ProcessDataGrid_PreviewMouseRightButtonDown"
                           ItemsSource="{Binding ProcessesView, NotifyOnTargetUpdated=True}"
                           TargetUpdated="ProcessDataGrid_TargetUpdated"
                           Loaded="ProcessDataGrid_Loaded"
@@ -116,6 +117,16 @@
                           LoadingRow="ProcessDataGrid_LoadingRow"
                           FontSize="12">
 
+                    <DataGrid.ContextMenu>
+                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"
+                                     Visibility="{Binding FeaturePublication.AiAssistance, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <MenuItem Header="New chat" Command="{Binding NewChatSelectedProcessCommand}"/>
+                            <MenuItem Header="Investigate" Command="{Binding InvestigateSelectedProcessFromMenuCommand}"/>
+                            <MenuItem Header="Review record" Command="{Binding ReviewSelectedProcessRecordInNewChatCommand}"/>
+                            <MenuItem Header="Find related activity" Command="{Binding FindSelectedProcessRelatedActivityInNewChatCommand}"/>
+                        </ContextMenu>
+                    </DataGrid.ContextMenu>
+
                     <DataGrid.Columns>
                         <!-- Process Name (with tree indentation) -->
                         <DataGridTemplateColumn Header="Tree" Width="200" SortMemberPath="Tree"
@@ -133,7 +144,7 @@
                         <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="60"
                                             CanUserSort="True" SortMemberPath="ProcessId"/>
 
-                        <DataGridTextColumn Header="Parent PID" Binding="{Binding ParentProcessId}" Width="75"
+                        <DataGridTextColumn Header="Parent PID" Binding="{Binding ParentProcessIdDisplay}" Width="75"
                                             CanUserSort="True" SortMemberPath="ParentProcessId"/>
 
                         <DataGridTextColumn Header="Parent Name" Binding="{Binding ParentProcessName}" Width="120"
@@ -162,7 +173,7 @@
                         <DataGridTextColumn Header="User" Binding="{Binding UserName}" Width="120"
                                             CanUserSort="True" SortMemberPath="UserName"/>
 
-                        <DataGridTextColumn Header="Session" Binding="{Binding SessionId}" Width="55"
+                        <DataGridTextColumn Header="Session" Binding="{Binding SessionIdDisplay}" Width="55"
                                             CanUserSort="True" SortMemberPath="SessionId"/>
 
                         <DataGridTextColumn Header="Arch" Binding="{Binding Architecture}" Width="50"

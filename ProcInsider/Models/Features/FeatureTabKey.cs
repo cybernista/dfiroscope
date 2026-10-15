@@ -71,6 +71,7 @@ public static class DataTabKeys
     public static readonly FeatureTabKey WindowsOtherEvents = new(FeatureTabSurface.Data, "windows-other-events");
     public static readonly FeatureTabKey SysmonEvents = new(FeatureTabSurface.Data, "sysmon-events");
     public static readonly FeatureTabKey Ai = new(FeatureTabSurface.Data, "ai");
+    public static readonly FeatureTabKey Investigation = new(FeatureTabSurface.Data, "investigation");
     public static readonly FeatureTabKey Baseline = new(FeatureTabSurface.Data, "baseline");
     public static readonly FeatureTabKey InfrastructureCase = new(FeatureTabSurface.Data, "infrastructure-case");
 }

@@ -70,6 +70,7 @@ public class ProcessListingFilterSet
     public string? ProcessNameContains { get; set; }
     public string? ProcessIdContains { get; set; }
     public int? ProcessIdEquals { get; set; }
+    public string? ProcessEntityIdEquals { get; set; }
     public string? ParentProcessIdContains { get; set; }
     public int? ParentProcessIdEquals { get; set; }
     public string? ParentProcessNameContains { get; set; }
@@ -95,6 +96,10 @@ public class ProcessListingFilterSet
     public string? SourceIdentityId { get; set; }
     public string? HostId { get; set; }
     public string? ExecutionRootId { get; set; }
+    /// <summary>Additional exact case/session/capture/host boundary, including an explicitly empty CaseId.</summary>
+    public EvidenceIdentity? ReadScope { get; set; }
+    /// <summary>Opt-in compatible roots within the explicit case/session/capture/host boundary.</summary>
+    public bool IncludeCompatibleExecutionRoots { get; set; }
     public string? ProcessSubtreeRootKey { get; set; }
     public string? OwnerKey { get; set; }
     public bool RequireModules { get; set; }

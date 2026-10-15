@@ -10,7 +10,8 @@ public enum ViewerAgentEvidenceActionKind
     Unknown = 0,
     Enrichment = 1,
     ProcessDump = 2,
-    FilesystemImport = 3
+    FilesystemImport = 3,
+    CollectPrefetch = 4
 }
 
 public enum ViewerAgentEvidenceActionOutcome
@@ -317,6 +318,19 @@ public sealed class ViewerAgentEvidenceActionService : IDisposable
             wait,
             timeout,
             cancellationToken);
+    }
+
+    /// <summary>Queues the explicit Agent-side fixed-root Prefetch examination; no source path is accepted from the Viewer.</summary>
+    public Task<ViewerAgentEvidenceActionResult> CollectPrefetchAsync(
+        ViewerAgentCaptureActionTarget target,
+        bool wait = false,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        var targetFailure = ValidateTarget(ViewerAgentEvidenceActionKind.CollectPrefetch, target, requireDumpsDirectory: false);
+        return targetFailure == null
+            ? QueueAsync(ViewerAgentEvidenceActionKind.CollectPrefetch, target, new CollectPrefetchCommand(), "collect local Prefetch", wait, timeout, cancellationToken)
+            : Task.FromResult(targetFailure);
     }
 
     public void Dispose()

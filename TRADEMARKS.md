@@ -1,6 +1,6 @@
 # DFIRoscope trademark policy
 
-The project maintainer, [tomek4624](https://github.com/tomek4624), reserves any applicable trademark rights in **DFIRoscope**, names incorporating DFIRoscope (including **DFIRoscope Live**), and the project's logos. This policy does not claim that any mark is registered, or establish rights where applicable law does not provide them.
+The [DFIRoscope project maintainers](https://github.com/cybernista/dfiroscope) reserve any applicable trademark rights in **DFIRoscope**, names incorporating DFIRoscope (including **DFIRoscope Live**), and the project's logos. This policy does not claim that any mark is registered, or establish rights where applicable law does not provide them.
 
 ## Software and branding are separate
 
@@ -14,4 +14,4 @@ You may use the name for truthful attribution, documentation, reviews, compatibi
 
 Do not use the name or logos to imply that a modified fork, service, business, or redistribution is an official DFIRoscope release or is endorsed by the maintainer without permission. Give independently branded forks a distinct name and identity; a truthful statement such as "based on DFIRoscope" is welcome.
 
-Uses permitted by applicable trademark law, including fair or nominative use, are not restricted by this policy. For permission to use the branding beyond these uses, contact the maintainer through the linked GitHub profile.
+Uses permitted by applicable trademark law, including fair or nominative use, are not restricted by this policy. For permission to use the branding beyond these uses, contact the maintainers through the linked project repository.

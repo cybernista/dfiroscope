@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Input;
 using System.Windows.Threading;
 using ProcInsider.Models;
 using ProcInsider.Services.Presentation;
@@ -75,6 +76,14 @@ public partial class ProcessInvestigationView : UserControl
     {
         if (e.Property == ItemsControl.ItemsSourceProperty)
             RestoreProcessSortIndicators();
+    }
+
+    private void ProcessDataGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not DataGrid grid || e.OriginalSource is not DependencyObject source ||
+            ItemsControl.ContainerFromElement(grid, source) is not DataGridRow row) return;
+        grid.SelectedItem = row.Item;
+        row.Focus();
     }
 
     private void ProcessDataGrid_Loaded(object sender, RoutedEventArgs e) => RestoreProcessSortIndicators();

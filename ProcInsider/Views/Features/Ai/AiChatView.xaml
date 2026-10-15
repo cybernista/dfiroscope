@@ -1,108 +1,62 @@
 <UserControl x:Class="ProcInsider.Views.Features.Ai.AiChatView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Grid>
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ai="clr-namespace:ProcInsider.Views.Features.Ai">
+    <UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="AiConversationResources.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></UserControl.Resources>
+    <Grid Margin="5">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-
-        <Border Grid.Row="0"
-                Margin="0,0,0,4"
-                Padding="6"
-                Background="#FFFFFFFF"
-                BorderBrush="#FFD8D8D8"
-                BorderThickness="1">
-            <DockPanel LastChildFill="True">
-                <Button DockPanel.Dock="Right"
-                        Content="Reload"
-                        Command="{Binding ReloadSettingsCommand}"
-                        Padding="8,2"
-                        Margin="6,0,0,0"/>
-                <TextBlock Text="{Binding ProviderStatusDisplay}"
-                           FontWeight="SemiBold"
-                           TextWrapping="Wrap"/>
+        <ScrollViewer Grid.Row="0" MaxHeight="80" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
+            <TextBlock Text="General Assistant conversation" FontWeight="SemiBold"/>
+            <DockPanel Margin="0,0,0,5" Visibility="{Binding HasEvidenceScopeOptions, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="Evidence" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ComboBox ItemsSource="{Binding EvidenceScopeOptions}" SelectedItem="{Binding SelectedEvidenceScope}"
+                          DisplayMemberPath="Label">
+                    <ComboBox.Style><Style TargetType="ComboBox">
+                        <Setter Property="IsEnabled" Value="True"/>
+                        <Style.Triggers><DataTrigger Binding="{Binding IsBusy}" Value="True">
+                            <Setter Property="IsEnabled" Value="False"/>
+                        </DataTrigger></Style.Triggers>
+                    </Style></ComboBox.Style>
+                </ComboBox>
             </DockPanel>
-        </Border>
-
-        <Border Grid.Row="1"
-                Background="#FFFFF6DF"
-                BorderBrush="#FFE0B95C"
-                BorderThickness="1"
-                Padding="6"
-                Margin="0,0,0,4"
-                Visibility="{Binding IsCloudProvider, Converter={StaticResource BoolToVisibilityConverter}}">
-            <TextBlock Text="{Binding PrivacyWarning}"
-                       TextWrapping="Wrap"
-                       Foreground="#664400"/>
-        </Border>
-
-        <Border Grid.Row="2"
-                BorderBrush="#FFD8D8D8"
-                BorderThickness="1"
-                Background="#FFFFFFFF"
-                Margin="0,0,0,4">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="6">
-                <ItemsControl ItemsSource="{Binding Messages}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border BorderBrush="#FFE0E0E0"
-                                    BorderThickness="0,0,0,1"
-                                    Padding="0,0,0,6"
-                                    Margin="0,0,0,6">
-                                <StackPanel>
-                                    <DockPanel Margin="0,0,0,2">
-                                        <TextBlock DockPanel.Dock="Right"
-                                                   Text="{Binding CreatedDisplay}"
-                                                   Foreground="#777777"
-                                                   FontSize="10"/>
-                                        <TextBlock Text="{Binding AuthorDisplay}" FontWeight="SemiBold"/>
-                                    </DockPanel>
-                                    <TextBlock Text="{Binding Content}" TextWrapping="Wrap"/>
-                                    <TextBlock Text="{Binding ProviderDisplay}"
-                                               Foreground="#777777"
-                                               FontSize="10"
-                                               TextTrimming="CharacterEllipsis"/>
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
-        </Border>
-
-        <Grid Grid.Row="3" Margin="0,0,0,4">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <TextBox Grid.Column="0"
-                     Text="{Binding PromptText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                     AcceptsReturn="True"
-                     TextWrapping="Wrap"
-                     VerticalScrollBarVisibility="Auto"
-                     MinHeight="70"
-                     MaxHeight="120"
-                     Padding="4"
-                     FontSize="12"/>
-            <StackPanel Grid.Column="1" Margin="6,0,0,0">
-                <Button Content="Send" Command="{Binding SendMessageCommand}" Padding="10,4" Margin="0,0,0,4"/>
-                <Button Content="Cancel" Command="{Binding CancelCommand}" Padding="10,4" Margin="0,0,0,4"/>
-                <Button Content="Clear" Command="{Binding ClearConversationCommand}" Padding="10,4"/>
-            </StackPanel>
-        </Grid>
-
-        <DockPanel Grid.Row="4">
-            <ProgressBar DockPanel.Dock="Left"
-                         Width="70"
-                         Height="14"
-                         IsIndeterminate="{Binding IsBusy}"
-                         Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"
-                         Margin="0,2,6,0"/>
-            <TextBlock Text="{Binding StatusMessage}" Foreground="#555555" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding ProviderDestination}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding EvidenceDisplay}" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding LastSubmissionDestination}" TextWrapping="Wrap"/>
+            <TextBlock Text="This saved historical chat is read-only. Start a new chat to discuss the current capture."
+                       Visibility="{Binding IsHistoricalView, Converter={StaticResource BoolToVisibilityConverter}}"
+                       Foreground="#805000" TextWrapping="Wrap"/>
+            <TextBlock Text="Sending submits the displayed host, time, workspace and selection hints to the configured provider. A cloud/external endpoint sends them outside this computer. Hints are not evidence; checked citations identify any retrieved originals."
+                       Foreground="#805000" TextWrapping="Wrap"/>
+            <TextBlock Text="General chat does not update a formal investigation. Continue an active investigation in its saved Data view."
+                       TextWrapping="Wrap"/>
+        </StackPanel></ScrollViewer>
+        <TextBlock Grid.Row="1" Text="Configure providers in Explorer > AI providers." TextTrimming="CharacterEllipsis" ToolTip="Configure and select providers in Explorer > AI providers." Foreground="#805000" Margin="0,5,0,5"/>
+        <WrapPanel Grid.Row="2" Margin="0,0,0,5">
+            <Button Content="Continue discussion in saved investigation"
+                    Command="{Binding OpenActiveInvestigationCommand}"
+                    Visibility="{Binding HasActiveInvestigation, Converter={StaticResource BoolToVisibilityConverter}}"
+                    Margin="0,0,5,0"/>
+        </WrapPanel>
+        <StackPanel Grid.Row="3">
+            <TextBlock Text="{Binding HistoryStatus}" TextWrapping="Wrap"/>
+            <TextBlock Style="{StaticResource AiCorrectionGuidanceStyle}"/>
+        </StackPanel>
+        <ListBox x:Name="Transcript" Grid.Row="4" ItemsSource="{Binding Messages}" SelectedItem="{Binding SelectedMessage}" Style="{StaticResource AiTranscriptStyle}" ItemTemplateSelector="{StaticResource AiMessageTemplates}"/>
+        <DockPanel Grid.Row="5" Margin="0,5,0,0">
+            <WrapPanel DockPanel.Dock="Bottom" Margin="0,5,0,0">
+                <Button Command="{Binding SendMessageCommand}" Margin="0,0,5,0"><Button.Style><Style TargetType="Button"><Setter Property="Content" Value="Send"/><Style.Triggers><DataTrigger Binding="{Binding IsBusy}" Value="True"><Setter Property="Content" Value="Sending…"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" Margin="0,0,5,0"/>
+                <Button Content="{Binding CorrectionActionText}" Command="{Binding PrepareCorrectionCommand}"
+                        Visibility="{Binding HasCorrectionOption, Converter={StaticResource AiCorrectionVisibility}}"
+                        ToolTip="Prepare an editable follow-up. Only Send contacts the provider." Margin="0,0,5,0"/>
+                <Button Content="System prompt" Command="{Binding EditSystemPromptCommand}"/>
+            </WrapPanel>
+            <TextBox x:Name="Composer" Text="{Binding PromptText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" MaxHeight="100" VerticalScrollBarVisibility="Auto" IsReadOnly="{Binding IsBusy}" ai:AiConversationInteraction.SendCommand="{Binding SendMessageCommand}" ToolTip="Enter to send; Shift+Enter for a new line"/>
         </DockPanel>
+        <TextBlock Grid.Row="6" Text="{Binding StatusMessage}" TextWrapping="Wrap"/>
     </Grid>
 </UserControl>

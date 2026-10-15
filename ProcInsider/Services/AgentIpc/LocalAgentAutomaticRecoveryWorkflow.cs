@@ -36,7 +36,8 @@ public sealed class LocalAgentAutomaticRecoveryWorkflow
         string activeSessionId,
         string activeDatabaseIdentity,
         bool authenticatedHealthReachable,
-        out LocalAgentRecoveryPromptReason reason)
+        out LocalAgentRecoveryPromptReason reason,
+        Func<AgentPairingDiscoveryRecord, bool>? verifyScheduledShutdown = null)
     {
         reason = LocalAgentRecoveryPromptReason.None;
         if (_promptOpen || target == _lastPromptedTarget || target == _declinedTarget)
@@ -46,7 +47,7 @@ public sealed class LocalAgentAutomaticRecoveryWorkflow
 
         reason = LocalAgentRecoveryPromptPolicy.Evaluate(
             discovery, target, activeSessionId, activeDatabaseIdentity,
-            authenticatedHealthReachable, DisconnectedSinceUtc, _nowUtc());
+            authenticatedHealthReachable, DisconnectedSinceUtc, _nowUtc(), verifyScheduledShutdown);
         if (reason == LocalAgentRecoveryPromptReason.None)
         {
             return false;
@@ -63,11 +64,12 @@ public sealed class LocalAgentAutomaticRecoveryWorkflow
         string activeSessionId,
         string activeDatabaseIdentity,
         bool authenticatedHealthReachable,
-        LocalAgentRecoveryPromptReason expectedReason)
+        LocalAgentRecoveryPromptReason expectedReason,
+        Func<AgentPairingDiscoveryRecord, bool>? verifyScheduledShutdown = null)
     {
         var currentReason = LocalAgentRecoveryPromptPolicy.Evaluate(
             discovery, target, activeSessionId, activeDatabaseIdentity,
-            authenticatedHealthReachable, DisconnectedSinceUtc, _nowUtc());
+            authenticatedHealthReachable, DisconnectedSinceUtc, _nowUtc(), verifyScheduledShutdown);
         if (currentReason == expectedReason)
         {
             return true;

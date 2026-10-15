@@ -57,4 +57,7 @@ public enum AgentCommandKind
     StartLiveCaptureSource = 33,
     QueueMemoryAcquisition = 34,
     RunTelemetryAuditTest = 35,
+    CollectPersistenceNow = 36,
+    RebaselinePersistence = 37,
+    CollectPrefetch = 38,
 }

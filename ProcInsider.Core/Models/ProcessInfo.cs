@@ -96,6 +96,7 @@ public class ProcessInfo
     {
         get
         {
+            if (MemoryUsageBytes < 0) return "<not available>";
             if (MemoryUsageBytes < 1024)
                 return $"{MemoryUsageBytes} B";
             if (MemoryUsageBytes < 1024 * 1024)

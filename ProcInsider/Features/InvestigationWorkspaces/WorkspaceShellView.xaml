@@ -4,8 +4,12 @@
  xmlns:local="clr-namespace:ProcInsider.Features.InvestigationWorkspaces"
  xmlns:presentation="clr-namespace:ProcInsider.Views.Presentation">
  <UserControl.Resources>
+  <DataTemplate x:Key="AiTemplate"><local:AiWorkspaceView/></DataTemplate>
   <DataTemplate x:Key="ProcessesTemplate"><presentation:ProcessInvestigationView DataContext="{Binding Presentation}"/></DataTemplate>
   <DataTemplate x:Key="EventsTemplate"><local:EventsWorkspaceView/></DataTemplate>
+  <DataTemplate x:Key="NetworkTemplate"><local:NetworkWorkspaceView/></DataTemplate>
+  <DataTemplate x:Key="PersistenceTemplate"><local:PersistenceWorkspaceView/></DataTemplate>
+  <DataTemplate x:Key="ArtifactsTemplate"><local:ArtifactsWorkspaceView/></DataTemplate>
   <BooleanToVisibilityConverter x:Key="EventsVisibility"/>
  </UserControl.Resources>
  <Grid>
