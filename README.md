@@ -2,6 +2,10 @@
 
 DFIRoscope Live is a Windows investigation and cybersecurity learning application. This source archive contains the complete product tree used to build the corresponding official Viewer and local Agent binaries.
 
+## Project ownership
+
+The owner of the DFIRoscope project is **Tomasz Łapaj** (GitHub: [cybernista](https://github.com/cybernista)).
+
 This is DFIRoscope Live 0.4.0, adding AI Assistance, Application Comparison, Network, Persistence, and filesystem artifacts to Processes and the combined Windows event workspace. Releases use semantic version numbers; earlier EDU releases retain their historical identities.
 
 This edition publishes exactly these feature groups:
